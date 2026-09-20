@@ -15,11 +15,8 @@ slint::include_modules!();
 use app::App;
 
 fn main() {
-    // 初始化日志
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .format_timestamp(None)
-        .try_init()
-        .ok();
+    // 初始化日志: 输出到 exe 同级 data/dawn-launcher.log
+    init_logger();
 
     log::info!("Dawn Launcher 启动中...");
 
@@ -36,7 +33,7 @@ fn main() {
                 };
                 use windows::core::PCWSTR;
                 use windows::core::HSTRING;
-                let msg = format!("应用初始化失败:\n{}\n\n请检查日志或联系开发者。", e);
+                let msg = format!("应用初始化失败:\n{}\n\n请检查 data/dawn-launcher.log 或联系开发者。", e);
                 let title = "Dawn Launcher 启动错误";
                 let msg_h = HSTRING::from(&msg);
                 let title_h = HSTRING::from(title);
@@ -59,5 +56,41 @@ fn main() {
     if let Err(e) = app.run() {
         log::error!("事件循环错误: {}", e);
         std::process::exit(1);
+    }
+}
+
+/// 初始化日志: 输出到 exe 同级 data/dawn-launcher.log
+fn init_logger() {
+    use std::fs::OpenOptions;
+
+    let log_path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("data").join("dawn-launcher.log")))
+        .unwrap_or_else(|| std::path::PathBuf::from("dawn-launcher.log"));
+
+    // 确保目录存在
+    if let Some(parent) = log_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let log_file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&log_path)
+        .ok();
+
+    if let Some(file) = log_file {
+        // env_logger 0.10 的 Target::Pipe 接受 Box<dyn Write + Send>
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+            .format_timestamp_secs()
+            .target(env_logger::Target::Pipe(Box::new(file)))
+            .try_init()
+            .ok();
+    } else {
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+            .format_timestamp_secs()
+            .try_init()
+            .ok();
     }
 }

@@ -77,35 +77,33 @@ impl App {
             *current_id_for_class.lock().unwrap() = id.into();
         });
 
-        // 8. 项目点击 (单击选中)
-        let window_for_item = main_window.as_weak();
-        main_window.on_item_clicked(move |item_id| {
-            if let Some(w) = window_for_item.upgrade() {
-                let items: Vec<ItemInfo> = w
-                    .get_items()
-                    .iter()
-                    .collect::<Vec<_>>();
-                let mut new_items = items;
-                for it in new_items.iter_mut() {
-                    it.selected = it.id == item_id;
-                }
-                let new_model = slint::VecModel::from(new_items);
-                w.set_items(ModelRc::from(Rc::new(new_model)));
-            }
-        });
-
-        // 9. 项目双击 (打开)
+        // 8. 项目单击 (直接打开项目 - 最可靠方式，避免双击事件不触发)
         let db_for_open = db.clone();
         let window_for_open = main_window.as_weak();
         let current_id_for_open = current_id.clone();
-        main_window.on_item_double_clicked(move |item_id| {
+        main_window.on_item_clicked(move |item_id| {
+            log::info!("项目单击回调触发, item_id={}", item_id);
             let items = db_for_open.list_items(current_id_for_open.lock().unwrap().clone());
             if let Some(item) = items.iter().find(|i| i.id == item_id as i64) {
                 open_item(item);
                 db_for_open.record_item_open(item_id.into());
+            } else {
+                log::warn!("未找到 item_id={} 的项目", item_id);
             }
             if let Some(w) = window_for_open.upgrade() {
                 let _ = w.window();
+            }
+        });
+
+        // 9. 项目双击 (同样打开，作为备用)
+        let db_for_open2 = db.clone();
+        let current_id_for_open2 = current_id.clone();
+        main_window.on_item_double_clicked(move |item_id| {
+            log::info!("项目双击回调触发, item_id={}", item_id);
+            let items = db_for_open2.list_items(current_id_for_open2.lock().unwrap().clone());
+            if let Some(item) = items.iter().find(|i| i.id == item_id as i64) {
+                open_item(item);
+                db_for_open2.record_item_open(item_id.into());
             }
         });
 
@@ -620,7 +618,7 @@ fn show_info_dialog(_title: &str, _message: &str) {}
 #[cfg(target_os = "windows")]
 fn show_input_dialog(title: &str, prompt: &str) -> Option<String> {
     // 通过 PowerShell 的 [Microsoft.VisualBasic.Interaction]::InputBox 实现
-    // 这是 Windows 上最简单的原生输入框方案，无需额外依赖
+    // 使用 CREATE_NO_WINDOW 标志隐藏 PowerShell 控制台窗口
     let script = format!(
         r#"
 Add-Type -AssemblyName Microsoft.VisualBasic
@@ -630,11 +628,8 @@ if ($result -ne '') {{ $result }} else {{ '' }}
         prompt.replace('\'', "''"),
         title.replace('\'', "''")
     );
-    let output = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .output()
-        .ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let output = run_hidden("powershell", &["-NoProfile", "-NonInteractive", "-Command", &script])?;
+    let stdout = String::from_utf8_lossy(&output).trim().to_string();
     if stdout.is_empty() {
         None
     } else {
@@ -674,11 +669,8 @@ Write-Output $result
         menu_text.replace('\'', "''"),
         title.replace('\'', "''")
     );
-    let output = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .output()
-        .ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let output = run_hidden("powershell", &["-NoProfile", "-NonInteractive", "-Command", &script])?;
+    let stdout = String::from_utf8_lossy(&output).trim().to_string();
     if stdout.is_empty() {
         return None;
     }
@@ -692,5 +684,25 @@ Write-Output $result
 
 #[cfg(not(target_os = "windows"))]
 fn show_action_dialog(_title: &str, _actions: &[&str]) -> Option<String> {
+    None
+}
+
+/// 隐藏窗口执行命令，返回 stdout 字节
+/// 使用 CREATE_NO_WINDOW 标志，避免弹出黑色控制台窗口
+#[cfg(target_os = "windows")]
+fn run_hidden(cmd: &str, args: &[&str]) -> Option<Vec<u8>> {
+    use std::os::windows::process::CommandExt;
+    // CREATE_NO_WINDOW = 0x08000000
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    std::process::Command::new(cmd)
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()
+        .map(|o| o.stdout)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_hidden(_cmd: &str, _args: &[&str]) -> Option<Vec<u8>> {
     None
 }
