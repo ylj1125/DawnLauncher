@@ -53,8 +53,11 @@ export component ItemCard inherits Rectangle {
     }
 
     touch-area := TouchArea {
+        // clicked 用于选中（单次点击）
         clicked => { root.clicked(); }
+        // double-clicked 用于打开，Slint 内部独立触发，不被 clicked 拦截
         double-clicked => { root.double-clicked(); }
+        // 右键
         pointer-event(e) => {
             if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
                 root.right-clicked();

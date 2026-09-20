@@ -147,8 +147,32 @@ pub fn search_path(file: &str) -> Option<String> {
 }
 
 /// 用系统默认程序打开文件或网址
+/// 使用 ShellExecuteW 而非 cmd /C start，避免 mingw 下参数转义问题
 pub fn open_path(path: &str) -> std::io::Result<()> {
-    Command::new("cmd").args(["/C", "start", "", path]).spawn()?;
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::PCWSTR;
+
+    let path_h = HSTRING::from(path);
+    let operation = HSTRING::from("open");
+    // ShellExecuteW 返回 HINSTANCE，错误时返回值 <= 32
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(operation.as_ptr()),
+            PCWSTR(path_h.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    // ShellExecuteW 错误时返回的 HINSTANCE 值 <= 32
+    if result.0 as usize <= 32 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("ShellExecuteW 失败，错误码: {}", result.0 as usize),
+        ));
+    }
     Ok(())
 }
 
