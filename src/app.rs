@@ -240,7 +240,15 @@ impl App {
             }
         });
 
-        // 15. 窗口关闭
+        // 15. 设置按钮
+        main_window.on_settings_clicked(move || {
+            show_info_dialog(
+                "Dawn Launcher 设置",
+                "设置功能正在开发中，当前版本(v0.3)暂未实现。\n\n已实现功能:\n• 添加/删除项目\n• 新建/重命名/删除分类\n• 双击打开项目\n• 窗口可自由拉伸\n\n后续计划:\n• 主题切换\n• 全局快捷键\n• 系统托盘\n• 拖拽排序\n• 数据备份",
+            );
+        });
+
+        // 16. 窗口关闭
         main_window.on_window_close(move || {
             std::process::exit(0);
         });
@@ -373,41 +381,47 @@ fn base64_decode(input: &str) -> Option<Vec<u8>> {
 }
 
 /// 打开项目 (文件/文件夹/网址/Appx)
+/// 统一使用 native::open_path (cmd /C start) 打开，可靠处理空格/中文路径
 fn open_item(item: &Item) {
     let target = match &item.data.target {
         Some(t) if !t.is_empty() => t.clone(),
-        _ => return,
+        _ => {
+            log::warn!("项目 [{}] 无目标路径，无法打开", item.name);
+            return;
+        }
     };
 
-    log::info!("打开项目: {} ({})", item.name, target);
+    log::info!("准备打开项目: name={}, target={}, type={}", item.name, target, item.kind);
 
-    // 网址直接用系统默认浏览器打开
-    if item.is_url() {
-        let _ = native::open_path(&target);
+    // 检查目标是否存在 (网址不检查)
+    if !item.is_url() && !std::path::Path::new(&target).exists() {
+        log::error!("目标路径不存在: {}", target);
+        // 弹出错误提示
+        #[cfg(target_os = "windows")]
+        {
+            show_error_dialog(
+                "打开失败",
+                &format!("目标路径不存在:\n{}", target),
+            );
+        }
         return;
     }
 
-    // 文件 / 文件夹 / Appx
-    let mut cmd = std::process::Command::new(&target);
-    if let Some(args) = &item.data.params {
-        if !args.is_empty() {
-            cmd = std::process::Command::new("cmd");
-            cmd.args(["/C", "start", "", &target]);
-            if let Some(start_loc) = &item.data.start_location {
-                if !start_loc.is_empty() {
-                    cmd.current_dir(start_loc);
-                }
+    // 统一用 native::open_path 打开 (内部用 cmd /C start "" path)
+    // 这能正确处理 exe/文件夹/网址/带空格路径
+    match native::open_path(&target) {
+        Ok(_) => log::info!("打开成功: {}", target),
+        Err(e) => {
+            log::error!("打开失败: {}, error: {}", target, e);
+            #[cfg(target_os = "windows")]
+            {
+                show_error_dialog(
+                    "打开失败",
+                    &format!("无法打开:\n{}\n\n错误: {}", target, e),
+                );
             }
-            let _ = cmd.spawn();
-            return;
         }
     }
-    if let Some(start_loc) = &item.data.start_location {
-        if !start_loc.is_empty() {
-            cmd.current_dir(start_loc);
-        }
-    }
-    let _ = cmd.spawn();
 }
 
 /// 根据路径构建新项目 (自动判断类型)
@@ -554,6 +568,52 @@ fn show_confirm_dialog(title: &str, message: &str) -> bool {
 fn show_confirm_dialog(_title: &str, _message: &str) -> bool {
     false
 }
+
+/// 显示错误对话框
+#[cfg(target_os = "windows")]
+fn show_error_dialog(title: &str, message: &str) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        MessageBoxW, MB_ICONERROR, MB_OK,
+    };
+    use windows::core::{HSTRING, PCWSTR};
+
+    let title_h = HSTRING::from(title);
+    let msg_h = HSTRING::from(message);
+    unsafe {
+        MessageBoxW(
+            None,
+            PCWSTR(msg_h.as_ptr()),
+            PCWSTR(title_h.as_ptr()),
+            MB_OK | MB_ICONERROR,
+        );
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn show_error_dialog(_title: &str, _message: &str) {}
+
+/// 显示信息对话框
+#[cfg(target_os = "windows")]
+fn show_info_dialog(title: &str, message: &str) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        MessageBoxW, MB_ICONINFORMATION, MB_OK,
+    };
+    use windows::core::{HSTRING, PCWSTR};
+
+    let title_h = HSTRING::from(title);
+    let msg_h = HSTRING::from(message);
+    unsafe {
+        MessageBoxW(
+            None,
+            PCWSTR(msg_h.as_ptr()),
+            PCWSTR(title_h.as_ptr()),
+            MB_OK | MB_ICONINFORMATION,
+        );
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn show_info_dialog(_title: &str, _message: &str) {}
 
 /// 显示输入对话框 (Windows 上通过 PowerShell 实现 InputBox)
 /// 返回 Some(输入内容) 表示用户确认，None 表示取消

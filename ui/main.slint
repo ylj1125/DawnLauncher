@@ -17,6 +17,8 @@ export component MainWindow inherits Window {
     default-font-family: ThemeSettings.font-family;
     preferred-width: 900px;
     preferred-height: 600px;
+    min-width: 600px;
+    min-height: 400px;
 
     // 数据属性
     in property <[ClassificationInfo]> classifications;
@@ -39,182 +41,215 @@ export component MainWindow inherits Window {
     callback delete-classification-requested(int); // 删除分类
     callback rename-classification-requested(int); // 重命名分类
     callback item-dropped(string);        // 拖拽文件到窗口
+    callback settings-clicked();          // 设置按钮
 
-    // 标题栏 (拖拽区域)
-    title-bar := Rectangle {
-        height: 32px;
-        background: ThemeSettings.sidebar-background-color;
+    // 用 VerticalLayout 包裹所有内容，确保布局跟随窗口大小
+    VerticalLayout {
+        spacing: 0px;
 
-        HorizontalLayout {
-            // 标题
-            Text {
-                text: "Dawn Launcher";
-                color: ThemeSettings.text-color;
-                font-size: ThemeSettings.font-size-normal;
-                font-weight: 700;
-                vertical-alignment: center;
-                horizontal-stretch: 1;
-            }
-
-            // 关闭按钮
-            Rectangle {
-                width: 40px;
-                height: parent.height;
-                background: close-touch.has-hover ? #e81123 : transparent;
-
-                Text {
-                    text: "×";
-                    color: ThemeSettings.text-color;
-                    font-size: 18px;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                close-touch := TouchArea {
-                    clicked => { root.window-close(); }
-                }
-            }
-        }
-    }
-
-    HorizontalLayout {
-        // 左侧分类栏
-        Rectangle {
-            width: ThemeSettings.sidebar-width;
+        // 标题栏 (拖拽区域)
+        title-bar := Rectangle {
+            height: 32px;
             background: ThemeSettings.sidebar-background-color;
 
-            VerticalLayout {
-                padding: ThemeSettings.spacing-small;
-                spacing: ThemeSettings.spacing-small;
-
-                // 分类列表
-                ScrollView {
-                    vertical-stretch: 1;
-
-                    VerticalLayout {
-                        spacing: 2px;
-                        for c in root.classifications : ClassificationTab {
-                            tab-id: c.id;
-                            name: c.name;
-                            selected: c.selected;
-                            clicked => { root.classification-clicked(c.id); }
-                            right-clicked => { root.classification-right-clicked(c.id); }
-                        }
-                    }
-                }
-
-                // 底部添加分类按钮
-                Rectangle {
-                    height: 32px;
-                    horizontal-stretch: 1;
-                    border-radius: ThemeSettings.border-radius;
-                    background: add-class-touch.has-hover ? ThemeSettings.hover-color : transparent;
-
-                    HorizontalLayout {
-                        alignment: center;
-                        spacing: ThemeSettings.spacing-small;
-
-                        Text {
-                            text: "+ 新建分类";
-                            color: ThemeSettings.text-secondary-color;
-                            font-size: ThemeSettings.font-size-normal;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    add-class-touch := TouchArea {
-                        clicked => { root.add-classification-clicked(); }
-                    }
-                }
-            }
-        }
-
-        // 分隔线
-        Rectangle {
-            width: 1px;
-            background: ThemeSettings.border-color;
-        }
-
-        // 右侧内容区
-        VerticalLayout {
-            padding: ThemeSettings.spacing-large;
-            spacing: ThemeSettings.spacing-normal;
-
-            // 工具栏
             HorizontalLayout {
-                height: 32px;
-                spacing: ThemeSettings.spacing-normal;
-                alignment: space-between;
-
+                // 标题
                 Text {
-                    text: root.status-text;
-                    color: ThemeSettings.text-secondary-color;
-                    font-size: ThemeSettings.font-size-small;
+                    text: "Dawn Launcher";
+                    color: ThemeSettings.text-color;
+                    font-size: ThemeSettings.font-size-normal;
+                    font-weight: 700;
                     vertical-alignment: center;
                     horizontal-stretch: 1;
+                    padding-left: ThemeSettings.spacing-normal;
                 }
 
-                // 添加项目按钮
+                // 设置按钮
                 Rectangle {
-                    width: 96px;
-                    height: 28px;
-                    border-radius: ThemeSettings.border-radius;
-                    background: add-item-touch.has-hover ? #3b82f6 : #e8f0fe;
+                    width: 40px;
+                    height: parent.height;
+                    background: settings-touch.has-hover ? ThemeSettings.hover-color : transparent;
 
                     Text {
-                        text: "+ 添加项目";
-                        color: add-item-touch.has-hover ? #ffffff : ThemeSettings.accent-color;
-                        font-size: ThemeSettings.font-size-small;
+                        text: "⚙";
+                        color: ThemeSettings.text-color;
+                        font-size: 16px;
                         horizontal-alignment: center;
                         vertical-alignment: center;
                     }
 
-                    add-item-touch := TouchArea {
-                        clicked => { root.add-item-clicked(); }
+                    settings-touch := TouchArea {
+                        clicked => { root.settings-clicked(); }
+                    }
+                }
+
+                // 关闭按钮
+                Rectangle {
+                    width: 40px;
+                    height: parent.height;
+                    background: close-touch.has-hover ? #e81123 : transparent;
+
+                    Text {
+                        text: "×";
+                        color: ThemeSettings.text-color;
+                        font-size: 18px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    close-touch := TouchArea {
+                        clicked => { root.window-close(); }
+                    }
+                }
+            }
+        }
+
+        // 主内容区: horizontal-stretch: 1 + vertical-stretch: 1 确保填充剩余空间
+        HorizontalLayout {
+            vertical-stretch: 1;
+            horizontal-stretch: 1;
+            spacing: 0px;
+
+            // 左侧分类栏
+            Rectangle {
+                width: ThemeSettings.sidebar-width;
+                background: ThemeSettings.sidebar-background-color;
+
+                VerticalLayout {
+                    padding: ThemeSettings.spacing-small;
+                    spacing: ThemeSettings.spacing-small;
+
+                    // 分类列表
+                    ScrollView {
+                        vertical-stretch: 1;
+
+                        VerticalLayout {
+                            spacing: 2px;
+                            for c in root.classifications : ClassificationTab {
+                                tab-id: c.id;
+                                name: c.name;
+                                selected: c.selected;
+                                clicked => { root.classification-clicked(c.id); }
+                                right-clicked => { root.classification-right-clicked(c.id); }
+                            }
+                        }
+                    }
+
+                    // 底部添加分类按钮
+                    Rectangle {
+                        height: 32px;
+                        horizontal-stretch: 1;
+                        border-radius: ThemeSettings.border-radius;
+                        background: add-class-touch.has-hover ? ThemeSettings.hover-color : transparent;
+
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: ThemeSettings.spacing-small;
+
+                            Text {
+                                text: "+ 新建分类";
+                                color: ThemeSettings.text-secondary-color;
+                                font-size: ThemeSettings.font-size-normal;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        add-class-touch := TouchArea {
+                            clicked => { root.add-classification-clicked(); }
+                        }
                     }
                 }
             }
 
-            // 项目网格区 (支持拖拽)
+            // 分隔线
             Rectangle {
-                vertical-stretch: 1;
-                background: root.drag-hover ? #f0f7ff : transparent;
-                border-radius: ThemeSettings.border-radius;
-                border-width: root.drag-hover ? 2px : 0px;
-                border-color: ThemeSettings.accent-color;
+                width: 1px;
+                background: ThemeSettings.border-color;
+            }
 
-                drop-area := TouchArea {
-                    // 拖拽处理由 Rust 端通过 winit 事件钩子处理
-                    pointer-event(e) => {
+            // 右侧内容区
+            VerticalLayout {
+                horizontal-stretch: 1;
+                padding: ThemeSettings.spacing-large;
+                spacing: ThemeSettings.spacing-normal;
+
+                // 工具栏
+                HorizontalLayout {
+                    height: 32px;
+                    spacing: ThemeSettings.spacing-normal;
+                    alignment: space-between;
+
+                    Text {
+                        text: root.status-text;
+                        color: ThemeSettings.text-secondary-color;
+                        font-size: ThemeSettings.font-size-small;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+
+                    // 添加项目按钮
+                    Rectangle {
+                        width: 96px;
+                        height: 28px;
+                        border-radius: ThemeSettings.border-radius;
+                        background: add-item-touch.has-hover ? #3b82f6 : #e8f0fe;
+
+                        Text {
+                            text: "+ 添加项目";
+                            color: add-item-touch.has-hover ? #ffffff : ThemeSettings.accent-color;
+                            font-size: ThemeSettings.font-size-small;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        add-item-touch := TouchArea {
+                            clicked => { root.add-item-clicked(); }
+                        }
                     }
                 }
 
-                // 空状态提示
-                if root.items.length == 0 : Text {
-                    text: root.drag-hover ?
-                        "松开以添加项目" :
-                        "暂无项目\n\n点击右上角「+ 添加项目」\n或将文件/快捷方式拖入此区域";
-                    color: ThemeSettings.text-secondary-color;
-                    font-size: ThemeSettings.font-size-normal;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                ScrollView {
+                // 项目网格区 (支持拖拽)
+                Rectangle {
                     vertical-stretch: 1;
+                    horizontal-stretch: 1;
+                    background: root.drag-hover ? #f0f7ff : transparent;
+                    border-radius: ThemeSettings.border-radius;
+                    border-width: root.drag-hover ? 2px : 0px;
+                    border-color: ThemeSettings.accent-color;
 
-                    VerticalLayout {
-                        spacing: ThemeSettings.spacing-normal;
+                    drop-area := TouchArea {
+                        pointer-event(e) => {
+                        }
+                    }
 
-                        for item in root.items : ItemCard {
-                            item-id: item.id;
-                            name: item.name;
-                            icon: item.icon;
-                            invalid: item.invalid;
-                            selected: item.selected;
-                            clicked => { root.item-clicked(item.id); }
-                            double-clicked => { root.item-double-clicked(item.id); }
-                            right-clicked => { root.item-right-clicked(item.id); }
+                    // 空状态提示
+                    if root.items.length == 0 : Text {
+                        text: root.drag-hover ?
+                            "松开以添加项目" :
+                            "暂无项目\n\n点击右上角「+ 添加项目」\n或将文件/快捷方式拖入此区域";
+                        color: ThemeSettings.text-secondary-color;
+                        font-size: ThemeSettings.font-size-normal;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    ScrollView {
+                        vertical-stretch: 1;
+                        horizontal-stretch: 1;
+
+                        VerticalLayout {
+                            spacing: ThemeSettings.spacing-normal;
+
+                            for item in root.items : ItemCard {
+                                item-id: item.id;
+                                name: item.name;
+                                icon: item.icon;
+                                invalid: item.invalid;
+                                selected: item.selected;
+                                clicked => { root.item-clicked(item.id); }
+                                double-clicked => { root.item-double-clicked(item.id); }
+                                right-clicked => { root.item-right-clicked(item.id); }
+                            }
                         }
                     }
                 }
