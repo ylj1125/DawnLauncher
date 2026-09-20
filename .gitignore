@@ -15,3 +15,6 @@ Thumbs.db
 # Build artifacts (本地构建产物，但 release/ 部署目录需要提交到仓库供用户下载)
 /dist
 /target-x86_64-pc-windows-gnu
+
+# 用户上传截图目录 (会话内临时文件)
+.uploads/

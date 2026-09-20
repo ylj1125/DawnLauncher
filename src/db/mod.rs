@@ -131,6 +131,90 @@ impl Database {
             params![now, item_id],
         );
     }
+
+    /// 获取某分类下项目的最大 order
+    pub fn max_item_order(&self, classification_id: i64) -> i64 {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COALESCE(MAX(`order`), 0) FROM item WHERE classification_id = ?",
+            params![classification_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0)
+    }
+
+    /// 获取父分类的最大 order
+    pub fn max_parent_classification_order(&self) -> i64 {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COALESCE(MAX(`order`), 0) FROM classification WHERE parent_id IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0)
+    }
+
+    /// 插入新项目，返回新 id
+    pub fn insert_item(&self, item: &Item) -> Result<i64, rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let data_str = serde_json::to_string(&item.data).unwrap_or_default();
+        conn.execute(
+            "INSERT INTO item (classification_id, name, type, data, shortcut_key, global_shortcut_key, `order`) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            params![
+                item.classification_id,
+                item.name,
+                item.kind,
+                data_str,
+                item.shortcut_key,
+                item.global_shortcut_key as i64,
+                item.order,
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// 插入新父分类，返回新 id
+    pub fn insert_parent_classification(&self, name: &str) -> Result<i64, rusqlite::Error> {
+        let order = self.max_parent_classification_order() + 1;
+        let data = ClassificationData {
+            item_layout: "default".into(),
+            item_sort: "default".into(),
+            item_show_only: "default".into(),
+            ..Default::default()
+        };
+        let data_str = serde_json::to_string(&data).unwrap_or_default();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO classification (parent_id, name, type, data, shortcut_key, global_shortcut_key, `order`) VALUES (NULL, ?, 0, ?, NULL, 0, ?)",
+            params![name, data_str, order],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// 删除项目
+    pub fn delete_item(&self, item_id: i64) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM item WHERE id = ?", params![item_id])?;
+        Ok(())
+    }
+
+    /// 删除分类 (同时删除其下所有项目)
+    pub fn delete_classification(&self, classification_id: i64) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM item WHERE classification_id = ?", params![classification_id])?;
+        conn.execute("DELETE FROM classification WHERE id = ?", params![classification_id])?;
+        Ok(())
+    }
+
+    /// 重命名分类
+    pub fn rename_classification(&self, classification_id: i64, new_name: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE classification SET name = ? WHERE id = ?",
+            params![new_name, classification_id],
+        )?;
+        Ok(())
+    }
 }
 
 fn row_to_classification(row: &rusqlite::Row) -> rusqlite::Result<Classification> {
