@@ -208,7 +208,7 @@ export component MainWindow inherits Window {
                     }
                 }
 
-                // 项目网格区 (支持拖拽)
+                // 项目网格区
                 Rectangle {
                     vertical-stretch: 1;
                     horizontal-stretch: 1;
@@ -216,11 +216,6 @@ export component MainWindow inherits Window {
                     border-radius: ThemeSettings.border-radius;
                     border-width: root.drag-hover ? 2px : 0px;
                     border-color: ThemeSettings.accent-color;
-
-                    drop-area := TouchArea {
-                        pointer-event(e) => {
-                        }
-                    }
 
                     // 空状态提示
                     if root.items.length == 0 : Text {
