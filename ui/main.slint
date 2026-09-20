@@ -1,0 +1,148 @@
+// 主界面
+import { ScrollView, ListView, StandardListView } from "std-widgets.slint";
+import { ThemeSettings } from "theme.slint";
+import { ItemCard, ItemInfo } from "components/item_card.slint";
+import { ClassificationTab } from "components/classification_tab.slint";
+
+// 分类数据模型
+export struct ClassificationInfo {
+    id: int,
+    name: string,
+    selected: bool,
+}
+
+export component MainWindow inherits Window {
+    title: "Dawn Launcher";
+    background: ThemeSettings.background-color;
+    default-font-family: ThemeSettings.font-family;
+    preferred-width: 900px;
+    preferred-height: 600px;
+
+    // 数据属性
+    in property <[ClassificationInfo]> classifications;
+    in property <[ItemInfo]> items;
+    in property <string> status-text: "Dawn Launcher";
+
+    // 回调
+    callback classification-clicked(int);
+    callback item-clicked(int);
+    callback item-double-clicked(int);
+    callback item-right-clicked(int);
+    callback classification-right-clicked(int);
+    callback window-close();
+
+    // 标题栏 (拖拽区域)
+    title-bar := Rectangle {
+        height: 32px;
+        background: ThemeSettings.sidebar-background-color;
+
+        HorizontalLayout {
+            // 标题
+            Text {
+                text: "Dawn Launcher";
+                color: ThemeSettings.text-color;
+                font-size: ThemeSettings.font-size-normal;
+                font-weight: 700;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+
+            // 关闭按钮
+            Rectangle {
+                width: 40px;
+                height: parent.height;
+                background: close-touch.has-hover ? #e81123 : transparent;
+
+                Text {
+                    text: "×";
+                    color: ThemeSettings.text-color;
+                    font-size: 18px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                close-touch := TouchArea {
+                    clicked => { root.window-close(); }
+                }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        // 左侧分类栏
+        Rectangle {
+            width: ThemeSettings.sidebar-width;
+            background: ThemeSettings.sidebar-background-color;
+
+            VerticalLayout {
+                padding: ThemeSettings.spacing-small;
+                spacing: ThemeSettings.spacing-small;
+
+                ScrollView {
+                    VerticalLayout {
+                        spacing: 2px;
+                        for c in root.classifications : ClassificationTab {
+                            tab-id: c.id;
+                            name: c.name;
+                            selected: c.selected;
+                            clicked => { root.classification-clicked(c.id); }
+                            right-clicked => { root.classification-right-clicked(c.id); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 分隔线
+        Rectangle {
+            width: 1px;
+            background: ThemeSettings.border-color;
+        }
+
+        // 右侧内容区
+        VerticalLayout {
+            padding: ThemeSettings.spacing-large;
+            spacing: ThemeSettings.spacing-normal;
+
+            // 状态栏
+            HorizontalLayout {
+                height: 28px;
+                alignment: space-between;
+
+                Text {
+                    text: root.status-text;
+                    color: ThemeSettings.text-secondary-color;
+                    font-size: ThemeSettings.font-size-small;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    text: root.items.length + " 项";
+                    color: ThemeSettings.text-secondary-color;
+                    font-size: ThemeSettings.font-size-small;
+                    vertical-alignment: center;
+                }
+            }
+
+            // 项目网格 (MVP: 用 ScrollView + HorizontalLayout 模拟行; 后续改进)
+            ScrollView {
+                vertical-stretch: 1;
+
+                VerticalLayout {
+                    spacing: ThemeSettings.spacing-normal;
+
+                    for item in root.items : ItemCard {
+                        item-id: item.id;
+                        name: item.name;
+                        icon: item.icon;
+                        invalid: item.invalid;
+                        selected: item.selected;
+                        clicked => { root.item-clicked(item.id); }
+                        double-clicked => { root.item-double-clicked(item.id); }
+                        right-clicked => { root.item-right-clicked(item.id); }
+                    }
+                }
+            }
+        }
+    }
+}

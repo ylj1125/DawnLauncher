@@ -1,0 +1,43 @@
+// 分类标签组件
+import { ThemeSettings } from "../theme.slint";
+
+export component ClassificationTab inherits Rectangle {
+    in property <int> tab-id;
+    in property <string> name;
+    in property <bool> selected;
+
+    callback clicked;
+    callback right-clicked;
+
+    height: 36px;
+    horizontal-stretch: 1;
+    border-radius: ThemeSettings.border-radius;
+    background: selected ? ThemeSettings.selected-color : (touch-area.has-hover ? ThemeSettings.hover-color : transparent);
+
+    HorizontalLayout {
+        alignment: start;
+        spacing: ThemeSettings.spacing-normal;
+        padding-left: ThemeSettings.spacing-normal;
+        padding-right: ThemeSettings.spacing-normal;
+
+        Text {
+            text: root.name;
+            color: root.selected ? ThemeSettings.accent-color : ThemeSettings.text-color;
+            font-size: ThemeSettings.font-size-normal;
+            vertical-alignment: center;
+            horizontal-alignment: left;
+            overflow: elide;
+        }
+    }
+
+    touch-area := TouchArea {
+        clicked => { root.clicked(); }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                root.right-clicked();
+            }
+        }
+    }
+
+    animate background { duration: 120ms; }
+}

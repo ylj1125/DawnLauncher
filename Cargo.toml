@@ -1,0 +1,51 @@
+[package]
+name = "dawn-launcher"
+version = "0.1.0"
+edition = "2021"
+description = "Dawn Launcher - Windows 快捷启动工具 (Rust + Slint 重构版)"
+authors = ["FanChenIO"]
+license = "MIT"
+
+[package.metadata.bundle]
+name = "Dawn Launcher"
+identifier = "com.dawnlauncher.application"
+icon = ["assets/icon.ico"]
+
+[[bin]]
+name = "dawn-launcher"
+path = "src/main.rs"
+
+[dependencies]
+slint = { version = "1.5", default-features = false, features = ["backend-winit", "renderer-femtovg", "std", "compat-1-18"] }
+rusqlite = { version = "0.29", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "5.0"
+once_cell = "1.18"
+log = "0.4"
+env_logger = "0.10"
+
+[dependencies.windows]
+version = "0.51"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Environment",
+    "Win32_UI_Input_Ime",
+    "Win32_Graphics_Dwm",
+    "Win32_Storage_FileSystem",
+]
+
+[build-dependencies]
+slint-build = "1.5"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

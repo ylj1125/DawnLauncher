@@ -1,0 +1,9 @@
+# 交叉编译配置: Linux -> Windows
+# 使用 mingw-w64 工具链
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+ar = "x86_64-w64-mingw32-ar"
+
+# 默认 target (本机调试用)
+[build]
+# target = "x86_64-pc-windows-gnu"

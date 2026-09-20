@@ -1,0 +1,32 @@
+// 主题全局变量
+// 通过 ThemeSettings 全局单例实现运行时主题切换
+
+export global ThemeSettings {
+    // 颜色
+    out property <color> background-color: #f5f6f7;
+    out property <color> sidebar-background-color: #ffffff;
+    out property <color> content-background-color: #ffffff;
+    out property <color> text-color: #2c2c2c;
+    out property <color> text-secondary-color: #888888;
+    out property <color> accent-color: #3b82f6;
+    out property <color> hover-color: #f0f0f0;
+    out property <color> selected-color: #e8f0fe;
+    out property <color> border-color: #e5e7eb;
+    out property <color> invalid-color: #cccccc;
+
+    // 尺寸
+    out property <length> font-size-small: 11px;
+    out property <length> font-size-normal: 13px;
+    out property <length> font-size-large: 15px;
+    out property <length> sidebar-width: 180px;
+    out property <length> item-card-width: 80px;
+    out property <length> item-card-height: 90px;
+    out property <length> item-icon-size: 48px;
+    out property <length> border-radius: 6px;
+    out property <length> spacing-small: 4px;
+    out property <length> spacing-normal: 8px;
+    out property <length> spacing-large: 12px;
+
+    // 字体
+    out property <string> font-family: "Microsoft YaHei UI";
+}

@@ -1,0 +1,66 @@
+// 项目卡片组件
+import { ThemeSettings } from "../theme.slint";
+
+// 项目数据模型 (Slint 全局使用)
+export struct ItemInfo {
+    id: int,
+    name: string,
+    icon: image,
+    invalid: bool,
+    selected: bool,
+}
+
+// 项目卡片
+export component ItemCard inherits Rectangle {
+    in property <int> item-id;
+    in property <string> name;
+    in property <image> icon;
+    in property <bool> invalid;
+    in property <bool> selected;
+
+    callback clicked;
+    callback double-clicked;
+    callback right-clicked;
+
+    width: ThemeSettings.item-card-width;
+    height: ThemeSettings.item-card-height;
+    border-radius: ThemeSettings.border-radius;
+    background: selected ? ThemeSettings.selected-color : (touch-area.has-hover ? ThemeSettings.hover-color : transparent);
+
+    VerticalLayout {
+        alignment: center;
+        spacing: ThemeSettings.spacing-small;
+        padding: ThemeSettings.spacing-small;
+
+        Image {
+            source: root.icon;
+            width: ThemeSettings.item-icon-size;
+            height: ThemeSettings.item-icon-size;
+            opacity: root.invalid ? 0.3 : 1.0;
+            horizontal-alignment: center;
+            image-fit: contain;
+        }
+
+        Text {
+            text: root.name;
+            color: ThemeSettings.text-color;
+            font-size: ThemeSettings.font-size-small;
+            horizontal-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+            width: 76px;
+        }
+    }
+
+    touch-area := TouchArea {
+        clicked => { root.clicked(); }
+        double-clicked => { root.double-clicked(); }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                root.right-clicked();
+            }
+        }
+    }
+
+    animate background { duration: 120ms; }
+}

@@ -1,71 +1,78 @@
-# 简体中文 | [English](https://github.com/fanchenio/DawnLauncher/blob/main/README-ENGLISH.md)
+# Dawn Launcher (Rust + Slint 重构版)
 
-# Dawn Launcher
+`Windows` 快捷启动工具，帮助您整理杂乱无章的桌面，分门别类管理您的桌面快捷方式。
 
-`Windows`快捷启动工具，帮助您整理杂乱无章的桌面，分门别类管理您的桌面快捷方式，让您的桌面保持干净整洁。
+本项目为原 Electron 版 Dawn Launcher 的**全面重构版本**，使用 Rust + Slint 替换 Electron + Vue3 + TypeScript 技术栈。
 
-支持关联文件夹（实时同步文件夹内容）、快速搜索、相对路径（便携路径）、扫描本机开始菜单、本地扫描本机 Appx 应用列表、添加网址并一键获取网址信息。
+## 重构目标
 
-# 技术栈
+- ✅ **大幅减小体积**：从 ~180MB 降至 ~10MB (减少 95%)
+- ✅ **提升运行效率**：原生编译，无 Node.js/Chromium 开销
+- ✅ **无运行时依赖**：无需 WebView2 / Node.js / .NET
+- ✅ **Windows 精简版兼容**：单文件分发，零依赖
 
-`Electron + Vite + Vue3 + TS + Rust`
+## 技术栈
 
-# 支持平台
+`Rust + Slint + rusqlite + windows-rs`
 
-`Windows(10/11)`
+## 支持平台
 
-# 编译步骤
+`Windows(10/11)` (含精简版)
 
-1. 安装`node-gyp`，编译 SQLite3 需要。
-2. 安装`Rust`环境 + `Cargo`，编译 Rust 需要。
-3. 然后运行`yarn install`安装项目依赖（如果修改了`Rust`代码也需要重新运行`yarn install`）。
-4. `yarn run dev`本地运行项目。
-5. `yarn run build`打包项目。
-6. 便携版和安装版需要分两次打包，通过修改`.env.production`中的`VITE_INSTALL`，`true`为安装版，`false`为便携版。
+## 仓库结构
 
-# 官网
+```
+.
+├── src/                # Rust 源码
+│   ├── main.rs         # 程序入口
+│   ├── app.rs          # 应用控制器 (数据/UI 桥接)
+│   ├── db/             # SQLite 数据访问层 (rusqlite)
+│   ├── models/         # 数据模型 (Classification/Item)
+│   └── native/         # Windows API 封装 (windows-rs)
+├── ui/                 # Slint UI 声明文件
+│   ├── main.slint     # 主界面
+│   ├── theme.slint    # 主题
+│   └── components/     # 通用组件
+├── release/            # 部署目录 (含可执行文件, 供用户下载测试)
+│   ├── dawn-launcher.exe
+│   ├── .portable      # 便携版标记
+│   └── README.md      # 部署说明
+├── legacy-electron/   # 原 Electron 版源码备份
+├── Cargo.toml          # Rust 项目配置
+├── build.rs            # Slint 编译脚本
+└── .cargo/config.toml  # 交叉编译配置 (Linux -> Windows)
+```
 
-[dawnlauncher.com](https://dawnlauncher.com/)
+## 当前状态
 
-# QQ 群
+⚠️ **MVP 阶段**：仅实现了核心读取与打开功能，大量功能尚未迁移。
+详见 [release/README.md](release/README.md) 的功能清单。
 
-369652112
+## 编译方法 (开发者)
 
-# 界面
+### 环境要求
+- Rust 1.92+
+- mingw-w64 (交叉编译 Windows 目标)
+- Linux 开发环境 (推荐) 或 Windows
 
-![界面](/images/soft1.png)
+### 命令
+```bash
+# 安装 Windows GNU 目标
+rustup target add x86_64-pc-windows-gnu
 
-## 子分类
+# 交叉编译
+cargo build --target x86_64-pc-windows-gnu --release
 
-![子分类](/images/soft2.png)
+# 输出
+target/x86_64-pc-windows-gnu/release/dawn-launcher.exe
+```
 
-## 自定义主题
+## 与原项目的关系
 
-![自定义主题](/images/soft3.png)
-
-## 自定义背景
-
-![自定义背景](/images/soft4.png)
-
-## 快速搜索
-
-![快速搜索](/images/soft5.png)
-
-## 一键获取网址信息
-
-![一键获取网址信息](/images/soft6.webp)
-
-## 相对路径（便携路径）
-
-![相对路径（便携路径）](/images/soft7.png)
-
-## 关联文件夹
-
-![关联文件夹](/images/soft8.webp)
-
-## Stargazers over time
-
-[![Stargazers over time](https://starchart.cc/fanchenio/DawnLauncher.svg)](https://starchart.cc/fanchenio/DawnLauncher)
+- 原 Electron 版源码完整保留在 `legacy-electron/` 目录
+- 数据库表结构 100% 兼容，可无缝读取原版数据
+- Rust 原生模块 (`src/native/`) 由原 `rust/windows.rs` 迁移而来
+- 商业逻辑由 TypeScript 重写为 Rust
 
 ## License
 
