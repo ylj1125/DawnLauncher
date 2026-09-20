@@ -5,6 +5,7 @@ export component ClassificationTab inherits Rectangle {
     in property <int> tab-id;
     in property <string> name;
     in property <bool> selected;
+    in property <string> theme-mode: "light";
 
     callback clicked;
     callback right-clicked;
@@ -12,7 +13,7 @@ export component ClassificationTab inherits Rectangle {
     height: 36px;
     horizontal-stretch: 1;
     border-radius: ThemeSettings.border-radius;
-    background: selected ? ThemeSettings.selected-color : (touch-area.has-hover ? ThemeSettings.hover-color : transparent);
+    background: selected ? ThemeSettings.selected-c(root.theme-mode) : (touch-area.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
 
     HorizontalLayout {
         alignment: start;
@@ -22,7 +23,7 @@ export component ClassificationTab inherits Rectangle {
 
         Text {
             text: root.name;
-            color: root.selected ? ThemeSettings.accent-color : ThemeSettings.text-color;
+            color: root.selected ? ThemeSettings.accent-color : ThemeSettings.text-c(root.theme-mode);
             font-size: ThemeSettings.font-size-normal;
             vertical-alignment: center;
             horizontal-alignment: left;

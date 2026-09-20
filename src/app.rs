@@ -238,18 +238,134 @@ impl App {
             }
         });
 
-        // 15. 设置按钮
-        main_window.on_settings_clicked(move || {
-            show_info_dialog(
-                "Dawn Launcher 设置",
-                "设置功能正在开发中，当前版本(v0.3)暂未实现。\n\n已实现功能:\n• 添加/删除项目\n• 新建/重命名/删除分类\n• 双击打开项目\n• 窗口可自由拉伸\n\n后续计划:\n• 主题切换\n• 全局快捷键\n• 系统托盘\n• 拖拽排序\n• 数据备份",
-            );
-        });
+        // 15. 设置按钮 - 切换到设置面板，加载当前设置值
+        {
+            let db_for_settings = db.clone();
+            let window_for_settings = main_window.as_weak();
+            main_window.on_settings_clicked(move || {
+                let w = match window_for_settings.upgrade() {
+                    Some(w) => w,
+                    None => return,
+                };
+                // 从数据库读取设置值
+                let theme = db_for_settings.get_setting("theme_mode", "light");
+                let auto_start = db_for_settings.get_setting_bool("auto_start", false);
+                let topmost = db_for_settings.get_setting_bool("window_topmost", false);
+                let columns = db_for_settings.get_setting_i64("item_columns", 8) as i32;
+                log::info!(
+                    "打开设置: theme={}, auto_start={}, topmost={}, columns={}",
+                    theme, auto_start, topmost, columns
+                );
+                w.set_theme_mode(SharedString::from(theme));
+                w.set_auto_start(auto_start);
+                w.set_window_topmost(topmost);
+                w.set_item_columns(columns);
+                w.set_view_mode(SharedString::from("settings"));
+                // 同步全局主题
+                slint::invoke_from_event_loop({
+                    let w = w.as_weak();
+                    move || {
+                        if let Some(w) = w.upgrade() {
+                            apply_theme(&w);
+                        }
+                    }
+                })
+                .ok();
+            });
+        }
+
+        // 15.1 主题切换
+        {
+            let db_for_theme = db.clone();
+            let window_for_theme = main_window.as_weak();
+            main_window.on_theme_mode_changed(move |mode| {
+                let mode_str = mode.to_string();
+                log::info!("主题切换: {}", mode_str);
+                let _ = db_for_theme.set_setting("theme_mode", &mode_str);
+                if let Some(w) = window_for_theme.upgrade() {
+                    w.set_theme_mode(mode.clone());
+                    apply_theme(&w);
+                }
+            });
+        }
+
+        // 15.2 开机自启切换
+        {
+            let db_for_autostart = db.clone();
+            let window_for_autostart = main_window.as_weak();
+            main_window.on_auto_start_changed(move |enabled| {
+                log::info!("开机自启切换: {}", enabled);
+                let _ = db_for_autostart.set_setting_bool("auto_start", enabled);
+                // 写注册表
+                #[cfg(target_os = "windows")]
+                {
+                    let exe_path = std::env::current_exe()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if !exe_path.is_empty() {
+                        let result = set_auto_start(enabled, &exe_path);
+                        log::info!("注册表写入结果: {:?}", result);
+                    }
+                }
+                if let Some(w) = window_for_autostart.upgrade() {
+                    w.set_auto_start(enabled);
+                }
+            });
+        }
+
+        // 15.3 窗口置顶切换
+        {
+            let db_for_topmost = db.clone();
+            let window_for_topmost = main_window.as_weak();
+            main_window.on_window_topmost_changed(move |enabled| {
+                log::info!("窗口置顶切换: {}", enabled);
+                let _ = db_for_topmost.set_setting_bool("window_topmost", enabled);
+                #[cfg(target_os = "windows")]
+                {
+                    if let Some(w) = window_for_topmost.upgrade() {
+                        set_window_topmost(&w, enabled);
+                    }
+                }
+                if let Some(w) = window_for_topmost.upgrade() {
+                    w.set_window_topmost(enabled);
+                }
+            });
+        }
+
+        // 15.4 项目列数调整
+        {
+            let db_for_cols = db.clone();
+            let window_for_cols = main_window.as_weak();
+            main_window.on_item_columns_changed(move |cols| {
+                log::info!("项目列数调整: {}", cols);
+                let _ = db_for_cols.set_setting_i64("item_columns", cols as i64);
+                if let Some(w) = window_for_cols.upgrade() {
+                    w.set_item_columns(cols);
+                }
+            });
+        }
 
         // 16. 窗口关闭
         main_window.on_window_close(move || {
             std::process::exit(0);
         });
+
+        // 17. 应用启动时加载已保存的设置
+        {
+            let theme = db.get_setting("theme_mode", "light");
+            let topmost = db.get_setting_bool("window_topmost", false);
+            main_window.set_theme_mode(SharedString::from(theme.clone()));
+            main_window.set_window_topmost(topmost);
+            apply_theme(&main_window);
+            // 启动时应用置顶
+            if topmost {
+                #[cfg(target_os = "windows")]
+                {
+                    set_window_topmost(&main_window, true);
+                }
+            }
+            log::info!("启动设置已应用: theme={}, topmost={}", theme, topmost);
+        }
 
         Ok(Self {
             main_window,
@@ -262,6 +378,122 @@ impl App {
     pub fn run(&self) -> Result<(), slint::PlatformError> {
         self.main_window.run()
     }
+}
+
+/// 应用主题
+/// Slint 1.5 的 global in-property 无法从 Rust 端直接 set
+/// 但我们改成了通过 MainWindow.theme-mode 驱动颜色函数
+/// 所以只需设置 window.theme_mode，颜色会自动通过函数计算更新
+fn apply_theme(window: &MainWindow) {
+    let mode = window.get_theme_mode().to_string();
+    log::info!("主题已设置: {}", mode);
+    // 颜色绑定在 Slint 中通过 bg-color(root.theme-mode) 等函数实现
+    // set_theme_mode 会自动触发所有依赖 root.theme-mode 的颜色重新计算
+}
+
+/// 设置窗口置顶 (Windows)
+/// 通过 FindWindowW 按标题查找窗口句柄，再用 SetWindowPos 设置置顶
+#[cfg(target_os = "windows")]
+fn set_window_topmost(_window: &MainWindow, topmost: bool) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, HWND_TOPMOST, HWND_NOTOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+        SetWindowPos,
+    };
+    use windows::core::{HSTRING, PCWSTR};
+
+    let title = HSTRING::from("Dawn Launcher");
+    unsafe {
+        let hwnd = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr()));
+        if hwnd.0 as usize != 0 {
+            let insert_after = if topmost { HWND_TOPMOST } else { HWND_NOTOPMOST };
+            let _ = SetWindowPos(
+                hwnd,
+                insert_after,
+                0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+            );
+            log::info!("窗口置顶设置完成: topmost={}", topmost);
+        } else {
+            log::warn!("未找到 Dawn Launcher 窗口");
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_window_topmost(_window: &MainWindow, _topmost: bool) {}
+
+/// 设置/取消开机自启 (Windows 注册表)
+#[cfg(target_os = "windows")]
+fn set_auto_start(enable: bool, exe_path: &str) -> Result<(), String> {
+    use windows::Win32::System::Registry::{
+        RegCloseKey, RegCreateKeyExW, RegOpenKeyExW, RegSetValueExW, RegDeleteValueW,
+        HKEY_CURRENT_USER, KEY_SET_VALUE, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ,
+        HKEY,
+    };
+    use windows::core::w;
+
+    // 注册表路径: HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+    let sub_key = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+    let value_name = w!("DawnLauncher");
+
+    unsafe {
+        if enable {
+            // 创建/打开键
+            let mut hkey = HKEY::default();
+            let result = RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                sub_key,
+                0,
+                None,
+                REG_OPTION_NON_VOLATILE,
+                KEY_WRITE,
+                None,
+                &mut hkey,
+                None,
+            );
+            if result.is_err() {
+                return Err(format!("RegCreateKeyExW 失败: {:?}", result));
+            }
+            // 设置值
+            let value_data: Vec<u16> = exe_path.encode_utf16().chain(std::iter::once(0)).collect();
+            let result = RegSetValueExW(
+                hkey,
+                value_name,
+                0,
+                REG_SZ,
+                Some(std::slice::from_raw_parts(
+                    value_data.as_ptr() as *const u8,
+                    value_data.len() * 2,
+                )),
+            );
+            let _ = RegCloseKey(hkey);
+            if result.is_err() {
+                return Err(format!("RegSetValueExW 失败: {:?}", result));
+            }
+        } else {
+            // 打开键并删除值
+            let mut hkey = HKEY::default();
+            let result = RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                sub_key,
+                0,
+                KEY_SET_VALUE,
+                &mut hkey,
+            );
+            if result.is_err() {
+                // 键不存在视为成功
+                return Ok(());
+            }
+            let _ = RegDeleteValueW(hkey, value_name);
+            let _ = RegCloseKey(hkey);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_auto_start(_enable: bool, _exe_path: &str) -> Result<(), String> {
+    Ok(())
 }
 
 /// 获取数据库路径
@@ -687,19 +919,11 @@ fn show_action_dialog(_title: &str, _actions: &[&str]) -> Option<String> {
     None
 }
 
-/// 隐藏窗口执行命令，返回 stdout 字节
-/// 使用 CREATE_NO_WINDOW 标志，避免弹出黑色控制台窗口
+/// 隐藏窗口执行命令的统一入口在 native 模块
+/// (避免重复实现，统一使用 CREATE_NO_WINDOW 标志)
 #[cfg(target_os = "windows")]
 fn run_hidden(cmd: &str, args: &[&str]) -> Option<Vec<u8>> {
-    use std::os::windows::process::CommandExt;
-    // CREATE_NO_WINDOW = 0x08000000
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    std::process::Command::new(cmd)
-        .args(args)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .ok()
-        .map(|o| o.stdout)
+    crate::native::run_hidden(cmd, args)
 }
 
 #[cfg(not(target_os = "windows"))]

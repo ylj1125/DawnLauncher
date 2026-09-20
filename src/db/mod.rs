@@ -49,6 +49,13 @@ impl Database {
                 `order` INTEGER NOT NULL
             )"#,
         )?;
+        // setting 表 (键值对，存储应用设置)
+        conn.execute_batch(
+            r#"CREATE TABLE IF NOT EXISTS setting (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )"#,
+        )?;
         Ok(())
     }
 
@@ -214,6 +221,52 @@ impl Database {
             params![new_name, classification_id],
         )?;
         Ok(())
+    }
+
+    // ==================== 设置 (setting) ====================
+
+    /// 读取设置项，不存在返回默认值
+    pub fn get_setting(&self, key: &str, default: &str) -> String {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT value FROM setting WHERE key = ?",
+            params![key],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|_| default.to_string())
+    }
+
+    /// 读取 bool 设置
+    pub fn get_setting_bool(&self, key: &str, default: bool) -> bool {
+        self.get_setting(key, if default { "1" } else { "0" }) == "1"
+    }
+
+    /// 读取 i64 设置
+    pub fn get_setting_i64(&self, key: &str, default: i64) -> i64 {
+        self.get_setting(key, &default.to_string())
+            .parse()
+            .unwrap_or(default)
+    }
+
+    /// 写入设置项 (upsert)
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO setting (key, value) VALUES (?, ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    /// 写入 bool 设置
+    pub fn set_setting_bool(&self, key: &str, value: bool) -> Result<(), rusqlite::Error> {
+        self.set_setting(key, if value { "1" } else { "0" })
+    }
+
+    /// 写入 i64 设置
+    pub fn set_setting_i64(&self, key: &str, value: i64) -> Result<(), rusqlite::Error> {
+        self.set_setting(key, &value.to_string())
     }
 }
 

@@ -1,0 +1,431 @@
+// 设置面板
+// 显示在主窗口右侧，包含主题/自启/置顶/列数/关于等设置项
+
+import { ScrollView } from "std-widgets.slint";
+import { ThemeSettings } from "../theme.slint";
+
+export component SettingsPanel inherits Rectangle {
+    background: ThemeSettings.bg-color(root.theme-mode);
+
+    // 入属性: 当前设置值
+    in property <string> theme-mode: "light";       // light / dark
+    in property <bool> auto-start: false;            // 开机自启
+    in property <bool> window-topmost: false;        // 窗口置顶
+    in property <int> item-columns: 8;               // 项目列数
+
+    // 出回调: 设置变更
+    callback theme-mode-changed(string);  // 用户切换主题
+    callback auto-start-changed(bool);
+    callback window-topmost-changed(bool);
+    callback item-columns-changed(int);
+    callback back-clicked();              // 返回主界面
+
+    VerticalLayout {
+        padding: ThemeSettings.spacing-large;
+        spacing: ThemeSettings.spacing-normal;
+
+        // 顶部: 返回按钮 + 标题
+        HorizontalLayout {
+            spacing: ThemeSettings.spacing-normal;
+
+            Rectangle {
+                width: 60px;
+                height: 28px;
+                border-radius: ThemeSettings.border-radius;
+                background: back-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+
+                Text {
+                    text: "← 返回";
+                    color: ThemeSettings.accent-color;
+                    font-size: ThemeSettings.font-size-normal;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                back-touch := TouchArea {
+                    clicked => { root.back-clicked(); }
+                }
+            }
+
+            Text {
+                text: "设置";
+                color: ThemeSettings.text-c(root.theme-mode);
+                font-size: ThemeSettings.font-size-large;
+                font-weight: 700;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+        }
+
+        // 分隔线
+        Rectangle {
+            height: 1px;
+            background: ThemeSettings.border-c(root.theme-mode);
+        }
+
+        ScrollView {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                spacing: ThemeSettings.spacing-large;
+
+                // ========== 外观 ==========
+                Text {
+                    text: "外观";
+                    color: ThemeSettings.text-sec(root.theme-mode);
+                    font-size: ThemeSettings.font-size-small;
+                    font-weight: 700;
+                }
+
+                // 主题切换
+                Rectangle {
+                    height: 56px;
+                    horizontal-stretch: 1;
+                    background: ThemeSettings.card-bg(root.theme-mode);
+                    border-radius: ThemeSettings.border-radius;
+
+                    HorizontalLayout {
+                        padding: ThemeSettings.spacing-normal;
+                        spacing: ThemeSettings.spacing-normal;
+
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+
+                            Text {
+                                text: "主题模式";
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                font-size: ThemeSettings.font-size-normal;
+                            }
+
+                            Text {
+                                text: "切换浅色/深色主题";
+                                color: ThemeSettings.text-sec(root.theme-mode);
+                                font-size: ThemeSettings.font-size-small;
+                                vertical-stretch: 1;
+                            }
+                        }
+
+                        // 主题切换按钮组
+                        HorizontalLayout {
+                            spacing: 4px;
+
+                            // 浅色
+                            Rectangle {
+                                width: 56px;
+                                height: 28px;
+                                border-radius: ThemeSettings.border-radius;
+                                background: root.theme-mode == "light" ? ThemeSettings.accent-color : ThemeSettings.hover-c(root.theme-mode);
+                                border-width: 1px;
+                                border-color: ThemeSettings.border-c(root.theme-mode);
+
+                                Text {
+                                    text: "浅色";
+                                    color: root.theme-mode == "light" ? #ffffff : ThemeSettings.text-c(root.theme-mode);
+                                    font-size: ThemeSettings.font-size-small;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                TouchArea {
+                                    clicked => { root.theme-mode-changed("light"); }
+                                }
+                            }
+
+                            // 深色
+                            Rectangle {
+                                width: 56px;
+                                height: 28px;
+                                border-radius: ThemeSettings.border-radius;
+                                background: root.theme-mode == "dark" ? ThemeSettings.accent-color : ThemeSettings.hover-c(root.theme-mode);
+                                border-width: 1px;
+                                border-color: ThemeSettings.border-c(root.theme-mode);
+
+                                Text {
+                                    text: "深色";
+                                    color: root.theme-mode == "dark" ? #ffffff : ThemeSettings.text-c(root.theme-mode);
+                                    font-size: ThemeSettings.font-size-small;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                TouchArea {
+                                    clicked => { root.theme-mode-changed("dark"); }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ========== 系统 ==========
+                Text {
+                    text: "系统";
+                    color: ThemeSettings.text-sec(root.theme-mode);
+                    font-size: ThemeSettings.font-size-small;
+                    font-weight: 700;
+                }
+
+                // 开机自启
+                Rectangle {
+                    height: 56px;
+                    horizontal-stretch: 1;
+                    background: ThemeSettings.card-bg(root.theme-mode);
+                    border-radius: ThemeSettings.border-radius;
+
+                    HorizontalLayout {
+                        padding: ThemeSettings.spacing-normal;
+                        spacing: ThemeSettings.spacing-normal;
+
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+
+                            Text {
+                                text: "开机自启";
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                font-size: ThemeSettings.font-size-normal;
+                            }
+
+                            Text {
+                                text: "系统登录时自动启动";
+                                color: ThemeSettings.text-sec(root.theme-mode);
+                                font-size: ThemeSettings.font-size-small;
+                                vertical-stretch: 1;
+                            }
+                        }
+
+                        // 开关
+                        Rectangle {
+                            width: 44px;
+                            height: 24px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: self.height / 2;
+                            background: root.auto-start ? ThemeSettings.accent-color : ThemeSettings.border-c(root.theme-mode);
+
+                            // 圆点
+                            Rectangle {
+                                width: 20px;
+                                height: 20px;
+                                y: (parent.height - self.height) / 2;
+                                x: root.auto-start ? parent.width - self.width - 2px : 2px;
+                                background: #ffffff;
+                                border-radius: self.height / 2;
+                            }
+
+                            TouchArea {
+                                clicked => { root.auto-start-changed(!root.auto-start); }
+                            }
+                        }
+                    }
+                }
+
+                // 窗口置顶
+                Rectangle {
+                    height: 56px;
+                    horizontal-stretch: 1;
+                    background: ThemeSettings.card-bg(root.theme-mode);
+                    border-radius: ThemeSettings.border-radius;
+
+                    HorizontalLayout {
+                        padding: ThemeSettings.spacing-normal;
+                        spacing: ThemeSettings.spacing-normal;
+
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+
+                            Text {
+                                text: "窗口置顶";
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                font-size: ThemeSettings.font-size-normal;
+                            }
+
+                            Text {
+                                text: "主窗口始终显示在最前";
+                                color: ThemeSettings.text-sec(root.theme-mode);
+                                font-size: ThemeSettings.font-size-small;
+                                vertical-stretch: 1;
+                            }
+                        }
+
+                        // 开关
+                        Rectangle {
+                            width: 44px;
+                            height: 24px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: self.height / 2;
+                            background: root.window-topmost ? ThemeSettings.accent-color : ThemeSettings.border-c(root.theme-mode);
+
+                            Rectangle {
+                                width: 20px;
+                                height: 20px;
+                                y: (parent.height - self.height) / 2;
+                                x: root.window-topmost ? parent.width - self.width - 2px : 2px;
+                                background: #ffffff;
+                                border-radius: self.height / 2;
+                            }
+
+                            TouchArea {
+                                clicked => { root.window-topmost-changed(!root.window-topmost); }
+                            }
+                        }
+                    }
+                }
+
+                // ========== 显示 ==========
+                Text {
+                    text: "显示";
+                    color: ThemeSettings.text-sec(root.theme-mode);
+                    font-size: ThemeSettings.font-size-small;
+                    font-weight: 700;
+                }
+
+                // 项目列数
+                Rectangle {
+                    height: 76px;
+                    horizontal-stretch: 1;
+                    background: ThemeSettings.card-bg(root.theme-mode);
+                    border-radius: ThemeSettings.border-radius;
+
+                    VerticalLayout {
+                        padding: ThemeSettings.spacing-normal;
+                        spacing: ThemeSettings.spacing-small;
+
+                        HorizontalLayout {
+                            spacing: ThemeSettings.spacing-normal;
+
+                            Text {
+                                text: "项目列数";
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                font-size: ThemeSettings.font-size-normal;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+
+                            Text {
+                                text: root.item-columns;
+                                color: ThemeSettings.accent-color;
+                                font-size: ThemeSettings.font-size-normal;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                                width: 30px;
+                                horizontal-alignment: right;
+                            }
+                        }
+
+                        // 减号
+                        HorizontalLayout {
+                            spacing: ThemeSettings.spacing-small;
+
+                            Rectangle {
+                                width: 28px;
+                                height: 28px;
+                                border-radius: ThemeSettings.border-radius;
+                                background: minus-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : ThemeSettings.border-c(root.theme-mode);
+
+                                Text {
+                                    text: "−";
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    font-size: 18px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                minus-touch := TouchArea {
+                                    clicked => {
+                                        if (root.item-columns > 2) {
+                                            root.item-columns-changed(root.item-columns - 1);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 进度条样式
+                            Rectangle {
+                                height: 4px;
+                                y: (parent.height - self.height) / 2;
+                                horizontal-stretch: 1;
+                                background: ThemeSettings.border-c(root.theme-mode);
+                                border-radius: 2px;
+
+                                Rectangle {
+                                    width: parent.width * ((root.item-columns - 2) / 14.0);
+                                    height: parent.height;
+                                    background: ThemeSettings.accent-color;
+                                    border-radius: 2px;
+                                }
+                            }
+
+                            // 加号
+                            Rectangle {
+                                width: 28px;
+                                height: 28px;
+                                border-radius: ThemeSettings.border-radius;
+                                background: plus-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : ThemeSettings.border-c(root.theme-mode);
+
+                                Text {
+                                    text: "+";
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    font-size: 18px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                plus-touch := TouchArea {
+                                    clicked => {
+                                        if (root.item-columns < 16) {
+                                            root.item-columns-changed(root.item-columns + 1);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ========== 关于 ==========
+                Text {
+                    text: "关于";
+                    color: ThemeSettings.text-sec(root.theme-mode);
+                    font-size: ThemeSettings.font-size-small;
+                    font-weight: 700;
+                }
+
+                Rectangle {
+                    height: 120px;
+                    horizontal-stretch: 1;
+                    background: ThemeSettings.card-bg(root.theme-mode);
+                    border-radius: ThemeSettings.border-radius;
+
+                    VerticalLayout {
+                        padding: ThemeSettings.spacing-large;
+                        spacing: ThemeSettings.spacing-small;
+
+                        Text {
+                            text: "Dawn Launcher";
+                            color: ThemeSettings.text-c(root.theme-mode);
+                            font-size: ThemeSettings.font-size-large;
+                            font-weight: 700;
+                        }
+
+                        Text {
+                            text: "版本 0.6.0 (Rust + Slint)";
+                            color: ThemeSettings.text-sec(root.theme-mode);
+                            font-size: ThemeSettings.font-size-small;
+                        }
+
+                        Text {
+                            text: "轻量级桌面启动器 · 9.7MB · 无依赖运行";
+                            color: ThemeSettings.text-sec(root.theme-mode);
+                            font-size: ThemeSettings.font-size-small;
+                        }
+
+                        Text {
+                            text: "https://github.com/ylj1125/DawnLauncher";
+                            color: ThemeSettings.accent-color;
+                            font-size: ThemeSettings.font-size-small;
+                            vertical-stretch: 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

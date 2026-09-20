@@ -3,6 +3,7 @@ import { ScrollView, ListView, StandardListView } from "std-widgets.slint";
 import { ThemeSettings } from "theme.slint";
 import { ItemCard, ItemInfo } from "components/item_card.slint";
 import { ClassificationTab } from "components/classification_tab.slint";
+import { SettingsPanel } from "components/settings_panel.slint";
 
 // 分类数据模型
 export struct ClassificationInfo {
@@ -13,7 +14,7 @@ export struct ClassificationInfo {
 
 export component MainWindow inherits Window {
     title: "Dawn Launcher";
-    background: ThemeSettings.background-color;
+    background: ThemeSettings.bg-color(root.theme-mode);
     default-font-family: ThemeSettings.font-family;
     preferred-width: 900px;
     preferred-height: 600px;
@@ -26,6 +27,14 @@ export component MainWindow inherits Window {
     in property <string> status-text: "Dawn Launcher";
     // 拖拽提示显隐
     in property <bool> drag-hover: false;
+    // 视图模式: "main" 主界面 / "settings" 设置面板
+    // in-out 允许内部(返回按钮)和外部(Rust)都能修改
+    in-out property <string> view-mode: "main";
+    // 设置项当前值 (传递给 SettingsPanel)
+    in property <string> theme-mode: "light";
+    in property <bool> auto-start: false;
+    in property <bool> window-topmost: false;
+    in property <int> item-columns: 8;
 
     // 回调
     callback classification-clicked(int);
@@ -42,6 +51,11 @@ export component MainWindow inherits Window {
     callback rename-classification-requested(int); // 重命名分类
     callback item-dropped(string);        // 拖拽文件到窗口
     callback settings-clicked();          // 设置按钮
+    // 设置变更回调
+    callback theme-mode-changed(string);
+    callback auto-start-changed(bool);
+    callback window-topmost-changed(bool);
+    callback item-columns-changed(int);
 
     // 用 VerticalLayout 包裹所有内容，确保布局跟随窗口大小
     VerticalLayout {
@@ -50,13 +64,13 @@ export component MainWindow inherits Window {
         // 标题栏 (拖拽区域)
         title-bar := Rectangle {
             height: 32px;
-            background: ThemeSettings.sidebar-background-color;
+            background: ThemeSettings.sidebar-bg(root.theme-mode);
 
             HorizontalLayout {
                 // 标题
                 Text {
                     text: "Dawn Launcher";
-                    color: ThemeSettings.text-color;
+                    color: ThemeSettings.text-c(root.theme-mode);
                     font-size: ThemeSettings.font-size-normal;
                     font-weight: 700;
                     vertical-alignment: center;
@@ -64,15 +78,15 @@ export component MainWindow inherits Window {
                     padding-left: ThemeSettings.spacing-normal;
                 }
 
-                // 设置按钮
+                // 设置按钮 (主界面才显示)
                 Rectangle {
                     width: 40px;
                     height: parent.height;
-                    background: settings-touch.has-hover ? ThemeSettings.hover-color : transparent;
+                    background: settings-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
 
                     Text {
                         text: "⚙";
-                        color: ThemeSettings.text-color;
+                        color: ThemeSettings.text-c(root.theme-mode);
                         font-size: 16px;
                         horizontal-alignment: center;
                         vertical-alignment: center;
@@ -91,7 +105,7 @@ export component MainWindow inherits Window {
 
                     Text {
                         text: "×";
-                        color: ThemeSettings.text-color;
+                        color: ThemeSettings.text-c(root.theme-mode);
                         font-size: 18px;
                         horizontal-alignment: center;
                         vertical-alignment: center;
@@ -104,16 +118,18 @@ export component MainWindow inherits Window {
             }
         }
 
-        // 主内容区: horizontal-stretch: 1 + vertical-stretch: 1 确保填充剩余空间
-        HorizontalLayout {
+        // 主内容区 - 通过 view-mode 切换主界面/设置面板
+        // 主界面
+        main-view := HorizontalLayout {
             vertical-stretch: 1;
             horizontal-stretch: 1;
             spacing: 0px;
+            visible: root.view-mode == "main";
 
             // 左侧分类栏
             Rectangle {
                 width: ThemeSettings.sidebar-width;
-                background: ThemeSettings.sidebar-background-color;
+                background: ThemeSettings.sidebar-bg(root.theme-mode);
 
                 VerticalLayout {
                     padding: ThemeSettings.spacing-small;
@@ -129,6 +145,7 @@ export component MainWindow inherits Window {
                                 tab-id: c.id;
                                 name: c.name;
                                 selected: c.selected;
+                                theme-mode: root.theme-mode;
                                 clicked => { root.classification-clicked(c.id); }
                                 right-clicked => { root.classification-right-clicked(c.id); }
                             }
@@ -140,7 +157,7 @@ export component MainWindow inherits Window {
                         height: 32px;
                         horizontal-stretch: 1;
                         border-radius: ThemeSettings.border-radius;
-                        background: add-class-touch.has-hover ? ThemeSettings.hover-color : transparent;
+                        background: add-class-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
 
                         HorizontalLayout {
                             alignment: center;
@@ -148,7 +165,7 @@ export component MainWindow inherits Window {
 
                             Text {
                                 text: "+ 新建分类";
-                                color: ThemeSettings.text-secondary-color;
+                                color: ThemeSettings.text-sec(root.theme-mode);
                                 font-size: ThemeSettings.font-size-normal;
                                 vertical-alignment: center;
                             }
@@ -164,7 +181,7 @@ export component MainWindow inherits Window {
             // 分隔线
             Rectangle {
                 width: 1px;
-                background: ThemeSettings.border-color;
+                background: ThemeSettings.border-c(root.theme-mode);
             }
 
             // 右侧内容区
@@ -181,7 +198,7 @@ export component MainWindow inherits Window {
 
                     Text {
                         text: root.status-text;
-                        color: ThemeSettings.text-secondary-color;
+                        color: ThemeSettings.text-sec(root.theme-mode);
                         font-size: ThemeSettings.font-size-small;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
@@ -192,7 +209,7 @@ export component MainWindow inherits Window {
                         width: 96px;
                         height: 28px;
                         border-radius: ThemeSettings.border-radius;
-                        background: add-item-touch.has-hover ? #3b82f6 : #e8f0fe;
+                        background: add-item-touch.has-hover ? #3b82f6 : ThemeSettings.selected-c(root.theme-mode);
 
                         Text {
                             text: "+ 添加项目";
@@ -212,7 +229,7 @@ export component MainWindow inherits Window {
                 Rectangle {
                     vertical-stretch: 1;
                     horizontal-stretch: 1;
-                    background: root.drag-hover ? #f0f7ff : transparent;
+                    background: root.drag-hover ? ThemeSettings.selected-c(root.theme-mode) : transparent;
                     border-radius: ThemeSettings.border-radius;
                     border-width: root.drag-hover ? 2px : 0px;
                     border-color: ThemeSettings.accent-color;
@@ -227,7 +244,7 @@ export component MainWindow inherits Window {
                         text: root.drag-hover ?
                             "松开以添加项目" :
                             "暂无项目\n\n点击右上角「+ 添加项目」\n或将文件/快捷方式拖入此区域";
-                        color: ThemeSettings.text-secondary-color;
+                        color: ThemeSettings.text-sec(root.theme-mode);
                         font-size: ThemeSettings.font-size-normal;
                         horizontal-alignment: center;
                         vertical-alignment: center;
@@ -246,6 +263,7 @@ export component MainWindow inherits Window {
                                 icon: item.icon;
                                 invalid: item.invalid;
                                 selected: item.selected;
+                                theme-mode: root.theme-mode;
                                 clicked => { root.item-clicked(item.id); }
                                 double-clicked => { root.item-double-clicked(item.id); }
                                 right-clicked => { root.item-right-clicked(item.id); }
@@ -254,6 +272,24 @@ export component MainWindow inherits Window {
                     }
                 }
             }
+        }
+
+        // 设置面板
+        settings-view := SettingsPanel {
+            vertical-stretch: 1;
+            horizontal-stretch: 1;
+            visible: root.view-mode == "settings";
+
+            theme-mode: root.theme-mode;
+            auto-start: root.auto-start;
+            window-topmost: root.window-topmost;
+            item-columns: root.item-columns;
+
+            back-clicked => { root.view-mode = "main"; }
+            theme-mode-changed(mode) => { root.theme-mode-changed(mode); }
+            auto-start-changed(v) => { root.auto-start-changed(v); }
+            window-topmost-changed(v) => { root.window-topmost-changed(v); }
+            item-columns-changed(v) => { root.item-columns-changed(v); }
         }
     }
 }

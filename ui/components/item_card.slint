@@ -17,6 +17,7 @@ export component ItemCard inherits Rectangle {
     in property <image> icon;
     in property <bool> invalid;
     in property <bool> selected;
+    in property <string> theme-mode: "light";  // 接收主题模式
 
     callback clicked;
     callback double-clicked;
@@ -25,7 +26,7 @@ export component ItemCard inherits Rectangle {
     width: ThemeSettings.item-card-width;
     height: ThemeSettings.item-card-height;
     border-radius: ThemeSettings.border-radius;
-    background: selected ? ThemeSettings.selected-color : (touch-area.has-hover ? ThemeSettings.hover-color : transparent);
+    background: selected ? ThemeSettings.selected-c(root.theme-mode) : (touch-area.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
 
     VerticalLayout {
         alignment: center;
@@ -43,7 +44,7 @@ export component ItemCard inherits Rectangle {
 
         Text {
             text: root.name;
-            color: ThemeSettings.text-color;
+            color: ThemeSettings.text-c(root.theme-mode);
             font-size: ThemeSettings.font-size-small;
             horizontal-alignment: center;
             overflow: elide;

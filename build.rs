@@ -5,4 +5,5 @@ fn main() {
     println!("cargo:rerun-if-changed=ui/theme.slint");
     println!("cargo:rerun-if-changed=ui/components/item_card.slint");
     println!("cargo:rerun-if-changed=ui/components/classification_tab.slint");
+    println!("cargo:rerun-if-changed=ui/components/settings_panel.slint");
 }

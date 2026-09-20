@@ -38,6 +38,7 @@ pub fn get_file_icon(path: &str) -> Option<String> {
 
 /// 简化版图标获取: 通过 PowerShell 调用 ExtractAssociatedIcon
 /// 性能不如原生 IShellItemImageFactory，但 MVP 阶段够用
+/// 使用 CREATE_NO_WINDOW 标志隐藏 PowerShell 控制台窗口
 fn get_file_icon_simple(path: &str) -> Option<String> {
     // 检查路径是否存在
     if !std::path::Path::new(path).exists() {
@@ -57,16 +58,36 @@ if ($icon) {{
 "#,
         path.replace('\'', "''")
     );
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
-        .output()
-        .ok()?;
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let output = run_hidden(
+        "powershell",
+        &["-NoProfile", "-NonInteractive", "-Command", &ps_script],
+    )?;
+    let stdout = String::from_utf8_lossy(&output).trim().to_string();
     if stdout.is_empty() {
         None
     } else {
         Some(format!("data:image/png;base64,{}", stdout))
     }
+}
+
+/// 隐藏窗口执行命令，返回 stdout 字节
+/// 使用 CREATE_NO_WINDOW 标志，避免弹出黑色控制台窗口
+#[cfg(target_os = "windows")]
+pub(crate) fn run_hidden(cmd: &str, args: &[&str]) -> Option<Vec<u8>> {
+    use std::os::windows::process::CommandExt;
+    // CREATE_NO_WINDOW = 0x08000000
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    std::process::Command::new(cmd)
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()
+        .map(|o| o.stdout)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn run_hidden(_cmd: &str, _args: &[&str]) -> Option<Vec<u8>> {
+    None
 }
 
 /// 解析 .lnk 快捷方式文件，返回 target 和 arguments
