@@ -87,6 +87,7 @@ export component SettingsPanel inherits Rectangle {
                     HorizontalLayout {
                         padding: ThemeSettings.spacing-normal;
                         spacing: ThemeSettings.spacing-normal;
+                        alignment: center;
 
                         VerticalLayout {
                             horizontal-stretch: 1;
@@ -174,6 +175,7 @@ export component SettingsPanel inherits Rectangle {
                     HorizontalLayout {
                         padding: ThemeSettings.spacing-normal;
                         spacing: ThemeSettings.spacing-normal;
+                        alignment: center;
 
                         VerticalLayout {
                             horizontal-stretch: 1;
@@ -196,7 +198,6 @@ export component SettingsPanel inherits Rectangle {
                         Rectangle {
                             width: 44px;
                             height: 24px;
-                            y: (parent.height - self.height) / 2;
                             border-radius: self.height / 2;
                             background: root.auto-start ? ThemeSettings.accent-color : ThemeSettings.border-c(root.theme-mode);
 
@@ -208,6 +209,7 @@ export component SettingsPanel inherits Rectangle {
                                 x: root.auto-start ? parent.width - self.width - 2px : 2px;
                                 background: #ffffff;
                                 border-radius: self.height / 2;
+                                animate x { duration: 120ms; }
                             }
 
                             TouchArea {
@@ -227,6 +229,7 @@ export component SettingsPanel inherits Rectangle {
                     HorizontalLayout {
                         padding: ThemeSettings.spacing-normal;
                         spacing: ThemeSettings.spacing-normal;
+                        alignment: center;
 
                         VerticalLayout {
                             horizontal-stretch: 1;
@@ -249,7 +252,6 @@ export component SettingsPanel inherits Rectangle {
                         Rectangle {
                             width: 44px;
                             height: 24px;
-                            y: (parent.height - self.height) / 2;
                             border-radius: self.height / 2;
                             background: root.window-topmost ? ThemeSettings.accent-color : ThemeSettings.border-c(root.theme-mode);
 
@@ -260,6 +262,7 @@ export component SettingsPanel inherits Rectangle {
                                 x: root.window-topmost ? parent.width - self.width - 2px : 2px;
                                 background: #ffffff;
                                 border-radius: self.height / 2;
+                                animate x { duration: 120ms; }
                             }
 
                             TouchArea {
@@ -279,14 +282,14 @@ export component SettingsPanel inherits Rectangle {
 
                 // 项目列数
                 Rectangle {
-                    height: 76px;
+                    height: 88px;
                     horizontal-stretch: 1;
                     background: ThemeSettings.card-bg(root.theme-mode);
                     border-radius: ThemeSettings.border-radius;
 
                     VerticalLayout {
                         padding: ThemeSettings.spacing-normal;
-                        spacing: ThemeSettings.spacing-small;
+                        spacing: ThemeSettings.spacing-normal;
 
                         HorizontalLayout {
                             spacing: ThemeSettings.spacing-normal;
@@ -310,9 +313,10 @@ export component SettingsPanel inherits Rectangle {
                             }
                         }
 
-                        // 减号
+                        // 减号 + 进度条 + 加号
                         HorizontalLayout {
                             spacing: ThemeSettings.spacing-small;
+                            alignment: center;
 
                             Rectangle {
                                 width: 28px;
@@ -337,23 +341,27 @@ export component SettingsPanel inherits Rectangle {
                                 }
                             }
 
-                            // 进度条样式
+                            // 进度条样式 - 用容器包裹确保垂直居中
                             Rectangle {
-                                height: 4px;
-                                y: (parent.height - self.height) / 2;
+                                height: 28px;
                                 horizontal-stretch: 1;
-                                background: ThemeSettings.border-c(root.theme-mode);
-                                border-radius: 2px;
 
                                 Rectangle {
-                                    width: parent.width * ((root.item-columns - 2) / 14.0);
-                                    height: parent.height;
-                                    background: ThemeSettings.accent-color;
-                                    border-radius: 2px;
+                                    height: 6px;
+                                    y: (parent.height - self.height) / 2;
+                                    width: parent.width;
+                                    background: ThemeSettings.border-c(root.theme-mode);
+                                    border-radius: 3px;
+
+                                    Rectangle {
+                                        width: parent.width * ((root.item-columns - 2) / 14.0);
+                                        height: parent.height;
+                                        background: ThemeSettings.accent-color;
+                                        border-radius: 3px;
+                                    }
                                 }
                             }
 
-                            // 加号
                             Rectangle {
                                 width: 28px;
                                 height: 28px;

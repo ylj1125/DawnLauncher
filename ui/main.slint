@@ -119,12 +119,12 @@ export component MainWindow inherits Window {
         }
 
         // 主内容区 - 通过 view-mode 切换主界面/设置面板
+        // 使用 if 条件确保隐藏的视图不占据布局空间
         // 主界面
-        main-view := HorizontalLayout {
+        if root.view-mode == "main" : HorizontalLayout {
             vertical-stretch: 1;
             horizontal-stretch: 1;
             spacing: 0px;
-            visible: root.view-mode == "main";
 
             // 左侧分类栏
             Rectangle {
@@ -275,10 +275,9 @@ export component MainWindow inherits Window {
         }
 
         // 设置面板
-        settings-view := SettingsPanel {
+        if root.view-mode == "settings" : SettingsPanel {
             vertical-stretch: 1;
             horizontal-stretch: 1;
-            visible: root.view-mode == "settings";
 
             theme-mode: root.theme-mode;
             auto-start: root.auto-start;
