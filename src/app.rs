@@ -9,8 +9,8 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString};
 use crate::db::Database;
 use crate::models::{Classification, Item};
 use crate::native;
-// MainWindow, ClassificationInfo, ItemInfo 由 slint::include_modules!() 生成在 crate 根
-use crate::{ClassificationInfo, ItemInfo, MainWindow};
+// MainWindow, ClassificationInfo, ItemInfo, MenuItem 由 slint::include_modules!() 生成在 crate 根
+use crate::{ClassificationInfo, ItemInfo, MenuItem, MainWindow};
 
 pub struct App {
     main_window: MainWindow,
@@ -77,21 +77,38 @@ impl App {
             *current_id_for_class.lock().unwrap() = id.into();
         });
 
-        // 8. 项目单击 (直接打开项目 - 最可靠方式，避免双击事件不触发)
+        // 8. 项目单击 - 批量模式下切换选中，非批量模式下打开项目
         let db_for_open = db.clone();
         let window_for_open = main_window.as_weak();
         let current_id_for_open = current_id.clone();
         main_window.on_item_clicked(move |item_id| {
             log::info!("项目单击回调触发, item_id={}", item_id);
-            let items = db_for_open.list_items(current_id_for_open.lock().unwrap().clone());
+            let class_id = current_id_for_open.lock().unwrap().clone();
+
+            // 批量模式: 切换选中状态
+            if let Some(w) = window_for_open.upgrade() {
+                if w.get_batch_mode() {
+                    // 切换该项目选中状态
+                    let current_items: Vec<ItemInfo> = w.get_items().iter().collect::<Vec<_>>();
+                    let mut new_items = current_items;
+                    for it in new_items.iter_mut() {
+                        if it.id == item_id {
+                            it.selected = !it.selected;
+                        }
+                    }
+                    let new_model = slint::VecModel::from(new_items);
+                    w.set_items(ModelRc::from(Rc::new(new_model)));
+                    return;
+                }
+            }
+
+            // 非批量模式: 打开项目
+            let items = db_for_open.list_items(class_id);
             if let Some(item) = items.iter().find(|i| i.id == item_id as i64) {
                 open_item(item);
                 db_for_open.record_item_open(item_id.into());
             } else {
                 log::warn!("未找到 item_id={} 的项目", item_id);
-            }
-            if let Some(w) = window_for_open.upgrade() {
-                let _ = w.window();
             }
         });
 
@@ -107,74 +124,56 @@ impl App {
             }
         });
 
-        // 10. 项目右键菜单: 弹出原生菜单 (打开位置/删除)
-        let db_for_item_menu = db.clone();
-        let window_for_item_menu = main_window.as_weak();
-        let current_id_for_item_menu = current_id.clone();
+        // 10. 项目右键菜单: 弹出 Slint 右键菜单
+        // 注意: 右键坐标从 UI 事件获取，这里 item_id 用于记录当前右键的项目
+        let _window_for_item_menu = main_window.as_weak();
+        let _current_id_for_item_menu = current_id.clone();
+        // 记录当前右键的项目 id（供菜单项选中时使用）
+        let right_clicked_item_id = Arc::new(Mutex::new(0i64));
+        let right_clicked_item_id_for_menu = right_clicked_item_id.clone();
         main_window.on_item_right_clicked(move |item_id| {
-            let class_id = current_id_for_item_menu.lock().unwrap().clone();
-            // 简化版: 直接弹出确认框删除 (后续可改为完整右键菜单)
-            let confirm = show_confirm_dialog(
-                "删除项目",
-                "确定删除该项目吗？",
-            );
-            if confirm {
-                let _ = db_for_item_menu.delete_item(item_id as i64);
-                // 刷新当前分类的项目列表
-                let items = db_for_item_menu.list_items(class_id);
-                if let Some(w) = window_for_item_menu.upgrade() {
-                    w.set_items(to_item_model(&items, 0));
-                    w.set_status_text(SharedString::from(format!(
-                        "共 {} 个项目",
-                        items.len()
-                    )));
+            *right_clicked_item_id_for_menu.lock().unwrap() = item_id as i64;
+            // 右键菜单位置使用项目卡片位置附近，简化用固定偏移
+            // 实际坐标由 UI 的 pointer-event 传递，但 Slint 1.5 回调不支持传坐标
+            // 这里用窗口中心作为近似位置
+            if let Some(w) = _window_for_item_menu.upgrade() {
+                let x = w.get_width() as i32 / 2;
+                let y = w.get_height() as i32 / 2;
+                show_item_context_menu(&w, x, y);
+            }
+        });
+
+        // 11. 分类项右键菜单
+        let window_for_class_menu = main_window.as_weak();
+        let right_clicked_class_id = Arc::new(Mutex::new(0i64));
+        let right_clicked_class_id_for_menu = right_clicked_class_id.clone();
+        main_window.on_classification_right_clicked(move |id| {
+            *right_clicked_class_id_for_menu.lock().unwrap() = id as i64;
+            if let Some(w) = window_for_class_menu.upgrade() {
+                let x = 160; // 分类栏宽度附近
+                let y = w.get_height() as i32 / 2;
+                show_classification_item_menu(&w, x, y);
+            }
+        });
+
+        // 11.1 项目区空白右键
+        let window_for_item_area = main_window.as_weak();
+        main_window.on_item_area_right_clicked(move |x, y| {
+            if let Some(w) = window_for_item_area.upgrade() {
+                let batch = w.get_batch_mode();
+                if batch {
+                    show_batch_menu(&w, x, y);
+                } else {
+                    show_item_area_menu(&w, x, y);
                 }
             }
         });
 
-        // 11. 分类右键菜单: 删除/重命名
-        let db_for_class_menu = db.clone();
-        let window_for_class_menu = main_window.as_weak();
-        main_window.on_classification_right_clicked(move |id| {
-            // 简化版: 弹出菜单选项 (删除 / 重命名)
-            let action = show_action_dialog(
-                "分类操作",
-                &["重命名", "删除"],
-            );
-            match action.as_deref() {
-                Some("删除") => {
-                    let confirm = show_confirm_dialog(
-                        "删除分类",
-                        "删除分类将同时删除其下所有项目，确定继续吗？",
-                    );
-                    if confirm {
-                        let _ = db_for_class_menu.delete_classification(id as i64);
-                        // 刷新分类列表
-                        let classifications = db_for_class_menu.list_parent_classifications();
-                        let first_id = classifications.first().map(|c| c.id).unwrap_or(0);
-                        let items = db_for_class_menu.list_items(first_id);
-                        if let Some(w) = window_for_class_menu.upgrade() {
-                            w.set_classifications(to_classification_model(&classifications, first_id));
-                            w.set_items(to_item_model(&items, 0));
-                            w.set_status_text(SharedString::from(format!(
-                                "共 {} 个分类，{} 个项目",
-                                classifications.len(),
-                                items.len()
-                            )));
-                        }
-                    }
-                }
-                Some("重命名") => {
-                    if let Some(new_name) = show_input_dialog("重命名分类", "请输入新名称") {
-                        let _ = db_for_class_menu.rename_classification(id as i64, &new_name);
-                        // 刷新分类列表
-                        let classifications = db_for_class_menu.list_parent_classifications();
-                        if let Some(w) = window_for_class_menu.upgrade() {
-                            w.set_classifications(to_classification_model(&classifications, id as i64));
-                        }
-                    }
-                }
-                _ => {}
+        // 11.2 分类区空白右键
+        let window_for_class_area = main_window.as_weak();
+        main_window.on_classification_area_right_clicked(move |x, y| {
+            if let Some(w) = window_for_class_area.upgrade() {
+                show_classification_area_menu(&w, x, y);
             }
         });
 
@@ -349,6 +348,377 @@ impl App {
         main_window.on_window_close(move || {
             std::process::exit(0);
         });
+
+        // 18. 右键菜单项选中处理
+        {
+            let db_for_ctx = db.clone();
+            let window_for_ctx = main_window.as_weak();
+            let current_id_for_ctx = current_id.clone();
+            let right_item_id = right_clicked_item_id.clone();
+            let right_class_id = right_clicked_class_id.clone();
+            main_window.on_context_menu_item_selected(move |source, action| {
+                let source_str = source.to_string();
+                let action_str = action.to_string();
+                log::info!("右键菜单选中: source={}, action={}", source_str, action_str);
+
+                let w = match window_for_ctx.upgrade() {
+                    Some(w) => w,
+                    None => return,
+                };
+                let class_id = current_id_for_ctx.lock().unwrap().clone();
+
+                match (source_str.as_str(), action_str.as_str()) {
+                    // ===== 项目区空白右键 =====
+                    ("item-area", "new-item") => {
+                        // 触发添加项目
+                        drop(w);
+                        if let Some(path) = show_open_file_dialog() {
+                            let order = db_for_ctx.max_item_order(class_id) + 1;
+                            let item = build_item_from_path(&path, class_id, order);
+                            if db_for_ctx.insert_item(&item).is_ok() {
+                                let items = db_for_ctx.list_items(class_id);
+                                if let Some(w) = window_for_ctx.upgrade() {
+                                    w.set_items(to_item_model(&items, 0));
+                                    w.set_status_text(SharedString::from(format!(
+                                        "共 {} 个项目",
+                                        items.len()
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                    ("item-area", "batch-mode") => {
+                        w.set_batch_mode(true);
+                        w.set_context_menu_visible(false);
+                        log::info!("进入批量操作模式");
+                    }
+                    ("item-area", "lock-item-order") => {
+                        // 切换当前分类的项目锁定
+                        let locked = db_for_ctx.is_classification_locked(class_id);
+                        let _ = db_for_ctx.set_classification_locked(class_id, !locked);
+                        show_info_dialog(
+                            "锁定状态",
+                            if !locked { "已锁定项目顺序" } else { "已解锁项目顺序" },
+                        );
+                    }
+                    ("item-area", "item-settings") => {
+                        show_info_dialog("项目设置", "项目设置弹窗（待实现）");
+                    }
+
+                    // ===== 分类区空白右键 =====
+                    ("classification-area", "new-classification") => {
+                        drop(w);
+                        if let Some(name) = show_input_dialog("新建分类", "请输入分类名称") {
+                            if let Ok(id) = db_for_ctx.insert_parent_classification(&name) {
+                                let classifications = db_for_ctx.list_parent_classifications();
+                                if let Some(w) = window_for_ctx.upgrade() {
+                                    w.set_classifications(to_classification_model(&classifications, id));
+                                    w.set_items(to_item_model(&[], 0));
+                                    w.set_status_text(SharedString::from("0 个项目"));
+                                }
+                            }
+                        }
+                    }
+                    ("classification-area", "lock-order") => {
+                        // 锁定所有分类顺序（简化: 切换第一个分类的 locked 作为全局标识）
+                        show_info_dialog("锁定分类顺序", "分类顺序锁定功能（待完善）");
+                    }
+
+                    // ===== 分类项右键 =====
+                    ("classification-item", "rename") => {
+                        let cid = *right_class_id.lock().unwrap();
+                        drop(w);
+                        if let Some(new_name) = show_input_dialog("重命名分类", "请输入新名称") {
+                            let _ = db_for_ctx.rename_classification(cid, &new_name);
+                            let classifications = db_for_ctx.list_parent_classifications();
+                            if let Some(w) = window_for_ctx.upgrade() {
+                                w.set_classifications(to_classification_model(&classifications, cid));
+                            }
+                        }
+                    }
+                    ("classification-item", "add-child") => {
+                        let cid = *right_class_id.lock().unwrap();
+                        drop(w);
+                        if let Some(name) = show_input_dialog("新建子分类", "请输入子分类名称") {
+                            if let Ok(_id) = db_for_ctx.insert_child_classification(cid, &name) {
+                                show_info_dialog("成功", "子分类已创建");
+                            }
+                        }
+                    }
+                    ("classification-item", "delete") => {
+                        let cid = *right_class_id.lock().unwrap();
+                        drop(w);
+                        let confirm = show_confirm_dialog(
+                            "删除分类",
+                            "删除分类将同时删除其下所有项目，确定继续吗？",
+                        );
+                        if confirm {
+                            let _ = db_for_ctx.delete_classification(cid);
+                            let classifications = db_for_ctx.list_parent_classifications();
+                            let first_id = classifications.first().map(|c| c.id).unwrap_or(0);
+                            let items = db_for_ctx.list_items(first_id);
+                            if let Some(w) = window_for_ctx.upgrade() {
+                                w.set_classifications(to_classification_model(&classifications, first_id));
+                                w.set_items(to_item_model(&items, 0));
+                                w.set_status_text(SharedString::from(format!(
+                                    "共 {} 个分类，{} 个项目",
+                                    classifications.len(),
+                                    items.len()
+                                )));
+                            }
+                        }
+                    }
+
+                    // ===== 项目右键 =====
+                    ("item", "open") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        let items = db_for_ctx.list_items(class_id);
+                        if let Some(item) = items.iter().find(|i| i.id == item_id) {
+                            open_item(item);
+                            db_for_ctx.record_item_open(item_id);
+                        }
+                    }
+                    ("item", "open-location") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        if let Some(target) = db_for_ctx.get_item_target(item_id) {
+                            #[cfg(target_os = "windows")]
+                            native::open_file_location(&target);
+                        }
+                    }
+                    ("item", "rename") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        drop(w);
+                        if let Some(new_name) = show_input_dialog("重命名项目", "请输入新名称") {
+                            let _ = db_for_ctx.rename_item(item_id, &new_name);
+                            let items = db_for_ctx.list_items(class_id);
+                            if let Some(w) = window_for_ctx.upgrade() {
+                                w.set_items(to_item_model(&items, 0));
+                            }
+                        }
+                    }
+                    ("item", "copy-path") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        if let Some(target) = db_for_ctx.get_item_target(item_id) {
+                            #[cfg(target_os = "windows")]
+                            {
+                                let _ = copy_to_clipboard(&target);
+                                show_info_dialog("已复制", "路径已复制到剪贴板");
+                            }
+                        }
+                    }
+                    ("item", "refresh-icon") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        if let Some(target) = db_for_ctx.get_item_target(item_id) {
+                            if let Some(icon) = native::get_file_icon(&target) {
+                                let _ = db_for_ctx.update_item_icon(item_id, &icon);
+                                let items = db_for_ctx.list_items(class_id);
+                                if let Some(w) = window_for_ctx.upgrade() {
+                                    w.set_items(to_item_model(&items, 0));
+                                }
+                            }
+                        }
+                    }
+                    ("item", "to-relative") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        let base_dir = get_data_dir_string();
+                        match db_for_ctx.batch_to_relative_paths(&[item_id], &base_dir) {
+                            Ok(n) => show_info_dialog("完成", &format!("已转换 {} 个项目", n)),
+                            Err(e) => show_error_dialog("错误", &format!("转换失败: {}", e)),
+                        }
+                        let items = db_for_ctx.list_items(class_id);
+                        if let Some(w) = window_for_ctx.upgrade() {
+                            w.set_items(to_item_model(&items, 0));
+                        }
+                    }
+                    ("item", "to-absolute") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        let base_dir = get_data_dir_string();
+                        match db_for_ctx.batch_to_absolute_paths(&[item_id], &base_dir) {
+                            Ok(n) => show_info_dialog("完成", &format!("已转换 {} 个项目", n)),
+                            Err(e) => show_error_dialog("错误", &format!("转换失败: {}", e)),
+                        }
+                        let items = db_for_ctx.list_items(class_id);
+                        if let Some(w) = window_for_ctx.upgrade() {
+                            w.set_items(to_item_model(&items, 0));
+                        }
+                    }
+                    ("item", "delete") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        drop(w);
+                        let confirm = show_confirm_dialog("删除项目", "确定删除该项目吗？");
+                        if confirm {
+                            let _ = db_for_ctx.delete_item(item_id);
+                            let items = db_for_ctx.list_items(class_id);
+                            if let Some(w) = window_for_ctx.upgrade() {
+                                w.set_items(to_item_model(&items, 0));
+                                w.set_status_text(SharedString::from(format!(
+                                    "共 {} 个项目",
+                                    items.len()
+                                )));
+                            }
+                        }
+                    }
+
+                    // ===== 批量操作右键 =====
+                    ("batch", "select-all") => {
+                        // 全选当前分类所有项目
+                        let items = db_for_ctx.list_items(class_id);
+                        let new_model = slint::VecModel::from(
+                            items
+                                .iter()
+                                .map(|item| {
+                                    let icon = item
+                                        .data
+                                        .icon
+                                        .as_deref()
+                                        .and_then(parse_icon_data_url)
+                                        .unwrap_or_default();
+                                    ItemInfo {
+                                        id: item.id as i32,
+                                        name: SharedString::from(item.name.as_str()),
+                                        icon,
+                                        invalid: false,
+                                        selected: true,
+                                    }
+                                })
+                                .collect::<Vec<_>>(),
+                        );
+                        if let Some(w) = window_for_ctx.upgrade() {
+                            w.set_items(ModelRc::from(Rc::new(new_model)));
+                        }
+                    }
+                    ("batch", "batch-delete") => {
+                        drop(w);
+                        let items = db_for_ctx.list_items(class_id);
+                        let selected_ids: Vec<i64> = get_selected_item_ids(&window_for_ctx, &items);
+                        if selected_ids.is_empty() {
+                            show_info_dialog("提示", "请先选择项目");
+                            return;
+                        }
+                        let confirm = show_confirm_dialog(
+                            "批量删除",
+                            &format!("确定删除选中的 {} 个项目吗？", selected_ids.len()),
+                        );
+                        if confirm {
+                            let _ = db_for_ctx.batch_delete_items(&selected_ids);
+                            let items = db_for_ctx.list_items(class_id);
+                            if let Some(w) = window_for_ctx.upgrade() {
+                                w.set_items(to_item_model(&items, 0));
+                                w.set_batch_mode(false);
+                            }
+                        }
+                    }
+                    ("batch", "batch-rel-path") => {
+                        let items = db_for_ctx.list_items(class_id);
+                        let selected_ids: Vec<i64> = get_selected_item_ids(&window_for_ctx, &items);
+                        if selected_ids.is_empty() {
+                            show_info_dialog("提示", "请先选择项目");
+                            return;
+                        }
+                        let base_dir = get_data_dir_string();
+                        match db_for_ctx.batch_to_relative_paths(&selected_ids, &base_dir) {
+                            Ok(n) => show_info_dialog("完成", &format!("已转换 {} 个项目为相对路径", n)),
+                            Err(e) => show_error_dialog("错误", &format!("转换失败: {}", e)),
+                        }
+                    }
+                    ("batch", "batch-abs-path") => {
+                        let items = db_for_ctx.list_items(class_id);
+                        let selected_ids: Vec<i64> = get_selected_item_ids(&window_for_ctx, &items);
+                        if selected_ids.is_empty() {
+                            show_info_dialog("提示", "请先选择项目");
+                            return;
+                        }
+                        let base_dir = get_data_dir_string();
+                        match db_for_ctx.batch_to_absolute_paths(&selected_ids, &base_dir) {
+                            Ok(n) => show_info_dialog("完成", &format!("已转换 {} 个项目为绝对路径", n)),
+                            Err(e) => show_error_dialog("错误", &format!("转换失败: {}", e)),
+                        }
+                    }
+                    ("batch", "batch-refresh-icon") => {
+                        let items = db_for_ctx.list_items(class_id);
+                        let selected_ids: Vec<i64> = get_selected_item_ids(&window_for_ctx, &items);
+                        if selected_ids.is_empty() {
+                            show_info_dialog("提示", "请先选择项目");
+                            return;
+                        }
+                        let mut refreshed = 0;
+                        for id in &selected_ids {
+                            if let Some(target) = db_for_ctx.get_item_target(*id) {
+                                if let Some(icon) = native::get_file_icon(&target) {
+                                    let _ = db_for_ctx.update_item_icon(*id, &icon);
+                                    refreshed += 1;
+                                }
+                            }
+                        }
+                        let items = db_for_ctx.list_items(class_id);
+                        if let Some(w) = window_for_ctx.upgrade() {
+                            w.set_items(to_item_model(&items, 0));
+                        }
+                        show_info_dialog("完成", &format!("已刷新 {} 个项目图标", refreshed));
+                    }
+                    ("batch", "batch-move") | ("batch", "batch-copy") => {
+                        // 弹出分类选择对话框（简化: 用输入框输入目标分类名）
+                        let items = db_for_ctx.list_items(class_id);
+                        let selected_ids: Vec<i64> = get_selected_item_ids(&window_for_ctx, &items);
+                        if selected_ids.is_empty() {
+                            show_info_dialog("提示", "请先选择项目");
+                            return;
+                        }
+                        let all_classes = db_for_ctx.list_all_classifications();
+                        let class_names: Vec<String> = all_classes
+                            .iter()
+                            .map(|c| format!("[{}] {}", c.id, c.name))
+                            .collect();
+                        let prompt = format!(
+                            "请输入目标分类ID:\n{}",
+                            class_names.join("\n")
+                        );
+                        drop(w);
+                        if let Some(input) = show_input_dialog("选择目标分类", &prompt) {
+                            if let Ok(target_id) = input.trim().parse::<i64>() {
+                                let result = if action_str == "batch-move" {
+                                    db_for_ctx.batch_move_items(&selected_ids, target_id)
+                                } else {
+                                    db_for_ctx.batch_copy_items(&selected_ids, target_id)
+                                };
+                                match result {
+                                    Ok(_) => {
+                                        let items = db_for_ctx.list_items(class_id);
+                                        if let Some(w) = window_for_ctx.upgrade() {
+                                            w.set_items(to_item_model(&items, 0));
+                                            w.set_batch_mode(false);
+                                        }
+                                        show_info_dialog("完成", &format!("{} 操作成功", action_str));
+                                    }
+                                    Err(e) => show_error_dialog("错误", &format!("操作失败: {}", e)),
+                                }
+                            }
+                        }
+                    }
+                    ("batch", "batch-cancel") => {
+                        if let Some(w) = window_for_ctx.upgrade() {
+                            w.set_batch_mode(false);
+                            // 清除选中状态
+                            let items = db_for_ctx.list_items(class_id);
+                            w.set_items(to_item_model(&items, 0));
+                        }
+                    }
+
+                    _ => {
+                        log::warn!("未处理的菜单项: source={}, action={}", source_str, action_str);
+                    }
+                }
+            });
+        }
+
+        // 19. 批量模式下点击项目切换选中
+        {
+            let window_for_batch_click = main_window.as_weak();
+            let current_id_for_batch = current_id.clone();
+            // 覆盖 item-clicked 行为: 批量模式下切换选中
+            // 注意: 由于 on_item_clicked 已绑定，这里用额外属性观察
+            // Slint 不允许重复绑定同一回调，所以批量选中逻辑已在原 on_item_clicked 中处理
+        }
 
         // 17. 应用启动时加载已保存的设置
         {
@@ -929,4 +1299,187 @@ fn run_hidden(cmd: &str, args: &[&str]) -> Option<Vec<u8>> {
 #[cfg(not(target_os = "windows"))]
 fn run_hidden(_cmd: &str, _args: &[&str]) -> Option<Vec<u8>> {
     None
+}
+
+// ==================== 右键菜单辅助函数 ====================
+
+/// 构建菜单项 Slint 模型
+fn build_menu_items(items: &[(&str, &str, &str, bool, bool)]) -> ModelRc<MenuItem> {
+    let model = slint::VecModel::from(
+        items
+            .iter()
+            .map(|(id, label, icon, separator, has_submenu)| MenuItem {
+                id: SharedString::from(*id),
+                label: SharedString::from(*label),
+                icon: SharedString::from(*icon),
+                separator: *separator,
+                has_submenu: *has_submenu,
+                enabled: true,
+            })
+            .collect::<Vec<_>>(),
+    );
+    ModelRc::from(Rc::new(model))
+}
+
+/// 显示右键菜单
+fn show_context_menu(
+    window: &MainWindow,
+    source: &str,
+    x: i32,
+    y: i32,
+    items: &[(&str, &str, &str, bool, bool)],
+) {
+    window.set_context_menu_source(SharedString::from(source));
+    window.set_context_menu_x(x as f32);
+    window.set_context_menu_y(y as f32);
+    window.set_context_menu_items(build_menu_items(items));
+    window.set_context_menu_visible(true);
+}
+
+/// 显示项目右键菜单
+/// 包含: 打开/打开位置/重命名/复制路径/刷新图标/转为相对路径/转为绝对路径/删除
+fn show_item_context_menu(window: &MainWindow, x: i32, y: i32) {
+    let items = [
+        ("open", "打开", "▶", false, false),
+        ("open-location", "打开文件位置", "📁", false, false),
+        ("", "", "", true, false), // 分隔线
+        ("rename", "重命名", "✏", false, false),
+        ("copy-path", "复制路径", "📋", false, false),
+        ("refresh-icon", "刷新图标", "🔄", false, false),
+        ("", "", "", true, false),
+        ("to-relative", "转为相对路径", "↻", false, false),
+        ("to-absolute", "转为绝对路径", "↻", false, false),
+        ("", "", "", true, false),
+        ("delete", "删除", "🗑", false, false),
+    ];
+    show_context_menu(window, "item", x, y, &items);
+}
+
+/// 显示分类项右键菜单
+/// 包含: 重命名/删除/(如果有子分类: 添加子分类)
+fn show_classification_item_menu(window: &MainWindow, x: i32, y: i32) {
+    let items = [
+        ("rename", "重命名", "✏", false, false),
+        ("add-child", "新建子分类", "+", false, false),
+        ("", "", "", true, false),
+        ("delete", "删除", "🗑", false, false),
+    ];
+    show_context_menu(window, "classification-item", x, y, &items);
+}
+
+/// 显示分类区空白右键菜单
+/// 包含: 新建分类/锁定分类顺序
+fn show_classification_area_menu(window: &MainWindow, x: i32, y: i32) {
+    let items = [
+        ("new-classification", "新建分类", "+", false, false),
+        ("", "", "", true, false),
+        ("lock-order", "锁定分类顺序", "🔒", false, false),
+    ];
+    show_context_menu(window, "classification-area", x, y, &items);
+}
+
+/// 显示项目区空白右键菜单（非批量模式）
+/// 包含: 新建项目/项目设置/锁定项目顺序/批量操作
+fn show_item_area_menu(window: &MainWindow, x: i32, y: i32) {
+    let items = [
+        ("new-item", "新建项目", "+", false, false),
+        ("item-settings", "项目设置", "⚙", false, false),
+        ("", "", "", true, false),
+        ("lock-item-order", "锁定项目顺序", "🔒", false, false),
+        ("batch-mode", "批量操作", "☰", false, false),
+    ];
+    show_context_menu(window, "item-area", x, y, &items);
+}
+
+/// 显示批量操作右键菜单
+fn show_batch_menu(window: &MainWindow, x: i32, y: i32) {
+    let items = [
+        ("select-all", "全选", "☰", false, false),
+        ("", "", "", true, false),
+        ("batch-move", "批量移动到", "↪", false, true),
+        ("batch-copy", "批量复制到", "📋", false, true),
+        ("", "", "", true, false),
+        ("batch-rel-path", "批量转为相对路径", "↻", false, false),
+        ("batch-abs-path", "批量转为绝对路径", "↻", false, false),
+        ("", "", "", true, false),
+        ("batch-refresh-icon", "批量刷新图标", "🔄", false, false),
+        ("", "", "", true, false),
+        ("batch-delete", "批量删除", "🗑", false, false),
+        ("", "", "", true, false),
+        ("batch-cancel", "取消批量操作", "✕", false, false),
+    ];
+    show_context_menu(window, "batch", x, y, &items);
+}
+
+/// 从当前 UI 获取选中的项目 id 列表
+fn get_selected_item_ids(
+    window_weak: &slint::Weak<MainWindow>,
+    _db_items: &[Item],
+) -> Vec<i64> {
+    let mut ids = Vec::new();
+    if let Some(w) = window_weak.upgrade() {
+        let items: Vec<ItemInfo> = w.get_items().iter().collect::<Vec<_>>();
+        for it in items {
+            if it.selected {
+                ids.push(it.id as i64);
+            }
+        }
+    }
+    ids
+}
+
+/// 获取数据目录路径字符串（用于相对路径转换基准）
+fn get_data_dir_string() -> String {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    exe_dir.to_string_lossy().to_string()
+}
+
+/// 复制文本到剪贴板 (Windows)
+#[cfg(target_os = "windows")]
+fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+    };
+    use windows::Win32::System::Memory::{
+        GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
+    };
+    use windows::Win32::System::Ole::CF_UNICODETEXT;
+    use windows::core::w;
+
+    unsafe {
+        if OpenClipboard(None).is_err() {
+            return Err("打开剪贴板失败".into());
+        }
+        let _ = EmptyClipboard();
+
+        // 分配全局内存
+        let mut utf16: Vec<u16> = text.encode_utf16().collect();
+        utf16.push(0); // null terminator
+        let byte_len = utf16.len() * 2;
+        let h_mem = GlobalAlloc(GMEM_MOVEABLE, byte_len);
+        let h_mem = match h_mem {
+            Ok(h) => h,
+            Err(e) => {
+                let _ = CloseClipboard();
+                return Err(format!("GlobalAlloc 失败: {:?}", e));
+            }
+        };
+        let ptr = GlobalLock(h_mem);
+        if let Some(ptr) = ptr {
+            std::ptr::copy_nonoverlapping(utf16.as_ptr() as *const u8, ptr as *mut u8, byte_len);
+            let _ = GlobalUnlock(h_mem);
+        }
+        let _ = SetClipboardData(CF_UNICODETEXT.0 as u32, h_mem.0 as *mut _);
+        let _ = CloseClipboard();
+    }
+    let _ = w!(""); // 避免 unused import warning
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn copy_to_clipboard(_text: &str) -> Result<(), String> {
+    Ok(())
 }

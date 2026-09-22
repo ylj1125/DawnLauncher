@@ -1,0 +1,131 @@
+// 右键菜单组件
+// 在主窗口上以浮层形式显示，点击菜单项后通过回调返回选中项 id
+// 支持分隔线、图标、子菜单箭头
+
+import { ThemeSettings } from "../theme.slint";
+
+// 菜单项数据结构
+export struct MenuItem {
+    id: string,         // 菜单项标识，如 "new-item"、"delete"
+    label: string,      // 显示文字
+    icon: string,       // 图标符号（文本形式，如 "+" "🔒" "⚙"）
+    separator: bool,    // 是否为分隔线
+    has-submenu: bool,  // 是否有子菜单（显示 ▸）
+    enabled: bool,      // 是否可用（灰显）
+}
+
+export component ContextMenu inherits Rectangle {
+    // 菜单项列表
+    in property <[MenuItem]> items;
+    // 主题模式
+    in property <string> theme-mode: "light";
+    // 显示位置
+    in property <length> menu-x: 0px;
+    in property <length> menu-y: 0px;
+
+    // 选中菜单项回调，返回 item id
+    callback item-selected(string);
+    // 点击菜单外部关闭
+    callback closed();
+
+    // 点击空白区域关闭菜单
+    TouchArea {
+        clicked => { root.closed(); }
+    }
+
+    // 菜单卡片
+    Rectangle {
+        x: root.menu-x;
+        y: root.menu-y;
+        width: 180px;
+        height: menu-col.preferred-height;
+        background: ThemeSettings.card-bg(root.theme-mode);
+        border-radius: ThemeSettings.border-radius;
+        border-width: 1px;
+        border-color: ThemeSettings.border-c(root.theme-mode);
+        drop-shadow-blur: 12px;
+        drop-shadow-color: #00000030;
+        drop-shadow-offset-y: 4px;
+
+        VerticalLayout {
+            id: menu-col;
+            padding: 4px;
+            spacing: 0px;
+
+            for item[i] in root.items : Rectangle {
+                height: item.separator ? 9px : 32px;
+                horizontal-stretch: 1;
+
+                // 分隔线
+                Rectangle {
+                    visible: item.separator;
+                    height: 1px;
+                    y: (parent.height - self.height) / 2;
+                    margin-left: 8px;
+                    margin-right: 8px;
+                    background: ThemeSettings.border-c(root.theme-mode);
+                }
+
+                // 菜单项
+                Rectangle {
+                    visible: !item.separator;
+                    height: parent.height;
+                    border-radius: 4px;
+                    background: item-touch.has-hover && item.enabled
+                        ? ThemeSettings.hover-c(root.theme-mode)
+                        : transparent;
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 8px;
+                        alignment: start;
+
+                        // 图标
+                        Text {
+                            text: item.icon;
+                            color: item.enabled
+                                ? ThemeSettings.text-c(root.theme-mode)
+                                : ThemeSettings.text-sec(root.theme-mode);
+                            font-size: 14px;
+                            vertical-alignment: center;
+                            width: 16px;
+                        }
+
+                        // 标签
+                        Text {
+                            text: item.label;
+                            color: item.enabled
+                                ? ThemeSettings.text-c(root.theme-mode)
+                                : ThemeSettings.text-sec(root.theme-mode);
+                            font-size: ThemeSettings.font-size-normal;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+
+                        // 子菜单箭头
+                        Text {
+                            text: "▸";
+                            visible: item.has-submenu;
+                            color: ThemeSettings.text-sec(root.theme-mode);
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            width: 12px;
+                        }
+                    }
+
+                    item-touch := TouchArea {
+                        enabled: !item.separator && item.enabled;
+                        clicked => {
+                            if (!item.separator && item.enabled) {
+                                root.item-selected(item.id);
+                            }
+                        }
+                    }
+                }
+
+                animate background { duration: 80ms; }
+            }
+        }
+    }
+}

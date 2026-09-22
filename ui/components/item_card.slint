@@ -18,6 +18,7 @@ export component ItemCard inherits Rectangle {
     in property <bool> invalid;
     in property <bool> selected;
     in property <string> theme-mode: "light";  // 接收主题模式
+    in property <bool> batch-mode: false;  // 是否批量模式（批量模式下选中态用蓝色边框）
 
     callback clicked;
     callback double-clicked;
@@ -27,6 +28,9 @@ export component ItemCard inherits Rectangle {
     height: ThemeSettings.item-card-height;
     border-radius: ThemeSettings.border-radius;
     background: selected ? ThemeSettings.selected-c(root.theme-mode) : (touch-area.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
+    // 批量模式下选中态用蓝色边框
+    border-width: (root.batch-mode && root.selected) ? 2px : 0px;
+    border-color: ThemeSettings.accent-color;
 
     VerticalLayout {
         alignment: center;

@@ -197,6 +197,29 @@ pub fn open_path(path: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+/// 在资源管理器中打开文件所在位置（选中该文件）
+pub fn open_file_location(path: &str) {
+    // 使用 explorer.exe /select,"path" 语法
+    // 为避免路径中含特殊字符，直接用 ShellExecuteW
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::PCWSTR;
+
+    let select_arg = format!("/select,\"{}\"", path);
+    let arg_h = HSTRING::from(select_arg);
+    let exe_h = HSTRING::from("explorer.exe");
+    let _ = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR::null(),
+            PCWSTR(exe_h.as_ptr()),
+            PCWSTR(arg_h.as_ptr()),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+}
+
 /// 判断当前前台窗口是否全屏 (简化版，后续完整实现)
 pub fn is_fullscreen() -> bool {
     // TODO: 完整实现需要枚举所有窗口并判断是否覆盖屏幕

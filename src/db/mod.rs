@@ -223,6 +223,241 @@ impl Database {
         Ok(())
     }
 
+    /// 插入子分类，返回新 id
+    pub fn insert_child_classification(&self, parent_id: i64, name: &str) -> Result<i64, rusqlite::Error> {
+        let order = self.max_child_classification_order(parent_id) + 1;
+        let data = ClassificationData {
+            item_layout: "default".into(),
+            item_sort: "default".into(),
+            item_show_only: "default".into(),
+            ..Default::default()
+        };
+        let data_str = serde_json::to_string(&data).unwrap_or_default();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO classification (parent_id, name, type, data, shortcut_key, global_shortcut_key, `order`) VALUES (?, ?, 0, ?, NULL, 0, ?)",
+            params![parent_id, name, data_str, order],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// 获取某父分类下子分类的最大 order
+    pub fn max_child_classification_order(&self, parent_id: i64) -> i64 {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COALESCE(MAX(`order`), 0) FROM classification WHERE parent_id = ?",
+            params![parent_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0)
+    }
+
+    /// 列出所有分类（父+子），用于批量移动目标选择
+    pub fn list_all_classifications(&self) -> Vec<Classification> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = match conn.prepare(
+            "SELECT id, parent_id, name, type, data, shortcut_key, global_shortcut_key, `order` FROM classification ORDER BY `order` ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map([], row_to_classification)
+            .ok()
+            .map(|r| r.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// 批量移动项目到目标分类（修改 classification_id）
+    pub fn batch_move_items(&self, item_ids: &[i64], target_class_id: i64) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        // 重新分配 order，避免冲突
+        let mut max_order: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(`order`), 0) FROM item WHERE classification_id = ?",
+            params![target_class_id],
+            |row| row.get(0),
+        )?;
+        for id in item_ids {
+            max_order += 1;
+            tx.execute(
+                "UPDATE item SET classification_id = ?, `order` = ? WHERE id = ?",
+                params![target_class_id, max_order, id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// 批量复制项目到目标分类（深拷贝，重新分配 id 和 order）
+    pub fn batch_copy_items(&self, item_ids: &[i64], target_class_id: i64) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        let mut max_order: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(`order`), 0) FROM item WHERE classification_id = ?",
+            params![target_class_id],
+            |row| row.get(0),
+        )?;
+        for id in item_ids {
+            max_order += 1;
+            // 拷贝整行，只改 classification_id 和 order
+            tx.execute(
+                "INSERT INTO item (classification_id, name, type, data, shortcut_key, global_shortcut_key, `order`)
+                 SELECT ?, name, type, data, shortcut_key, global_shortcut_key, ? FROM item WHERE id = ?",
+                params![target_class_id, max_order, id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// 批量删除项目
+    pub fn batch_delete_items(&self, item_ids: &[i64]) -> Result<(), rusqlite::Error> {
+        if item_ids.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock().unwrap();
+        let placeholders = vec!["?"; item_ids.len()].join(",");
+        let sql = format!("DELETE FROM item WHERE id IN ({})", placeholders);
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> = item_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::ToSql)
+            .collect();
+        stmt.execute(params.as_slice())?;
+        Ok(())
+    }
+
+    /// 批量转换项目路径为相对路径（相对数据库文件所在目录）
+    pub fn batch_to_relative_paths(&self, item_ids: &[i64], base_dir: &str) -> Result<usize, rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let mut updated = 0;
+        for id in item_ids {
+            let row: (String, String) = conn.query_row(
+                "SELECT data, name FROM item WHERE id = ?",
+                params![id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )?;
+            let mut data_str = row.0;
+            if let Ok(mut data) = serde_json::from_str::<crate::models::ItemData>(&data_str) {
+                if let Some(ref target) = data.target.clone() {
+                    if let Some(rel) = make_relative_path(target, base_dir) {
+                        data.target = Some(rel);
+                        data_str = serde_json::to_string(&data).unwrap_or(data_str);
+                        conn.execute(
+                            "UPDATE item SET data = ? WHERE id = ?",
+                            params![data_str, id],
+                        )?;
+                        updated += 1;
+                    }
+                }
+            }
+        }
+        Ok(updated)
+    }
+
+    /// 批量转换项目路径为绝对路径
+    pub fn batch_to_absolute_paths(&self, item_ids: &[i64], base_dir: &str) -> Result<usize, rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let mut updated = 0;
+        for id in item_ids {
+            let row: (String, String) = conn.query_row(
+                "SELECT data, name FROM item WHERE id = ?",
+                params![id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            )?;
+            let mut data_str = row.0;
+            if let Ok(mut data) = serde_json::from_str::<crate::models::ItemData>(&data_str) {
+                if let Some(ref target) = data.target.clone() {
+                    if let Some(abs) = make_absolute_path(target, base_dir) {
+                        data.target = Some(abs);
+                        data_str = serde_json::to_string(&data).unwrap_or(data_str);
+                        conn.execute(
+                            "UPDATE item SET data = ? WHERE id = ?",
+                            params![data_str, id],
+                        )?;
+                        updated += 1;
+                    }
+                }
+            }
+        }
+        Ok(updated)
+    }
+
+    /// 更新项目图标（批量刷新图标用）
+    pub fn update_item_icon(&self, item_id: i64, icon_data_url: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let data_str: String = conn.query_row(
+            "SELECT data FROM item WHERE id = ?",
+            params![item_id],
+            |r| r.get(0),
+        )?;
+        if let Ok(mut data) = serde_json::from_str::<crate::models::ItemData>(&data_str) {
+            data.icon = Some(icon_data_url.to_string());
+            let new_data_str = serde_json::to_string(&data).unwrap_or(data_str);
+            conn.execute(
+                "UPDATE item SET data = ? WHERE id = ?",
+                params![new_data_str, item_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// 获取项目（含 target）用于批量刷新图标
+    pub fn get_item_target(&self, item_id: i64) -> Option<String> {
+        let conn = self.conn.lock().unwrap();
+        let data_str: String = conn.query_row(
+            "SELECT data FROM item WHERE id = ?",
+            params![item_id],
+            |r| r.get(0),
+        )
+        .ok()?;
+        let data: crate::models::ItemData = serde_json::from_str(&data_str).ok()?;
+        data.target
+    }
+
+    /// 更新分类的锁定状态（fixed 字段）
+    pub fn set_classification_locked(&self, class_id: i64, locked: bool) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let data_str: String = conn.query_row(
+            "SELECT data FROM classification WHERE id = ?",
+            params![class_id],
+            |r| r.get(0),
+        )?;
+        if let Ok(mut data) = serde_json::from_str::<ClassificationData>(&data_str) {
+            data.fixed = locked;
+            let new_data_str = serde_json::to_string(&data).unwrap_or(data_str);
+            conn.execute(
+                "UPDATE classification SET data = ? WHERE id = ?",
+                params![new_data_str, class_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// 获取分类锁定状态
+    pub fn is_classification_locked(&self, class_id: i64) -> bool {
+        let conn = self.conn.lock().unwrap();
+        let data_str: String = conn
+            .query_row(
+                "SELECT data FROM classification WHERE id = ?",
+                params![class_id],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
+        let data: ClassificationData = serde_json::from_str(&data_str).unwrap_or_default();
+        data.fixed
+    }
+
+    /// 重命名项目
+    pub fn rename_item(&self, item_id: i64, new_name: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE item SET name = ? WHERE id = ?",
+            params![new_name, item_id],
+        )?;
+        Ok(())
+    }
+
     // ==================== 设置 (setting) ====================
 
     /// 读取设置项，不存在返回默认值
@@ -309,4 +544,54 @@ fn chrono_now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// 将绝对路径转为相对路径（相对 base_dir）
+/// 网址不转换
+fn make_relative_path(target: &str, base_dir: &str) -> Option<String> {
+    // 网址不转换
+    if target.starts_with("http://") || target.starts_with("https://") {
+        return None;
+    }
+    // 已经是相对路径
+    if target.starts_with('.') || target.starts_with("..") {
+        return None;
+    }
+    let target_path = std::path::Path::new(target);
+    let base_path = std::path::Path::new(base_dir);
+    let diff = pathdiff::diff_paths(target_path, base_path)?;
+    let diff_str = diff.to_string_lossy().to_string();
+    // Windows 下统一用正斜杠
+    let rel = diff_str.replace('\\', "/");
+    if rel.is_empty() {
+        None
+    } else if rel.starts_with('.') {
+        Some(rel)
+    } else {
+        Some(format!("./{}", rel))
+    }
+}
+
+/// 将相对路径转为绝对路径（基于 base_dir）
+fn make_absolute_path(target: &str, base_dir: &str) -> Option<String> {
+    // 网址不转换
+    if target.starts_with("http://") || target.starts_with("https://") {
+        return None;
+    }
+    // 已经是绝对路径（Windows 盘符或 UNC）
+    if target.len() >= 2 && target.as_bytes()[1] == b':' {
+        return None;
+    }
+    if target.starts_with("\\\\") {
+        return None;
+    }
+    // 必须是相对路径才转换
+    if !target.starts_with('.') && !target.starts_with("..") {
+        return None;
+    }
+    let base_path = std::path::Path::new(base_dir);
+    let target_path = std::path::Path::new(target);
+    let joined = base_path.join(target_path);
+    let canonical = joined.canonicalize().unwrap_or(joined);
+    Some(canonical.to_string_lossy().to_string())
 }

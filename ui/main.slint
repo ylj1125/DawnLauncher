@@ -4,6 +4,7 @@ import { ThemeSettings } from "theme.slint";
 import { ItemCard, ItemInfo } from "components/item_card.slint";
 import { ClassificationTab } from "components/classification_tab.slint";
 import { SettingsPanel } from "components/settings_panel.slint";
+import { ContextMenu, MenuItem } from "components/context_menu.slint";
 
 // 分类数据模型
 export struct ClassificationInfo {
@@ -28,7 +29,6 @@ export component MainWindow inherits Window {
     // 拖拽提示显隐
     in property <bool> drag-hover: false;
     // 视图模式: "main" 主界面 / "settings" 设置面板
-    // in-out 允许内部(返回按钮)和外部(Rust)都能修改
     in-out property <string> view-mode: "main";
     // 设置项当前值 (传递给 SettingsPanel)
     in property <string> theme-mode: "light";
@@ -36,26 +36,60 @@ export component MainWindow inherits Window {
     in property <bool> window-topmost: false;
     in property <int> item-columns: 8;
 
+    // ===== 右键菜单状态 =====
+    // 菜单是否可见
+    in-out property <bool> context-menu-visible: false;
+    // 菜单位置
+    in-out property <length> context-menu-x: 0px;
+    in-out property <length> context-menu-y: 0px;
+    // 菜单项列表
+    in-out property <[MenuItem]> context-menu-items: [];
+    // 菜单来源标识（用于区分右键来源）
+    // "classification-area": 分类区空白右键
+    // "classification-item": 分类项右键
+    // "item-area": 项目区空白右键
+    // "item": 项目右键
+    in-out property <string> context-menu-source: "";
+
+    // ===== 批量操作模式 =====
+    // 是否处于批量选择模式
+    in-out property <bool> batch-mode: false;
+
     // 回调
     callback classification-clicked(int);
     callback item-clicked(int);
     callback item-double-clicked(int);
     callback item-right-clicked(int);
     callback classification-right-clicked(int);
+    // 空白区域右键（项目区空白、分类区空白）
+    callback item-area-right-clicked(int, int);  // x, y
+    callback classification-area-right-clicked(int, int);  // x, y
     callback window-close();
     // 新增回调
-    callback add-item-clicked();          // 工具栏"添加项目"按钮
-    callback add-classification-clicked(); // 左侧栏底部"+"
-    callback delete-item-requested(int);  // 删除项目
-    callback delete-classification-requested(int); // 删除分类
-    callback rename-classification-requested(int); // 重命名分类
-    callback item-dropped(string);        // 拖拽文件到窗口
-    callback settings-clicked();          // 设置按钮
+    callback add-item-clicked();
+    callback add-classification-clicked();
+    callback delete-item-requested(int);
+    callback delete-classification-requested(int);
+    callback rename-classification-requested(int);
+    callback item-dropped(string);
+    callback settings-clicked();
     // 设置变更回调
     callback theme-mode-changed(string);
     callback auto-start-changed(bool);
     callback window-topmost-changed(bool);
     callback item-columns-changed(int);
+
+    // ===== 右键菜单回调 =====
+    // 右键菜单项被选中，参数: source, item-id
+    callback context-menu-item-selected(string, string);
+    // 右键菜单关闭
+    callback context-menu-closed();
+
+    // ===== 批量操作回调 =====
+    // 批量操作子菜单项选中（"select-all" / "move" / "copy" / "rel-path" / "abs-path" / "refresh-icon" / "delete" / "cancel"）
+    callback batch-action-selected(string);
+    // 进入/退出批量模式
+    callback batch-mode-toggled(bool);
 
     // 用 VerticalLayout 包裹所有内容，确保布局跟随窗口大小
     VerticalLayout {
@@ -131,6 +165,15 @@ export component MainWindow inherits Window {
                 width: ThemeSettings.sidebar-width;
                 background: ThemeSettings.sidebar-bg(root.theme-mode);
 
+                // 分类区空白右键
+                TouchArea {
+                    pointer-event(e) => {
+                        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                            root.classification-area-right-clicked(self.mouse-x, self.mouse-y);
+                        }
+                    }
+                }
+
                 VerticalLayout {
                     padding: ThemeSettings.spacing-small;
                     spacing: ThemeSettings.spacing-small;
@@ -197,15 +240,15 @@ export component MainWindow inherits Window {
                     alignment: space-between;
 
                     Text {
-                        text: root.status-text;
-                        color: ThemeSettings.text-sec(root.theme-mode);
+                        text: root.batch-mode ? "批量操作模式 - 选择项目后使用右键菜单" : root.status-text;
+                        color: root.batch-mode ? ThemeSettings.accent-color : ThemeSettings.text-sec(root.theme-mode);
                         font-size: ThemeSettings.font-size-small;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                     }
 
-                    // 添加项目按钮
-                    Rectangle {
+                    // 添加项目按钮（非批量模式显示）
+                    if !root.batch-mode : Rectangle {
                         width: 96px;
                         height: 28px;
                         border-radius: ThemeSettings.border-radius;
@@ -223,6 +266,29 @@ export component MainWindow inherits Window {
                             clicked => { root.add-item-clicked(); }
                         }
                     }
+
+                    // 批量模式退出按钮
+                    if root.batch-mode : Rectangle {
+                        width: 96px;
+                        height: 28px;
+                        border-radius: ThemeSettings.border-radius;
+                        background: cancel-batch-touch.has-hover ? #e81123 : ThemeSettings.border-c(root.theme-mode);
+
+                        Text {
+                            text: "退出批量";
+                            color: #ffffff;
+                            font-size: ThemeSettings.font-size-small;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        cancel-batch-touch := TouchArea {
+                            clicked => {
+                                root.batch-mode = false;
+                                root.batch-mode-toggled(false);
+                            }
+                        }
+                    }
                 }
 
                 // 项目网格区 (支持拖拽)
@@ -234,8 +300,12 @@ export component MainWindow inherits Window {
                     border-width: root.drag-hover ? 2px : 0px;
                     border-color: ThemeSettings.accent-color;
 
-                    drop-area := TouchArea {
+                    // 项目区空白右键
+                    item-area-touch := TouchArea {
                         pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                                root.item-area-right-clicked(self.mouse-x, self.mouse-y);
+                            }
                         }
                     }
 
@@ -243,7 +313,7 @@ export component MainWindow inherits Window {
                     if root.items.length == 0 : Text {
                         text: root.drag-hover ?
                             "松开以添加项目" :
-                            "暂无项目\n\n点击右上角「+ 添加项目」\n或将文件/快捷方式拖入此区域";
+                            "暂无项目\n\n右键新建项目\n或将文件/快捷方式拖入此区域";
                         color: ThemeSettings.text-sec(root.theme-mode);
                         font-size: ThemeSettings.font-size-normal;
                         horizontal-alignment: center;
@@ -264,8 +334,20 @@ export component MainWindow inherits Window {
                                 invalid: item.invalid;
                                 selected: item.selected;
                                 theme-mode: root.theme-mode;
-                                clicked => { root.item-clicked(item.id); }
-                                double-clicked => { root.item-double-clicked(item.id); }
+                                batch-mode: root.batch-mode;
+                                clicked => {
+                                    if (root.batch-mode) {
+                                        // 批量模式下点击切换选中
+                                        root.item-clicked(item.id);
+                                    } else {
+                                        root.item-clicked(item.id);
+                                    }
+                                }
+                                double-clicked => {
+                                    if (!root.batch-mode) {
+                                        root.item-double-clicked(item.id);
+                                    }
+                                }
                                 right-clicked => { root.item-right-clicked(item.id); }
                             }
                         }
@@ -289,6 +371,28 @@ export component MainWindow inherits Window {
             auto-start-changed(v) => { root.auto-start-changed(v); }
             window-topmost-changed(v) => { root.window-topmost-changed(v); }
             item-columns-changed(v) => { root.item-columns-changed(v); }
+        }
+    }
+
+    // ===== 右键菜单浮层（覆盖在所有内容之上）=====
+    if root.context-menu-visible : ContextMenu {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+
+        items: root.context-menu-items;
+        theme-mode: root.theme-mode;
+        menu-x: root.context-menu-x;
+        menu-y: root.context-menu-y;
+
+        item-selected(id) => {
+            root.context-menu-visible = false;
+            root.context-menu-item-selected(root.context-menu-source, id);
+        }
+        closed => {
+            root.context-menu-visible = false;
+            root.context-menu-closed();
         }
     }
 }
