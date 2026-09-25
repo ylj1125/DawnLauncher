@@ -1150,8 +1150,8 @@ fn center_window_on_screen<C: ComponentHandle>(window: &C) {
         let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) } as f32;
         let screen_h = unsafe { GetSystemMetrics(SM_CYSCREEN) } as f32;
         let size = window.window().size();
-        let win_w = size.width;
-        let win_h = size.height;
+        let win_w = size.width as f32;
+        let win_h = size.height as f32;
         let x = (screen_w - win_w) / 2.0;
         let y = (screen_h - win_h) / 3.0; // 偏上 1/3 处，更符合搜索框视觉习惯
         window.window().set_position(slint::LogicalPosition::new(x, y));
@@ -1864,6 +1864,7 @@ fn copy_to_clipboard(text: &str) -> Result<(), String> {
         GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
     };
     use windows::Win32::System::Ole::CF_UNICODETEXT;
+    use windows::Win32::Foundation::HANDLE;
     use windows::core::w;
 
     unsafe {
@@ -1885,11 +1886,11 @@ fn copy_to_clipboard(text: &str) -> Result<(), String> {
             }
         };
         let ptr = GlobalLock(h_mem);
-        if let Some(ptr) = ptr {
+        if !ptr.is_null() {
             std::ptr::copy_nonoverlapping(utf16.as_ptr() as *const u8, ptr as *mut u8, byte_len);
             let _ = GlobalUnlock(h_mem);
         }
-        let _ = SetClipboardData(CF_UNICODETEXT.0 as u32, h_mem.0 as *mut _);
+        let _ = SetClipboardData(CF_UNICODETEXT.0 as u32, HANDLE(h_mem.0 as isize));
         let _ = CloseClipboard();
     }
     let _ = w!(""); // 避免 unused import warning

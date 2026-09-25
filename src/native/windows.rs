@@ -143,13 +143,6 @@ fn u16_to_string(buf: &[u16]) -> String {
     String::from_utf16_lossy(&buf[..len])
 }
 
-/// 在资源管理器中打开文件所在位置并选中
-pub fn open_file_location(path: &str) {
-    let _ = Command::new("explorer")
-        .args(["/select,", path])
-        .spawn();
-}
-
 /// 在 PATH 环境变量中搜索可执行文件
 pub fn search_path(file: &str) -> Option<String> {
     let path_env = std::env::var("PATH").ok()?;
