@@ -34,21 +34,12 @@ export component ContextMenu inherits Rectangle {
     }
 
     // 菜单卡片
-    Rectangle {
+    menu-card := Rectangle {
         x: root.menu-x;
         y: root.menu-y;
         width: 180px;
-        height: menu-col.preferred-height;
-        background: ThemeSettings.card-bg(root.theme-mode);
-        border-radius: ThemeSettings.border-radius;
-        border-width: 1px;
-        border-color: ThemeSettings.border-c(root.theme-mode);
-        drop-shadow-blur: 12px;
-        drop-shadow-color: #00000030;
-        drop-shadow-offset-y: 4px;
-
+        // 用内容自适应高度
         VerticalLayout {
-            id: menu-col;
             padding: 4px;
             spacing: 0px;
 
@@ -56,19 +47,17 @@ export component ContextMenu inherits Rectangle {
                 height: item.separator ? 9px : 32px;
                 horizontal-stretch: 1;
 
-                // 分隔线
-                Rectangle {
-                    visible: item.separator;
+                // 分隔线 - 用 padding 模拟 margin
+                if item.separator : Rectangle {
                     height: 1px;
                     y: (parent.height - self.height) / 2;
-                    margin-left: 8px;
-                    margin-right: 8px;
+                    padding-left: 8px;
+                    padding-right: 8px;
                     background: ThemeSettings.border-c(root.theme-mode);
                 }
 
                 // 菜单项
-                Rectangle {
-                    visible: !item.separator;
+                if !item.separator : Rectangle {
                     height: parent.height;
                     border-radius: 4px;
                     background: item-touch.has-hover && item.enabled
@@ -115,9 +104,9 @@ export component ContextMenu inherits Rectangle {
                     }
 
                     item-touch := TouchArea {
-                        enabled: !item.separator && item.enabled;
+                        enabled: item.enabled;
                         clicked => {
-                            if (!item.separator && item.enabled) {
+                            if (item.enabled) {
                                 root.item-selected(item.id);
                             }
                         }

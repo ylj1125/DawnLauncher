@@ -117,13 +117,68 @@ impl Database {
     /// 查询某分类下的项目，按 order 升序
     pub fn list_items(&self, classification_id: i64) -> Vec<Item> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = match conn.prepare(
-            "SELECT id, classification_id, name, type, data, shortcut_key, global_shortcut_key, `order` FROM item WHERE classification_id = ? ORDER BY `order` ASC",
-        ) {
+        // 读取分类的 item_sort 设置（默认按 order 排序）
+        let sort_mode: String = conn
+            .query_row(
+                "SELECT COALESCE(json_extract(data, '$.itemSort'), 'default') FROM classification WHERE id = ?",
+                params![classification_id],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|_| "default".to_string());
+
+        let order_by = match sort_mode.as_str() {
+            "initial" => "name ASC",
+            "openNumber" => "COALESCE(json_extract(data, '$.openNumber'), 0) DESC",
+            "lastOpen" => "COALESCE(json_extract(data, '$.lastOpen'), 0) DESC",
+            _ => "`order` ASC",
+        };
+
+        let sql = format!(
+            "SELECT id, classification_id, name, type, data, shortcut_key, global_shortcut_key, `order` FROM item WHERE classification_id = ? ORDER BY {}",
+            order_by
+        );
+        let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
             Err(_) => return vec![],
         };
         stmt.query_map(params![classification_id], row_to_item)
+            .ok()
+            .map(|r| r.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// 快速搜索：按名称模糊匹配所有分类下的项目
+    /// 使用 SQL LIKE 大小写不敏感匹配，按打开次数降序、名称升序排列
+    pub fn search_items(&self, query: &str) -> Vec<Item> {
+        if query.trim().is_empty() {
+            return vec![];
+        }
+        let conn = self.conn.lock().unwrap();
+        let like = format!("%{}%", query.trim());
+        let mut stmt = match conn.prepare(
+            "SELECT id, classification_id, name, type, data, shortcut_key, global_shortcut_key, `order` \
+             FROM item WHERE name LIKE ? COLLATE NOCASE \
+             ORDER BY COALESCE(json_extract(data, '$.openNumber'), 0) DESC, name ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(params![like], row_to_item)
+            .ok()
+            .map(|r| r.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// 获取所有项目（不限分类），用于快速搜索的全量匹配
+    pub fn list_all_items(&self) -> Vec<Item> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = match conn.prepare(
+            "SELECT id, classification_id, name, type, data, shortcut_key, global_shortcut_key, `order` FROM item ORDER BY name ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map([], row_to_item)
             .ok()
             .map(|r| r.filter_map(|x| x.ok()).collect())
             .unwrap_or_default()
@@ -446,6 +501,26 @@ impl Database {
             .unwrap_or_default();
         let data: ClassificationData = serde_json::from_str(&data_str).unwrap_or_default();
         data.fixed
+    }
+
+    /// 设置分类的项目排序方式
+    /// sort_mode: "default" | "initial" | "openNumber" | "lastOpen"
+    pub fn set_classification_item_sort(&self, class_id: i64, sort_mode: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let data_str: String = conn.query_row(
+            "SELECT data FROM classification WHERE id = ?",
+            params![class_id],
+            |r| r.get(0),
+        )?;
+        if let Ok(mut data) = serde_json::from_str::<ClassificationData>(&data_str) {
+            data.item_sort = sort_mode.to_string();
+            let new_data_str = serde_json::to_string(&data).unwrap_or(data_str);
+            conn.execute(
+                "UPDATE classification SET data = ? WHERE id = ?",
+                params![new_data_str, class_id],
+            )?;
+        }
+        Ok(())
     }
 
     /// 重命名项目

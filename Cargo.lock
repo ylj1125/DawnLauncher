@@ -759,6 +759,7 @@ dependencies = [
  "env_logger",
  "log",
  "once_cell",
+ "pathdiff",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3087,6 +3088,12 @@ checksum = "1567535334d6ba2d3cde19221ba9a7bd0fabb3cbd99046ddfb10ae061cfcc889"
 dependencies = [
  "icu_properties",
 ]
+
+[[package]]
+name = "pathdiff"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 
 [[package]]
 name = "percent-encoding"

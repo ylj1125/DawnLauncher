@@ -6,9 +6,13 @@ export component ClassificationTab inherits Rectangle {
     in property <string> name;
     in property <bool> selected;
     in property <string> theme-mode: "light";
+    in property <int> depth: 0;
+    in property <bool> has-children: false;
+    in property <bool> expanded: true;
 
     callback clicked;
     callback right-clicked;
+    callback expand-toggled;
 
     height: 36px;
     horizontal-stretch: 1;
@@ -18,8 +22,29 @@ export component ClassificationTab inherits Rectangle {
     HorizontalLayout {
         alignment: start;
         spacing: ThemeSettings.spacing-normal;
-        padding-left: ThemeSettings.spacing-normal;
+        // 子分类缩进
+        padding-left: ThemeSettings.spacing-normal + root.depth * 16px;
         padding-right: ThemeSettings.spacing-normal;
+
+        // 子分类折叠箭头 (有子分类时显示，可点击切换展开/折叠)
+        Rectangle {
+            width: 12px;
+            height: 100%;
+
+            Text {
+                text: root.has-children ? (root.expanded ? "▾" : "▸") : "";
+                color: ThemeSettings.text-sec(root.theme-mode);
+                font-size: 10px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            // 仅在有子分类时响应点击
+            arrow-touch := TouchArea {
+                enabled: root.has-children;
+                clicked => { root.expand-toggled(); }
+            }
+        }
 
         Text {
             text: root.name;
@@ -28,6 +53,7 @@ export component ClassificationTab inherits Rectangle {
             vertical-alignment: center;
             horizontal-alignment: left;
             overflow: elide;
+            horizontal-stretch: 1;
         }
     }
 

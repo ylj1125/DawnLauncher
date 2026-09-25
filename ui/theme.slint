@@ -1,6 +1,7 @@
 // 主题全局变量
-// 颜色函数定义在 global 内部，根据传入的 mode 返回对应颜色
-// 运行时主题切换通过 MainWindow.theme-mode 驱动各组件颜色实现
+// 支持 11 个预设主题 + 自定义主题
+// 主题名: light / dark-gray / classic-dark / blue / dark-green / indigo /
+//         purple / wine-red / rose / black-gold / black-white / custom
 
 export global ThemeSettings {
     // 尺寸 (固定值)
@@ -19,60 +20,178 @@ export global ThemeSettings {
     // 字体
     out property <string> font-family: "Microsoft YaHei UI";
 
-    // 强调色 (light/dark 通用)
+    // 强调色
     out property <color> accent-color: #3b82f6;
 
-    // ===== 主题颜色函数 =====
-    // 根据传入的 mode ("light"/"dark") 返回对应颜色
-    // pure function 可在属性绑定中调用
+    // ===== 自定义主题颜色 (仅当 theme == "custom" 时生效) =====
+    in property <color> custom-bg: #f5f6f7;
+    in property <color> custom-sidebar: #ffffff;
+    in property <color> custom-text: #2c2c2c;
+    in property <color> custom-text-sec: #888888;
+    in property <color> custom-border: #e5e7eb;
+    in property <color> custom-card: #ffffff;
+
+    // ===== 预设主题颜色表 =====
+    // 每个主题定义: bg, sidebar, text, text-sec, border, card, hover, selected
 
     // 主背景
     pure public function bg-color(mode: string) -> color {
-        return mode == "dark" ? #1e1e1e : #f5f6f7;
+        if mode == "light" { return #f5f6f7; }
+        if mode == "dark-gray" { return #2d2d2d; }
+        if mode == "classic-dark" { return #1e1e1e; }
+        if mode == "blue" { return #0f172a; }
+        if mode == "dark-green" { return #1a2e2a; }
+        if mode == "indigo" { return #1e1b4b; }
+        if mode == "purple" { return #2e1065; }
+        if mode == "wine-red" { return #2d1b1b; }
+        if mode == "rose" { return #4c0519; }
+        if mode == "black-gold" { return #0a0a0a; }
+        if mode == "black-white" { return #000000; }
+        if mode == "custom" { return ThemeSettings.custom-bg; }
+        return #f5f6f7;
     }
 
     // 侧栏/标题栏背景
     pure public function sidebar-bg(mode: string) -> color {
-        return mode == "dark" ? #252526 : #ffffff;
+        if mode == "light" { return #ffffff; }
+        if mode == "dark-gray" { return #252526; }
+        if mode == "classic-dark" { return #252526; }
+        if mode == "blue" { return #1e293b; }
+        if mode == "dark-green" { return #1f3530; }
+        if mode == "indigo" { return #312e81; }
+        if mode == "purple" { return #4c1d95; }
+        if mode == "wine-red" { return #3d1f1f; }
+        if mode == "rose" { return #881337; }
+        if mode == "black-gold" { return #1a1a1a; }
+        if mode == "black-white" { return #0a0a0a; }
+        if mode == "custom" { return ThemeSettings.custom-sidebar; }
+        return #ffffff;
     }
 
     // 主文本色
     pure public function text-c(mode: string) -> color {
-        return mode == "dark" ? #d4d4d4 : #2c2c2c;
+        if mode == "light" { return #2c2c2c; }
+        if mode == "dark-gray" { return #d4d4d4; }
+        if mode == "classic-dark" { return #d4d4d4; }
+        if mode == "blue" { return #e2e8f0; }
+        if mode == "dark-green" { return #c8e6d0; }
+        if mode == "indigo" { return #e0e7ff; }
+        if mode == "purple" { return #f3e8ff; }
+        if mode == "wine-red" { return #f5d5d5; }
+        if mode == "rose" { return #ffe4e6; }
+        if mode == "black-gold" { return #d4af37; }
+        if mode == "black-white" { return #ffffff; }
+        if mode == "custom" { return ThemeSettings.custom-text; }
+        return #2c2c2c;
     }
 
     // 次要文本色
     pure public function text-sec(mode: string) -> color {
-        return mode == "dark" ? #888888 : #888888;
+        if mode == "light" { return #888888; }
+        if mode == "dark-gray" { return #888888; }
+        if mode == "classic-dark" { return #888888; }
+        if mode == "blue" { return #94a3b8; }
+        if mode == "dark-green" { return #7faa88; }
+        if mode == "indigo" { return #a5b4fc; }
+        if mode == "purple" { return #c4b5fd; }
+        if mode == "wine-red" { return #c99494; }
+        if mode == "rose" { return #fda4af; }
+        if mode == "black-gold" { return #8b7355; }
+        if mode == "black-white" { return #aaaaaa; }
+        if mode == "custom" { return ThemeSettings.custom-text-sec; }
+        return #888888;
     }
 
-    // 悬停色
+    // 悬停色 (基于背景微调)
     pure public function hover-c(mode: string) -> color {
-        return mode == "dark" ? #2a2a2a : #f0f0f0;
+        if mode == "light" { return #f0f0f0; }
+        if mode == "dark-gray" { return #383838; }
+        if mode == "classic-dark" { return #2a2a2a; }
+        if mode == "blue" { return #334155; }
+        if mode == "dark-green" { return #2d4a42; }
+        if mode == "indigo" { return #4338ca; }
+        if mode == "purple" { return #6d28d9; }
+        if mode == "wine-red" { return #5c2e2e; }
+        if mode == "rose" { return #9f1239; }
+        if mode == "black-gold" { return #2a2a2a; }
+        if mode == "black-white" { return #1a1a1a; }
+        if mode == "custom" { return ThemeSettings.custom-border; }
+        return #f0f0f0;
     }
 
     // 选中色
     pure public function selected-c(mode: string) -> color {
-        return mode == "dark" ? #094771 : #e8f0fe;
+        if mode == "light" { return #e8f0fe; }
+        if mode == "dark-gray" { return #094771; }
+        if mode == "classic-dark" { return #094771; }
+        if mode == "blue" { return #1e40af; }
+        if mode == "dark-green" { return #14532d; }
+        if mode == "indigo" { return #4f46e5; }
+        if mode == "purple" { return #7c3aed; }
+        if mode == "wine-red" { return #7f1d1d; }
+        if mode == "rose" { return #be123c; }
+        if mode == "black-gold" { return #3d2914; }
+        if mode == "black-white" { return #333333; }
+        if mode == "custom" { return ThemeSettings.custom-border; }
+        return #e8f0fe;
     }
 
     // 边框色
     pure public function border-c(mode: string) -> color {
-        return mode == "dark" ? #3c3c3c : #e5e7eb;
+        if mode == "light" { return #e5e7eb; }
+        if mode == "dark-gray" { return #3c3c3c; }
+        if mode == "classic-dark" { return #3c3c3c; }
+        if mode == "blue" { return #334155; }
+        if mode == "dark-green" { return #2d4a42; }
+        if mode == "indigo" { return #4338ca; }
+        if mode == "purple" { return #6d28d9; }
+        if mode == "wine-red" { return #5c2e2e; }
+        if mode == "rose" { return #9f1239; }
+        if mode == "black-gold" { return #3d3d3d; }
+        if mode == "black-white" { return #333333; }
+        if mode == "custom" { return ThemeSettings.custom-border; }
+        return #e5e7eb;
     }
 
     // 卡片背景
     pure public function card-bg(mode: string) -> color {
-        return mode == "dark" ? #2d2d2d : #ffffff;
+        if mode == "light" { return #ffffff; }
+        if mode == "dark-gray" { return #383838; }
+        if mode == "classic-dark" { return #2d2d2d; }
+        if mode == "blue" { return #1e293b; }
+        if mode == "dark-green" { return #243b35; }
+        if mode == "indigo" { return #312e81; }
+        if mode == "purple" { return #4c1d95; }
+        if mode == "wine-red" { return #3d2424; }
+        if mode == "rose" { return #881337; }
+        if mode == "black-gold" { return #1a1a1a; }
+        if mode == "black-white" { return #0a0a0a; }
+        if mode == "custom" { return ThemeSettings.custom-card; }
+        return #ffffff;
     }
 
     // 卡片悬停色
     pure public function card-hover-c(mode: string) -> color {
-        return mode == "dark" ? #383838 : #f5f9ff;
+        if mode == "light" { return #f5f9ff; }
+        if mode == "dark-gray" { return #424242; }
+        if mode == "classic-dark" { return #383838; }
+        if mode == "blue" { return #334155; }
+        if mode == "dark-green" { return #2d4a42; }
+        if mode == "indigo" { return #4338ca; }
+        if mode == "purple" { return #6d28d9; }
+        if mode == "wine-red" { return #5c2e2e; }
+        if mode == "rose" { return #9f1239; }
+        if mode == "black-gold" { return #2a2a2a; }
+        if mode == "black-white" { return #1a1a1a; }
+        if mode == "custom" { return ThemeSettings.custom-border; }
+        return #f5f9ff;
     }
 
     // 无效色
     pure public function invalid-c(mode: string) -> color {
-        return mode == "dark" ? #555555 : #cccccc;
+        if mode == "light" { return #cccccc; }
+        if mode == "dark-gray" { return #555555; }
+        if mode == "classic-dark" { return #555555; }
+        return #555555;
     }
 }

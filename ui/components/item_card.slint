@@ -19,13 +19,15 @@ export component ItemCard inherits Rectangle {
     in property <bool> selected;
     in property <string> theme-mode: "light";  // 接收主题模式
     in property <bool> batch-mode: false;  // 是否批量模式（批量模式下选中态用蓝色边框）
+    in property <length> icon-size: ThemeSettings.item-icon-size;  // 动态图标大小
+    in property <bool> hide-name: false;  // 是否隐藏名称
 
     callback clicked;
     callback double-clicked;
     callback right-clicked;
 
     width: ThemeSettings.item-card-width;
-    height: ThemeSettings.item-card-height;
+    height: root.hide-name ? ThemeSettings.item-card-width : ThemeSettings.item-card-height;
     border-radius: ThemeSettings.border-radius;
     background: selected ? ThemeSettings.selected-c(root.theme-mode) : (touch-area.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
     // 批量模式下选中态用蓝色边框
@@ -39,14 +41,14 @@ export component ItemCard inherits Rectangle {
 
         Image {
             source: root.icon;
-            width: ThemeSettings.item-icon-size;
-            height: ThemeSettings.item-icon-size;
+            width: root.icon-size;
+            height: root.icon-size;
             opacity: root.invalid ? 0.3 : 1.0;
             horizontal-alignment: center;
             image-fit: contain;
         }
 
-        Text {
+        if !root.hide-name : Text {
             text: root.name;
             color: ThemeSettings.text-c(root.theme-mode);
             font-size: ThemeSettings.font-size-small;

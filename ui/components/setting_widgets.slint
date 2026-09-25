@@ -1,0 +1,48 @@
+// 设置项通用组件
+// 提供开关、设置行等可复用组件
+
+import { ThemeSettings } from "../theme.slint";
+
+// 开关组件
+export component SettingSwitch inherits Rectangle {
+    in property <bool> checked: false;
+    in property <string> theme-mode: "light";
+
+    callback toggled(bool);
+
+    width: 44px;
+    height: 24px;
+    border-radius: self.height / 2;
+    background: root.checked ? ThemeSettings.accent-color : ThemeSettings.border-c(root.theme-mode);
+
+    Rectangle {
+        width: 20px;
+        height: 20px;
+        y: (parent.height - self.height) / 2;
+        x: root.checked ? parent.width - self.width - 2px : 2px;
+        background: #ffffff;
+        border-radius: self.height / 2;
+        animate x { duration: 120ms; }
+    }
+
+    TouchArea {
+        clicked => { root.toggled(!root.checked); }
+    }
+}
+
+// 分组标题
+export component SettingGroupTitle inherits Rectangle {
+    in property <string> text: "";
+    in property <string> theme-mode: "light";
+
+    height: 24px;
+    horizontal-stretch: 1;
+
+    Text {
+        text: root.text;
+        color: ThemeSettings.text-sec(root.theme-mode);
+        font-size: ThemeSettings.font-size-small;
+        font-weight: 700;
+        vertical-alignment: center;
+    }
+}

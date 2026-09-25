@@ -1,5 +1,5 @@
 // 主界面
-import { ScrollView, ListView, StandardListView } from "std-widgets.slint";
+import { ScrollView, ListView, StandardListView, LineEdit } from "std-widgets.slint";
 import { ThemeSettings } from "theme.slint";
 import { ItemCard, ItemInfo } from "components/item_card.slint";
 import { ClassificationTab } from "components/classification_tab.slint";
@@ -11,6 +11,10 @@ export struct ClassificationInfo {
     id: int,
     name: string,
     selected: bool,
+    parent-id: int,    // 父分类 id (0 表示顶级)
+    depth: int,        // 层级深度 (0=顶级, 1=子分类)
+    has-children: bool, // 是否有子分类
+    expanded: bool,     // 是否展开子分类
 }
 
 export component MainWindow inherits Window {
@@ -35,6 +39,12 @@ export component MainWindow inherits Window {
     in property <bool> auto-start: false;
     in property <bool> window-topmost: false;
     in property <int> item-columns: 8;
+    in property <int> item-icon-size: 48;
+    in property <int> sidebar-width: 140;
+    in property <bool> hide-name: false;
+    in property <bool> hide-after-open: false;
+    in property <bool> quick-search-enabled: false;
+    in property <int> quick-search-width: 600;
 
     // ===== 右键菜单状态 =====
     // 菜单是否可见
@@ -57,13 +67,14 @@ export component MainWindow inherits Window {
 
     // 回调
     callback classification-clicked(int);
+    callback classification-right-clicked(int);
+    callback classification-expand-toggled(int);
     callback item-clicked(int);
     callback item-double-clicked(int);
     callback item-right-clicked(int);
-    callback classification-right-clicked(int);
     // 空白区域右键（项目区空白、分类区空白）
-    callback item-area-right-clicked(int, int);  // x, y
-    callback classification-area-right-clicked(int, int);  // x, y
+    callback item-area-right-clicked(length, length);  // x, y
+    callback classification-area-right-clicked(length, length);  // x, y
     callback window-close();
     // 新增回调
     callback add-item-clicked();
@@ -78,6 +89,18 @@ export component MainWindow inherits Window {
     callback auto-start-changed(bool);
     callback window-topmost-changed(bool);
     callback item-columns-changed(int);
+    callback item-icon-size-changed(int);
+    callback sidebar-width-changed(int);
+    callback hide-name-changed(bool);
+    callback hide-after-open-changed(bool);
+    callback quick-search-enabled-changed(bool);
+    callback quick-search-width-changed(int);
+    // 触发快速搜索窗口
+    callback quick-search-triggered();
+    // 工具回调
+    callback backup-data();
+    callback restore-data();
+    callback check-invalid-items();
 
     // ===== 右键菜单回调 =====
     // 右键菜单项被选中，参数: source, item-id
@@ -131,6 +154,25 @@ export component MainWindow inherits Window {
                     }
                 }
 
+                // 快速搜索按钮
+                Rectangle {
+                    width: 40px;
+                    height: parent.height;
+                    background: search-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+
+                    Text {
+                        text: "🔍";
+                        color: ThemeSettings.text-c(root.theme-mode);
+                        font-size: 15px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    search-touch := TouchArea {
+                        clicked => { root.quick-search-triggered(); }
+                    }
+                }
+
                 // 关闭按钮
                 Rectangle {
                     width: 40px;
@@ -162,7 +204,7 @@ export component MainWindow inherits Window {
 
             // 左侧分类栏
             Rectangle {
-                width: ThemeSettings.sidebar-width;
+                width: root.sidebar-width * 1px;
                 background: ThemeSettings.sidebar-bg(root.theme-mode);
 
                 // 分类区空白右键
@@ -189,8 +231,12 @@ export component MainWindow inherits Window {
                                 name: c.name;
                                 selected: c.selected;
                                 theme-mode: root.theme-mode;
+                                depth: c.depth;
+                                has-children: c.has-children;
+                                expanded: c.expanded;
                                 clicked => { root.classification-clicked(c.id); }
                                 right-clicked => { root.classification-right-clicked(c.id); }
+                                expand-toggled => { root.classification-expand-toggled(c.id); }
                             }
                         }
                     }
@@ -335,6 +381,8 @@ export component MainWindow inherits Window {
                                 selected: item.selected;
                                 theme-mode: root.theme-mode;
                                 batch-mode: root.batch-mode;
+                                icon-size: root.item-icon-size * 1px;
+                                hide-name: root.hide-name;
                                 clicked => {
                                     if (root.batch-mode) {
                                         // 批量模式下点击切换选中
@@ -371,6 +419,15 @@ export component MainWindow inherits Window {
             auto-start-changed(v) => { root.auto-start-changed(v); }
             window-topmost-changed(v) => { root.window-topmost-changed(v); }
             item-columns-changed(v) => { root.item-columns-changed(v); }
+            item-icon-size-changed(v) => { root.item-icon-size-changed(v); }
+            sidebar-width-changed(v) => { root.sidebar-width-changed(v); }
+            hide-name-changed(v) => { root.hide-name-changed(v); }
+            hide-after-open-changed(v) => { root.hide-after-open-changed(v); }
+            quick-search-enabled-changed(v) => { root.quick-search-enabled-changed(v); }
+            quick-search-width-changed(v) => { root.quick-search-width-changed(v); }
+            backup-data => { root.backup-data(); }
+            restore-data => { root.restore-data(); }
+            check-invalid-items => { root.check-invalid-items(); }
         }
     }
 
@@ -393,6 +450,120 @@ export component MainWindow inherits Window {
         closed => {
             root.context-menu-visible = false;
             root.context-menu-closed();
+        }
+    }
+}
+
+// 快速搜索窗口（独立窗口，按名称搜索项目并打开）
+export component QuickSearchWindow inherits Window {
+    title: "快速搜索";
+    background: ThemeSettings.bg-color(root.theme-mode);
+    default-font-family: ThemeSettings.font-family;
+    preferred-width: 600px;
+    preferred-height: 400px;
+    min-width: 400px;
+    min-height: 300px;
+    no-frame: true;
+
+    in property <string> theme-mode: "light";
+    in property <[ItemInfo]> search-results: [];
+    in property <string> search-text: "";
+
+    callback search-changed(string);
+    callback result-double-clicked(int);
+    callback result-clicked(int);
+    callback close-requested();
+
+    VerticalLayout {
+        padding: ThemeSettings.spacing-normal;
+        spacing: ThemeSettings.spacing-normal;
+
+        // 搜索框
+        Rectangle {
+            height: 44px;
+            horizontal-stretch: 1;
+            background: ThemeSettings.card-bg(root.theme-mode);
+            border-radius: ThemeSettings.border-radius;
+            border-width: 1px;
+            border-color: ThemeSettings.border-c(root.theme-mode);
+
+            HorizontalLayout {
+                padding-left: ThemeSettings.spacing-normal;
+                padding-right: ThemeSettings.spacing-normal;
+                spacing: ThemeSettings.spacing-normal;
+                alignment: center;
+
+                Text {
+                    text: "🔍";
+                    font-size: 18px;
+                    color: ThemeSettings.text-sec(root.theme-mode);
+                    vertical-alignment: center;
+                }
+
+                input := LineEdit {
+                    horizontal-stretch: 1;
+                    placeholder-text: "搜索项目...";
+                    text: root.search-text;
+                    font-size: ThemeSettings.font-size-normal;
+                    edited => { root.search-changed(self.text); }
+                }
+
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 4px;
+                    background: close-touch.has-hover ? #e81123 : transparent;
+
+                    Text {
+                        text: "×";
+                        color: ThemeSettings.text-c(root.theme-mode);
+                        font-size: 18px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    close-touch := TouchArea {
+                        clicked => { root.close-requested(); }
+                    }
+                }
+            }
+        }
+
+        // 结果列表
+        ScrollView {
+            vertical-stretch: 1;
+            horizontal-stretch: 1;
+
+            if root.search-results.length == 0 : Text {
+                text: root.search-text == "" ? "输入关键词搜索项目" : "未找到匹配的项目";
+                color: ThemeSettings.text-sec(root.theme-mode);
+                font-size: ThemeSettings.font-size-normal;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            VerticalLayout {
+                spacing: ThemeSettings.spacing-small;
+
+                for item in root.search-results : ItemCard {
+                    item-id: item.id;
+                    name: item.name;
+                    icon: item.icon;
+                    invalid: item.invalid;
+                    selected: item.selected;
+                    theme-mode: root.theme-mode;
+                    double-clicked => { root.result-double-clicked(item.id); }
+                    clicked => { root.result-clicked(item.id); }
+                }
+            }
+        }
+
+        // 底部提示
+        Text {
+            text: "双击打开项目 · Esc 关闭";
+            color: ThemeSettings.text-sec(root.theme-mode);
+            font-size: ThemeSettings.font-size-small;
+            horizontal-alignment: center;
         }
     }
 }

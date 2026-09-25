@@ -10,12 +10,14 @@ use crate::db::Database;
 use crate::models::{Classification, Item};
 use crate::native;
 // MainWindow, ClassificationInfo, ItemInfo, MenuItem 由 slint::include_modules!() 生成在 crate 根
-use crate::{ClassificationInfo, ItemInfo, MenuItem, MainWindow};
+use crate::{ClassificationInfo, ItemInfo, MenuItem, MainWindow, QuickSearchWindow};
 
 pub struct App {
     main_window: MainWindow,
+    quick_search_window: QuickSearchWindow,
     db: Arc<Database>,
     current_classification_id: Arc<Mutex<i64>>,
+    expanded_classifications: Arc<Mutex<std::collections::HashSet<i64>>>,
 }
 
 impl App {
@@ -33,12 +35,30 @@ impl App {
         // 3. 创建主窗口
         let main_window = MainWindow::new()?;
 
+        // 3.1 创建快速搜索窗口（初始隐藏）
+        let quick_search_window = QuickSearchWindow::new()?;
+        quick_search_window.window().hide().ok();
+
         // 4. 加载分类列表
-        let classifications = db.list_parent_classifications();
-        let first_id = classifications.first().map(|c| c.id).unwrap_or(0);
+        let classifications = db.list_all_classifications();
+        // 选中第一个父分类
+        let first_id = classifications
+            .iter()
+            .find(|c| c.parent_id.is_none())
+            .map(|c| c.id)
+            .unwrap_or_else(|| classifications.first().map(|c| c.id).unwrap_or(0));
+
+        // 4.1 初始化展开状态：默认所有父分类展开
+        let expanded_classifications = Arc::new(Mutex::new(
+            classifications
+                .iter()
+                .filter(|c| c.parent_id.is_none())
+                .map(|c| c.id)
+                .collect(),
+        ));
 
         // 5. 绑定数据到 UI
-        let class_model = to_classification_model(&classifications, first_id);
+        let class_model = to_classification_model(&classifications, first_id, &expanded_classifications.lock().unwrap());
         main_window.set_classifications(class_model);
 
         // 6. 加载首个分类的项目
@@ -77,6 +97,30 @@ impl App {
             *current_id_for_class.lock().unwrap() = id.into();
         });
 
+        // 7.1 分类展开/折叠切换
+        {
+            let db_for_expand = db.clone();
+            let window_for_expand = main_window.as_weak();
+            let expanded_for_toggle = expanded_classifications.clone();
+            let current_id_for_expand = current_id.clone();
+            main_window.on_classification_expand_toggled(move |id| {
+                let class_id = id as i64;
+                let mut expanded = expanded_for_toggle.lock().unwrap();
+                if expanded.contains(&class_id) {
+                    expanded.remove(&class_id);
+                } else {
+                    expanded.insert(class_id);
+                }
+                drop(expanded);
+                // 刷新分类列表
+                let classifications = db_for_expand.list_all_classifications();
+                let cur = *current_id_for_expand.lock().unwrap();
+                if let Some(w) = window_for_expand.upgrade() {
+                    w.set_classifications(to_classification_model(&classifications, cur, &expanded_for_toggle.lock().unwrap()));
+                }
+            });
+        }
+
         // 8. 项目单击 - 批量模式下切换选中，非批量模式下打开项目
         let db_for_open = db.clone();
         let window_for_open = main_window.as_weak();
@@ -107,6 +151,12 @@ impl App {
             if let Some(item) = items.iter().find(|i| i.id == item_id as i64) {
                 open_item(item);
                 db_for_open.record_item_open(item_id.into());
+                // 打开后隐藏主窗口
+                if let Some(w) = window_for_open.upgrade() {
+                    if w.get_hide_after_open() {
+                        w.window().hide().ok();
+                    }
+                }
             } else {
                 log::warn!("未找到 item_id={} 的项目", item_id);
             }
@@ -133,13 +183,10 @@ impl App {
         let right_clicked_item_id_for_menu = right_clicked_item_id.clone();
         main_window.on_item_right_clicked(move |item_id| {
             *right_clicked_item_id_for_menu.lock().unwrap() = item_id as i64;
-            // 右键菜单位置使用项目卡片位置附近，简化用固定偏移
-            // 实际坐标由 UI 的 pointer-event 传递，但 Slint 1.5 回调不支持传坐标
-            // 这里用窗口中心作为近似位置
+            // 右键菜单位置: Slint 1.5 的 item-right-clicked 不传坐标，
+            // 用内容区近似位置（后续可通过扩展回调传坐标）
             if let Some(w) = _window_for_item_menu.upgrade() {
-                let x = w.get_width() as i32 / 2;
-                let y = w.get_height() as i32 / 2;
-                show_item_context_menu(&w, x, y);
+                show_item_context_menu(&w, 300, 200);
             }
         });
 
@@ -150,15 +197,15 @@ impl App {
         main_window.on_classification_right_clicked(move |id| {
             *right_clicked_class_id_for_menu.lock().unwrap() = id as i64;
             if let Some(w) = window_for_class_menu.upgrade() {
-                let x = 160; // 分类栏宽度附近
-                let y = w.get_height() as i32 / 2;
-                show_classification_item_menu(&w, x, y);
+                show_classification_item_menu(&w, 160, 200);
             }
         });
 
         // 11.1 项目区空白右键
         let window_for_item_area = main_window.as_weak();
         main_window.on_item_area_right_clicked(move |x, y| {
+            let x = x as i32;
+            let y = y as i32;
             if let Some(w) = window_for_item_area.upgrade() {
                 let batch = w.get_batch_mode();
                 if batch {
@@ -172,6 +219,8 @@ impl App {
         // 11.2 分类区空白右键
         let window_for_class_area = main_window.as_weak();
         main_window.on_classification_area_right_clicked(move |x, y| {
+            let x = x as i32;
+            let y = y as i32;
             if let Some(w) = window_for_class_area.upgrade() {
                 show_classification_area_menu(&w, x, y);
             }
@@ -203,12 +252,15 @@ impl App {
         // 13. 左侧栏"+ 新建分类"按钮
         let db_for_new_class = db.clone();
         let window_for_new_class = main_window.as_weak();
+        let expanded_for_new_class = expanded_classifications.clone();
         main_window.on_add_classification_clicked(move || {
             if let Some(name) = show_input_dialog("新建分类", "请输入分类名称") {
                 if let Ok(id) = db_for_new_class.insert_parent_classification(&name) {
-                    let classifications = db_for_new_class.list_parent_classifications();
+                    let classifications = db_for_new_class.list_all_classifications();
+                    // 新建的父分类默认展开
+                    expanded_for_new_class.lock().unwrap().insert(id);
                     if let Some(w) = window_for_new_class.upgrade() {
-                        w.set_classifications(to_classification_model(&classifications, id));
+                        w.set_classifications(to_classification_model(&classifications, id, &expanded_for_new_class.lock().unwrap()));
                         w.set_items(to_item_model(&[], 0));
                         w.set_status_text(SharedString::from("0 个项目"));
                     }
@@ -247,10 +299,22 @@ impl App {
                     None => return,
                 };
                 // 从数据库读取设置值
-                let theme = db_for_settings.get_setting("theme_mode", "light");
+                // 兼容旧版本: "dark" -> "classic-dark"
+                let raw_theme = db_for_settings.get_setting("theme_mode", "light");
+                let theme = if raw_theme == "dark" {
+                    "classic-dark".to_string()
+                } else {
+                    raw_theme
+                };
                 let auto_start = db_for_settings.get_setting_bool("auto_start", false);
                 let topmost = db_for_settings.get_setting_bool("window_topmost", false);
                 let columns = db_for_settings.get_setting_i64("item_columns", 8) as i32;
+                let icon_size = db_for_settings.get_setting_i64("item_icon_size", 48) as i32;
+                let sidebar_w = db_for_settings.get_setting_i64("sidebar_width", 140) as i32;
+                let hide_name = db_for_settings.get_setting_bool("hide_name", false);
+                let hide_after_open = db_for_settings.get_setting_bool("hide_after_open", false);
+                let qs_enabled = db_for_settings.get_setting_bool("quick_search_enabled", false);
+                let qs_width = db_for_settings.get_setting_i64("quick_search_width", 600) as i32;
                 log::info!(
                     "打开设置: theme={}, auto_start={}, topmost={}, columns={}",
                     theme, auto_start, topmost, columns
@@ -259,6 +323,12 @@ impl App {
                 w.set_auto_start(auto_start);
                 w.set_window_topmost(topmost);
                 w.set_item_columns(columns);
+                w.set_item_icon_size(icon_size);
+                w.set_sidebar_width(sidebar_w);
+                w.set_hide_name(hide_name);
+                w.set_hide_after_open(hide_after_open);
+                w.set_quick_search_enabled(qs_enabled);
+                w.set_quick_search_width(qs_width);
                 w.set_view_mode(SharedString::from("settings"));
                 // 同步全局主题
                 slint::invoke_from_event_loop({
@@ -277,6 +347,7 @@ impl App {
         {
             let db_for_theme = db.clone();
             let window_for_theme = main_window.as_weak();
+            let qs_for_theme = quick_search_window.as_weak();
             main_window.on_theme_mode_changed(move |mode| {
                 let mode_str = mode.to_string();
                 log::info!("主题切换: {}", mode_str);
@@ -284,6 +355,9 @@ impl App {
                 if let Some(w) = window_for_theme.upgrade() {
                     w.set_theme_mode(mode.clone());
                     apply_theme(&w);
+                }
+                if let Some(qs) = qs_for_theme.upgrade() {
+                    qs.set_theme_mode(mode.clone());
                 }
             });
         }
@@ -344,10 +418,233 @@ impl App {
             });
         }
 
+        // 15.5 图标大小调整
+        {
+            let db_for_icon = db.clone();
+            let window_for_icon = main_window.as_weak();
+            main_window.on_item_icon_size_changed(move |size| {
+                log::info!("图标大小调整: {}", size);
+                let _ = db_for_icon.set_setting_i64("item_icon_size", size as i64);
+                if let Some(w) = window_for_icon.upgrade() {
+                    w.set_item_icon_size(size);
+                }
+            });
+        }
+
+        // 15.6 分类栏宽度
+        {
+            let db_for_sw = db.clone();
+            let window_for_sw = main_window.as_weak();
+            main_window.on_sidebar_width_changed(move |w_val| {
+                log::info!("分类栏宽度: {}", w_val);
+                let _ = db_for_sw.set_setting_i64("sidebar_width", w_val as i64);
+                if let Some(w) = window_for_sw.upgrade() {
+                    w.set_sidebar_width(w_val);
+                }
+            });
+        }
+
+        // 15.7 隐藏名称
+        {
+            let db_for_hn = db.clone();
+            let window_for_hn = main_window.as_weak();
+            main_window.on_hide_name_changed(move |v| {
+                log::info!("隐藏名称: {}", v);
+                let _ = db_for_hn.set_setting_bool("hide_name", v);
+                if let Some(w) = window_for_hn.upgrade() {
+                    w.set_hide_name(v);
+                }
+            });
+        }
+
+        // 15.8 打开后隐藏
+        {
+            let db_for_hao = db.clone();
+            let window_for_hao = main_window.as_weak();
+            main_window.on_hide_after_open_changed(move |v| {
+                log::info!("打开后隐藏: {}", v);
+                let _ = db_for_hao.set_setting_bool("hide_after_open", v);
+                if let Some(w) = window_for_hao.upgrade() {
+                    w.set_hide_after_open(v);
+                }
+            });
+        }
+
+        // 15.9 快速搜索启用
+        {
+            let db_for_qse = db.clone();
+            let window_for_qse = main_window.as_weak();
+            main_window.on_quick_search_enabled_changed(move |v| {
+                log::info!("快速搜索启用: {}", v);
+                let _ = db_for_qse.set_setting_bool("quick_search_enabled", v);
+                if let Some(w) = window_for_qse.upgrade() {
+                    w.set_quick_search_enabled(v);
+                }
+            });
+        }
+
+        // 15.10 快速搜索窗口宽度
+        {
+            let db_for_qsw = db.clone();
+            let window_for_qsw = main_window.as_weak();
+            main_window.on_quick_search_width_changed(move |v| {
+                log::info!("快速搜索宽度: {}", v);
+                let _ = db_for_qsw.set_setting_i64("quick_search_width", v as i64);
+                if let Some(w) = window_for_qsw.upgrade() {
+                    w.set_quick_search_width(v);
+                }
+            });
+        }
+
+        // 15.11 工具: 数据备份
+        {
+            let db_for_backup = db.clone();
+            main_window.on_backup_data(move || {
+                // 备份: 复制数据库文件到 data/backup_<时间戳>.db
+                if let Ok(db_path) = get_database_path() {
+                    let ts = chrono_now_ms_str();
+                    let backup_path = db_path
+                        .parent()
+                        .map(|p| p.join(format!("backup_{}.db", ts)))
+                        .unwrap_or_else(|| std::path::PathBuf::from(format!("backup_{}.db", ts)));
+                    match std::fs::copy(&db_path, &backup_path) {
+                        Ok(_) => show_info_dialog(
+                            "备份成功",
+                            &format!("已备份到:\n{}", backup_path.display()),
+                        ),
+                        Err(e) => show_error_dialog("备份失败", &format!("{}", e)),
+                    }
+                }
+            });
+        }
+
+        // 15.12 工具: 数据还原
+        {
+            main_window.on_restore_data(move || {
+                if let Some(backup_file) = show_open_file_dialog() {
+                    if let Ok(db_path) = get_database_path() {
+                        // 关闭当前连接再还原 (简化: 直接复制覆盖，当前连接会被破坏)
+                        // 实际应先关闭，这里提示用户重启
+                        match std::fs::copy(&backup_file, &db_path) {
+                            Ok(_) => show_info_dialog(
+                                "还原成功",
+                                "数据已还原，请重启应用使更改生效。",
+                            ),
+                            Err(e) => show_error_dialog("还原失败", &format!("{}", e)),
+                        }
+                    }
+                }
+            });
+        }
+
+        // 15.13 工具: 检查无效项目
+        {
+            let db_for_check = db.clone();
+            let window_for_check = main_window.as_weak();
+            let current_id_for_check = current_id.clone();
+            main_window.on_check_invalid_items(move || {
+                let class_id = current_id_for_check.lock().unwrap().clone();
+                let items = db_for_check.list_items(class_id);
+                let mut invalid_count = 0;
+                for item in &items {
+                    if (item.is_file() || item.is_folder()) {
+                        if let Some(target) = &item.data.target {
+                            if !std::path::Path::new(target).exists() {
+                                invalid_count += 1;
+                            }
+                        }
+                    }
+                }
+                if invalid_count > 0 {
+                    show_info_dialog(
+                        "检查完成",
+                        &format!("发现 {} 个无效项目（目标路径不存在）", invalid_count),
+                    );
+                    // 刷新显示，标记无效
+                    if let Some(w) = window_for_check.upgrade() {
+                        w.set_items(to_item_model(&items, 0));
+                    }
+                } else {
+                    show_info_dialog("检查完成", "所有项目均有效");
+                }
+            });
+        }
+
         // 16. 窗口关闭
         main_window.on_window_close(move || {
             std::process::exit(0);
         });
+
+        // 16.1 快速搜索窗口: 搜索文本变更 -> 实时过滤项目
+        {
+            let db_for_qs = db.clone();
+            let qs_weak = quick_search_window.as_weak();
+            quick_search_window.on_search_changed(move |text| {
+                let query = text.to_string();
+                let results = db_for_qs.search_items(&query);
+                if let Some(qs) = qs_weak.upgrade() {
+                    qs.set_search_text(text.clone());
+                    qs.set_search_results(to_item_model(&results, 0));
+                }
+            });
+        }
+
+        // 16.2 快速搜索窗口: 双击结果 -> 打开项目
+        {
+            let db_for_qs_open = db.clone();
+            let qs_weak_open = quick_search_window.as_weak();
+            let main_weak_open = main_window.as_weak();
+            quick_search_window.on_result_double_clicked(move |item_id| {
+                let id = item_id as i64;
+                // 从全量项目中查找
+                let all_items = db_for_qs_open.list_all_items();
+                if let Some(item) = all_items.iter().find(|i| i.id == id) {
+                    open_item(item);
+                    db_for_qs_open.record_item_open(id);
+                    // 打开后隐藏快速搜索窗口
+                    if let Some(qs) = qs_weak_open.upgrade() {
+                        qs.window().hide().ok();
+                    }
+                    // 若设置了"打开后隐藏主窗口"也同时隐藏
+                    if let Some(w) = main_weak_open.upgrade() {
+                        if w.get_hide_after_open() {
+                            w.window().hide().ok();
+                        }
+                    }
+                }
+            });
+        }
+
+        // 16.3 快速搜索窗口: 关闭请求 -> 隐藏窗口
+        {
+            let qs_weak_close = quick_search_window.as_weak();
+            quick_search_window.on_close_requested(move || {
+                if let Some(qs) = qs_weak_close.upgrade() {
+                    qs.window().hide().ok();
+                }
+            });
+        }
+
+        // 16.4 主窗口: 触发快速搜索 -> 显示并居中快速搜索窗口
+        {
+            let qs_weak_show = quick_search_window.as_weak();
+            let main_weak_show = main_window.as_weak();
+            main_window.on_quick_search_triggered(move || {
+                if let Some(qs) = qs_weak_show.upgrade() {
+                    // 清空搜索文本和结果
+                    qs.set_search_text(SharedString::from(""));
+                    qs.set_search_results(ModelRc::from(Rc::new(slint::VecModel::default())));
+                    // 同步主题
+                    if let Some(w) = main_weak_show.upgrade() {
+                        qs.set_theme_mode(w.get_theme_mode());
+                    }
+                    // 显示并居中到屏幕
+                    qs.window().show().ok();
+                    center_window_on_screen(&qs);
+                    log::info!("快速搜索窗口已显示");
+                }
+            });
+        }
 
         // 18. 右键菜单项选中处理
         {
@@ -356,6 +653,7 @@ impl App {
             let current_id_for_ctx = current_id.clone();
             let right_item_id = right_clicked_item_id.clone();
             let right_class_id = right_clicked_class_id.clone();
+            let expanded_for_ctx = expanded_classifications.clone();
             main_window.on_context_menu_item_selected(move |source, action| {
                 let source_str = source.to_string();
                 let action_str = action.to_string();
@@ -404,15 +702,49 @@ impl App {
                     ("item-area", "item-settings") => {
                         show_info_dialog("项目设置", "项目设置弹窗（待实现）");
                     }
+                    // ===== 项目排序 =====
+                    ("item-area", "sort-default") => {
+                        let _ = db_for_ctx.set_classification_item_sort(class_id, "default");
+                        let items = db_for_ctx.list_items(class_id);
+                        if let Some(w) = window_for_ctx.upgrade() {
+                            w.set_items(to_item_model(&items, 0));
+                            w.set_context_menu_visible(false);
+                        }
+                    }
+                    ("item-area", "sort-initial") => {
+                        let _ = db_for_ctx.set_classification_item_sort(class_id, "initial");
+                        let items = db_for_ctx.list_items(class_id);
+                        if let Some(w) = window_for_ctx.upgrade() {
+                            w.set_items(to_item_model(&items, 0));
+                            w.set_context_menu_visible(false);
+                        }
+                    }
+                    ("item-area", "sort-open-number") => {
+                        let _ = db_for_ctx.set_classification_item_sort(class_id, "openNumber");
+                        let items = db_for_ctx.list_items(class_id);
+                        if let Some(w) = window_for_ctx.upgrade() {
+                            w.set_items(to_item_model(&items, 0));
+                            w.set_context_menu_visible(false);
+                        }
+                    }
+                    ("item-area", "sort-last-open") => {
+                        let _ = db_for_ctx.set_classification_item_sort(class_id, "lastOpen");
+                        let items = db_for_ctx.list_items(class_id);
+                        if let Some(w) = window_for_ctx.upgrade() {
+                            w.set_items(to_item_model(&items, 0));
+                            w.set_context_menu_visible(false);
+                        }
+                    }
 
                     // ===== 分类区空白右键 =====
                     ("classification-area", "new-classification") => {
                         drop(w);
                         if let Some(name) = show_input_dialog("新建分类", "请输入分类名称") {
                             if let Ok(id) = db_for_ctx.insert_parent_classification(&name) {
-                                let classifications = db_for_ctx.list_parent_classifications();
+                                let classifications = db_for_ctx.list_all_classifications();
+                                expanded_for_ctx.lock().unwrap().insert(id);
                                 if let Some(w) = window_for_ctx.upgrade() {
-                                    w.set_classifications(to_classification_model(&classifications, id));
+                                    w.set_classifications(to_classification_model(&classifications, id, &expanded_for_ctx.lock().unwrap()));
                                     w.set_items(to_item_model(&[], 0));
                                     w.set_status_text(SharedString::from("0 个项目"));
                                 }
@@ -430,9 +762,9 @@ impl App {
                         drop(w);
                         if let Some(new_name) = show_input_dialog("重命名分类", "请输入新名称") {
                             let _ = db_for_ctx.rename_classification(cid, &new_name);
-                            let classifications = db_for_ctx.list_parent_classifications();
+                            let classifications = db_for_ctx.list_all_classifications();
                             if let Some(w) = window_for_ctx.upgrade() {
-                                w.set_classifications(to_classification_model(&classifications, cid));
+                                w.set_classifications(to_classification_model(&classifications, cid, &expanded_for_ctx.lock().unwrap()));
                             }
                         }
                     }
@@ -441,6 +773,12 @@ impl App {
                         drop(w);
                         if let Some(name) = show_input_dialog("新建子分类", "请输入子分类名称") {
                             if let Ok(_id) = db_for_ctx.insert_child_classification(cid, &name) {
+                                // 确保父分类展开以显示新子分类
+                                expanded_for_ctx.lock().unwrap().insert(cid);
+                                let classifications = db_for_ctx.list_all_classifications();
+                                if let Some(w) = window_for_ctx.upgrade() {
+                                    w.set_classifications(to_classification_model(&classifications, cid, &expanded_for_ctx.lock().unwrap()));
+                                }
                                 show_info_dialog("成功", "子分类已创建");
                             }
                         }
@@ -454,11 +792,11 @@ impl App {
                         );
                         if confirm {
                             let _ = db_for_ctx.delete_classification(cid);
-                            let classifications = db_for_ctx.list_parent_classifications();
+                            let classifications = db_for_ctx.list_all_classifications();
                             let first_id = classifications.first().map(|c| c.id).unwrap_or(0);
                             let items = db_for_ctx.list_items(first_id);
                             if let Some(w) = window_for_ctx.upgrade() {
-                                w.set_classifications(to_classification_model(&classifications, first_id));
+                                w.set_classifications(to_classification_model(&classifications, first_id, &expanded_for_ctx.lock().unwrap()));
                                 w.set_items(to_item_model(&items, 0));
                                 w.set_status_text(SharedString::from(format!(
                                     "共 {} 个分类，{} 个项目",
@@ -711,21 +1049,27 @@ impl App {
             });
         }
 
-        // 19. 批量模式下点击项目切换选中
-        {
-            let window_for_batch_click = main_window.as_weak();
-            let current_id_for_batch = current_id.clone();
-            // 覆盖 item-clicked 行为: 批量模式下切换选中
-            // 注意: 由于 on_item_clicked 已绑定，这里用额外属性观察
-            // Slint 不允许重复绑定同一回调，所以批量选中逻辑已在原 on_item_clicked 中处理
-        }
-
         // 17. 应用启动时加载已保存的设置
         {
-            let theme = db.get_setting("theme_mode", "light");
+            let raw_theme = db.get_setting("theme_mode", "light");
+            let theme = if raw_theme == "dark" {
+                "classic-dark".to_string()
+            } else {
+                raw_theme
+            };
             let topmost = db.get_setting_bool("window_topmost", false);
+            let icon_size = db.get_setting_i64("item_icon_size", 48) as i32;
+            let sidebar_w = db.get_setting_i64("sidebar_width", 140) as i32;
+            let hide_name = db.get_setting_bool("hide_name", false);
+            let hide_after_open = db.get_setting_bool("hide_after_open", false);
             main_window.set_theme_mode(SharedString::from(theme.clone()));
             main_window.set_window_topmost(topmost);
+            main_window.set_item_icon_size(icon_size);
+            main_window.set_sidebar_width(sidebar_w);
+            main_window.set_hide_name(hide_name);
+            main_window.set_hide_after_open(hide_after_open);
+            // 同步快速搜索窗口主题
+            quick_search_window.set_theme_mode(SharedString::from(theme.clone()));
             apply_theme(&main_window);
             // 启动时应用置顶
             if topmost {
@@ -734,13 +1078,18 @@ impl App {
                     set_window_topmost(&main_window, true);
                 }
             }
-            log::info!("启动设置已应用: theme={}, topmost={}", theme, topmost);
+            log::info!(
+                "启动设置已应用: theme={}, topmost={}, icon_size={}, sidebar_width={}",
+                theme, topmost, icon_size, sidebar_w
+            );
         }
 
         Ok(Self {
             main_window,
+            quick_search_window,
             db,
             current_classification_id: current_id,
+            expanded_classifications,
         })
     }
 
@@ -791,6 +1140,27 @@ fn set_window_topmost(_window: &MainWindow, topmost: bool) {
 
 #[cfg(not(target_os = "windows"))]
 fn set_window_topmost(_window: &MainWindow, _topmost: bool) {}
+
+/// 将窗口居中到主屏幕
+/// 使用 Slint Window API 获取窗口逻辑尺寸，结合 Windows GetSystemMetrics 获取屏幕尺寸
+fn center_window_on_screen<C: ComponentHandle>(window: &C) {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+        let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) } as f32;
+        let screen_h = unsafe { GetSystemMetrics(SM_CYSCREEN) } as f32;
+        let size = window.window().size();
+        let win_w = size.width;
+        let win_h = size.height;
+        let x = (screen_w - win_w) / 2.0;
+        let y = (screen_h - win_h) / 3.0; // 偏上 1/3 处，更符合搜索框视觉习惯
+        window.window().set_position(slint::LogicalPosition::new(x, y));
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+    }
+}
 
 /// 设置/取消开机自启 (Windows 注册表)
 #[cfg(target_os = "windows")]
@@ -879,17 +1249,59 @@ fn get_database_path() -> Result<std::path::PathBuf, Box<dyn std::error::Error>>
     Ok(data_dir.join("dawn-launcher.db"))
 }
 
-/// 将分类列表转为 Slint 模型
+/// 将分类列表转为 Slint 模型 (包含父子层级)
+/// list 应为已排序的完整分类列表（父+子）
+/// expanded: 当前展开的父分类 id 集合，子分类仅在父分类展开时显示
 fn to_classification_model(
     list: &[Classification],
     selected_id: i64,
+    expanded: &std::collections::HashSet<i64>,
 ) -> ModelRc<ClassificationInfo> {
+    // 计算每个分类是否有子分类
+    let mut has_children_set = std::collections::HashSet::new();
+    for c in list {
+        if let Some(pid) = c.parent_id {
+            has_children_set.insert(pid);
+        }
+    }
+
+    // 构建树: 先放父分类，紧跟其子分类（仅当父分类展开时）
+    let mut ordered: Vec<&Classification> = Vec::new();
+    let parents: Vec<&Classification> = list.iter().filter(|c| c.parent_id.is_none()).collect();
+    let children_map: std::collections::HashMap<i64, Vec<&Classification>> = {
+        let mut m: std::collections::HashMap<i64, Vec<&Classification>> = std::collections::HashMap::new();
+        for c in list.iter().filter(|c| c.parent_id.is_some()) {
+            m.entry(c.parent_id.unwrap()).or_default().push(c);
+        }
+        m
+    };
+
+    for p in &parents {
+        ordered.push(p);
+        // 仅当父分类展开时才显示子分类
+        if expanded.contains(&p.id) {
+            if let Some(children) = children_map.get(&p.id) {
+                for child in children {
+                    ordered.push(child);
+                }
+            }
+        }
+    }
+
     let model = slint::VecModel::from(
-        list.iter()
-            .map(|c| ClassificationInfo {
-                id: c.id as i32,
-                name: SharedString::from(c.name.as_str()),
-                selected: c.id == selected_id,
+        ordered
+            .iter()
+            .map(|c| {
+                let depth = if c.parent_id.is_some() { 1 } else { 0 };
+                ClassificationInfo {
+                    id: c.id as i32,
+                    name: SharedString::from(c.name.as_str()),
+                    selected: c.id == selected_id,
+                    parent_id: c.parent_id.unwrap_or(0) as i32,
+                    depth,
+                    has_children: has_children_set.contains(&c.id),
+                    expanded: expanded.contains(&c.id),
+                }
             })
             .collect::<Vec<_>>(),
     );
@@ -1385,6 +1797,11 @@ fn show_item_area_menu(window: &MainWindow, x: i32, y: i32) {
         ("new-item", "新建项目", "+", false, false),
         ("item-settings", "项目设置", "⚙", false, false),
         ("", "", "", true, false),
+        ("sort-default", "排序：默认", "≡", false, false),
+        ("sort-initial", "排序：按名称", "A", false, false),
+        ("sort-open-number", "排序：按打开次数", "🔢", false, false),
+        ("sort-last-open", "排序：按最近打开", "⏱", false, false),
+        ("", "", "", true, false),
         ("lock-item-order", "锁定项目顺序", "🔒", false, false),
         ("batch-mode", "批量操作", "☰", false, false),
     ];
@@ -1482,4 +1899,14 @@ fn copy_to_clipboard(text: &str) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 fn copy_to_clipboard(_text: &str) -> Result<(), String> {
     Ok(())
+}
+
+/// 生成时间戳字符串（用于备份文件名）
+fn chrono_now_ms_str() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    ms.to_string()
 }
