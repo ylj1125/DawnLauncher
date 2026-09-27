@@ -18,6 +18,7 @@ pub struct App {
     db: Arc<Database>,
     current_classification_id: Arc<Mutex<i64>>,
     expanded_classifications: Arc<Mutex<std::collections::HashSet<i64>>>,
+    hotkey_rx: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<()>>>,
 }
 
 impl App {
@@ -38,6 +39,11 @@ impl App {
         // 3.1 创建快速搜索窗口（初始隐藏）
         let quick_search_window = QuickSearchWindow::new()?;
         quick_search_window.window().hide().ok();
+
+        // 3.2 注册全局热键 (Ctrl+Space) 唤起快速搜索
+        let (hotkey_tx, hotkey_rx) = std::sync::mpsc::channel::<()>();
+        crate::native::register_global_hotkey(hotkey_tx);
+        let hotkey_rx = std::sync::Arc::new(std::sync::Mutex::new(hotkey_rx));
 
         // 4. 加载分类列表
         let classifications = db.list_all_classifications();
@@ -1090,11 +1096,36 @@ impl App {
             db,
             current_classification_id: current_id,
             expanded_classifications,
+            hotkey_rx,
         })
     }
 
     /// 运行应用
     pub fn run(&self) -> Result<(), slint::PlatformError> {
+        // 轮询全局热键信号，收到后触发快速搜索窗口
+        let qs_weak = self.quick_search_window.as_weak();
+        let main_weak = self.main_window.as_weak();
+        let rx = self.hotkey_rx.clone();
+        let timer = slint::Timer::default();
+        timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(100), move || {
+            if let Ok(rx) = rx.try_lock() {
+                if rx.try_recv().is_ok() {
+                    log::info!("全局热键触发，显示快速搜索窗口");
+                    if let Some(qs) = qs_weak.upgrade() {
+                        qs.set_search_text(SharedString::from(""));
+                        qs.set_search_results(ModelRc::from(Rc::new(slint::VecModel::default())));
+                        if let Some(w) = main_weak.upgrade() {
+                            qs.set_theme_mode(w.get_theme_mode());
+                        }
+                        qs.window().show().ok();
+                        center_window_on_screen(&qs);
+                    }
+                }
+            }
+        });
+        // 保持 timer 不被 drop（Slint 事件循环会持有引用）
+        std::mem::forget(timer);
+
         self.main_window.run()
     }
 }

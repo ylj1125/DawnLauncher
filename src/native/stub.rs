@@ -23,3 +23,5 @@ pub fn open_path(_path: &str) -> std::io::Result<()> {
 pub fn is_fullscreen() -> bool {
     false
 }
+
+pub fn register_global_hotkey(_notify: std::sync::mpsc::Sender<()>) {}

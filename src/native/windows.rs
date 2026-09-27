@@ -218,3 +218,72 @@ pub fn is_fullscreen() -> bool {
     // TODO: 完整实现需要枚举所有窗口并判断是否覆盖屏幕
     false
 }
+
+// ============================================================
+// 全局热键注册 (RegisterHotKey) - 使用直接 FFI 声明
+// ============================================================
+
+use std::sync::mpsc::Sender;
+
+/// RegisterHotKey 的 mod 标志位
+const MOD_CONTROL: u32 = 0x0002;
+const MOD_NOREPEAT: u32 = 0x4000;
+/// VK_SPACE
+const VK_SPACE: u32 = 0x20;
+/// WM_HOTKEY 消息
+const WM_HOTKEY: u32 = 0x0312;
+/// 热键 ID
+const HOTKEY_ID_QUICK_SEARCH: i32 = 0xB001;
+
+extern "system" {
+    fn RegisterHotKey(hWnd: *mut std::ffi::c_void, id: i32, fsModifiers: u32, vk: u32) -> i32;
+    fn UnregisterHotKey(hWnd: *mut std::ffi::c_void, id: i32) -> i32;
+    fn GetMessageW(lpMsg: *mut MSG, hWnd: *mut std::ffi::c_void, wMsgFilterMin: u32, wMsgFilterMax: u32) -> std::ffi::c_int;
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct MSG {
+    hwnd: *mut std::ffi::c_void,
+    message: u32,
+    wparam: usize,
+    lparam: isize,
+    time: u32,
+    pt_x: i32,
+    pt_y: i32,
+}
+
+/// 在后台线程注册全局热键 (Ctrl+Space)，收到热键时通过 channel 发送通知
+pub fn register_global_hotkey(notify: Sender<()>) {
+    std::thread::spawn(move || {
+        let result = unsafe {
+            RegisterHotKey(
+                std::ptr::null_mut(),
+                HOTKEY_ID_QUICK_SEARCH,
+                MOD_CONTROL | MOD_NOREPEAT,
+                VK_SPACE,
+            )
+        };
+        if result == 0 {
+            log::warn!("RegisterHotKey 失败");
+            return;
+        }
+        log::info!("全局热键 Ctrl+Space 注册成功");
+
+        // 消息循环：等待 WM_HOTKEY
+        let mut msg = MSG::default();
+        loop {
+            let ret = unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) };
+            if ret <= 0 {
+                break; // WM_QUIT (0) 或 错误 (-1)
+            }
+            if msg.message == WM_HOTKEY && msg.wparam as i32 == HOTKEY_ID_QUICK_SEARCH {
+                let _ = notify.send(());
+            }
+        }
+
+        // 注销热键
+        let _ = unsafe { UnregisterHotKey(std::ptr::null_mut(), HOTKEY_ID_QUICK_SEARCH) };
+        log::info!("全局热键已注销");
+    });
+}
