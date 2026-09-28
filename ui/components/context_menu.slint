@@ -12,6 +12,7 @@ export struct MenuItem {
     separator: bool,    // 是否为分隔线
     has-submenu: bool,  // 是否有子菜单（显示 ▸）
     enabled: bool,      // 是否可用（灰显）
+    checked: bool,      // 是否为选中状态（显示勾选）
 }
 
 export component ContextMenu inherits Rectangle {
@@ -33,11 +34,34 @@ export component ContextMenu inherits Rectangle {
         clicked => { root.closed(); }
     }
 
-    // 菜单卡片
+    // ===== 菜单阴影层 =====
+    // 通过偏移的半透明黑色矩形模拟投影效果
+    menu-shadow := Rectangle {
+        x: root.menu-x + 4px;
+        y: root.menu-y + 4px;
+        width: 180px;
+        background: #00000022;
+        border-radius: 8px;
+        // 高度由内容决定，用 layout 撑开
+        VerticalLayout {
+            padding: 4px;
+            spacing: 0px;
+            for item[i] in root.items : Rectangle {
+                height: item.separator ? 9px : 32px;
+            }
+        }
+    }
+
+    // ===== 菜单卡片（带边框、圆角、背景）=====
     menu-card := Rectangle {
         x: root.menu-x;
         y: root.menu-y;
         width: 180px;
+        background: ThemeSettings.card-bg(root.theme-mode);
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: ThemeSettings.border-c(root.theme-mode);
+
         // 用内容自适应高度
         VerticalLayout {
             padding: 4px;
@@ -47,12 +71,12 @@ export component ContextMenu inherits Rectangle {
                 height: item.separator ? 9px : 32px;
                 horizontal-stretch: 1;
 
-                // 分隔线 - 用 padding 模拟 margin
+                // 分隔线
                 if item.separator : Rectangle {
                     height: 1px;
                     y: (parent.height - self.height) / 2;
-                    padding-left: 8px;
-                    padding-right: 8px;
+                    x: 12px;
+                    width: parent.width - 24px;
                     background: ThemeSettings.border-c(root.theme-mode);
                 }
 
@@ -90,6 +114,17 @@ export component ContextMenu inherits Rectangle {
                             font-size: ThemeSettings.font-size-normal;
                             vertical-alignment: center;
                             horizontal-stretch: 1;
+                        }
+
+                        // 选中勾选
+                        Text {
+                            text: "✓";
+                            visible: item.checked;
+                            color: ThemeSettings.accent-color;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            width: 12px;
+                            horizontal-alignment: center;
                         }
 
                         // 子菜单箭头

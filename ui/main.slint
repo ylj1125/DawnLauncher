@@ -403,32 +403,6 @@ export component MainWindow inherits Window {
                 }
             }
         }
-
-        // 设置面板
-        if root.view-mode == "settings" : SettingsPanel {
-            vertical-stretch: 1;
-            horizontal-stretch: 1;
-
-            theme-mode: root.theme-mode;
-            auto-start: root.auto-start;
-            window-topmost: root.window-topmost;
-            item-columns: root.item-columns;
-
-            back-clicked => { root.view-mode = "main"; }
-            theme-mode-changed(mode) => { root.theme-mode-changed(mode); }
-            auto-start-changed(v) => { root.auto-start-changed(v); }
-            window-topmost-changed(v) => { root.window-topmost-changed(v); }
-            item-columns-changed(v) => { root.item-columns-changed(v); }
-            item-icon-size-changed(v) => { root.item-icon-size-changed(v); }
-            sidebar-width-changed(v) => { root.sidebar-width-changed(v); }
-            hide-name-changed(v) => { root.hide-name-changed(v); }
-            hide-after-open-changed(v) => { root.hide-after-open-changed(v); }
-            quick-search-enabled-changed(v) => { root.quick-search-enabled-changed(v); }
-            quick-search-width-changed(v) => { root.quick-search-width-changed(v); }
-            backup-data => { root.backup-data(); }
-            restore-data => { root.restore-data(); }
-            check-invalid-items => { root.check-invalid-items(); }
-        }
     }
 
     // ===== 右键菜单浮层（覆盖在所有内容之上）=====
@@ -565,5 +539,174 @@ export component QuickSearchWindow inherits Window {
             font-size: ThemeSettings.font-size-small;
             horizontal-alignment: center;
         }
+    }
+}
+
+// 设置窗口（独立窗口，包含所有设置项）
+export component SettingsWindow inherits Window {
+    title: "设置";
+    background: ThemeSettings.bg-color(root.theme-mode);
+    default-font-family: ThemeSettings.font-family;
+    preferred-width: 780px;
+    preferred-height: 560px;
+    min-width: 640px;
+    min-height: 440px;
+
+    // ===== 外观设置 =====
+    in property <string> theme-mode: "light";
+    // ===== 常规设置 =====
+    in property <bool> auto-start: false;
+    in property <bool> window-topmost: false;
+    in property <bool> minimize-to-tray: false;
+    in property <bool> tray-icon: true;
+    in property <bool> taskbar-show: true;
+    in property <bool> follow-mouse: false;
+    in property <bool> hide-on-lost-focus: false;
+    in property <bool> lock-size: false;
+    in property <bool> lock-position: false;
+    in property <bool> always-center: false;
+    // ===== 项目设置 =====
+    in property <int> item-columns: 8;
+    in property <int> item-icon-size: 48;
+    in property <bool> hide-name: false;
+    in property <bool> hide-ellipsis: false;
+    in property <bool> hide-after-open: false;
+    in property <bool> record-open-count: true;
+    in property <bool> show-tooltip: true;
+    in property <bool> show-path: false;
+    // ===== 分类设置 =====
+    in property <int> sidebar-width: 140;
+    in property <string> sidebar-position: "left";
+    in property <bool> hover-switch: false;
+    in property <bool> wheel-switch: true;
+    in property <bool> remember-selected: true;
+    // ===== 快速搜索 =====
+    in property <bool> quick-search-enabled: false;
+    in property <int> quick-search-width: 600;
+    in property <string> quick-search-position: "center";
+    in property <bool> quick-search-hide-on-lost-focus: true;
+    in property <bool> quick-search-auto-open: true;
+    in property <bool> quick-search-hide-after-open: true;
+    in property <bool> quick-search-history: true;
+    in property <bool> quick-search-match-remark: false;
+    // ===== 项目布局 =====
+    in property <string> item-layout: "tile";
+
+    // ===== 回调 =====
+    callback theme-mode-changed(string);
+    callback auto-start-changed(bool);
+    callback window-topmost-changed(bool);
+    callback minimize-to-tray-changed(bool);
+    callback tray-icon-changed(bool);
+    callback taskbar-show-changed(bool);
+    callback follow-mouse-changed(bool);
+    callback hide-on-lost-focus-changed(bool);
+    callback lock-size-changed(bool);
+    callback lock-position-changed(bool);
+    callback always-center-changed(bool);
+    callback item-columns-changed(int);
+    callback item-icon-size-changed(int);
+    callback hide-name-changed(bool);
+    callback hide-ellipsis-changed(bool);
+    callback hide-after-open-changed(bool);
+    callback record-open-count-changed(bool);
+    callback show-tooltip-changed(bool);
+    callback show-path-changed(bool);
+    callback sidebar-width-changed(int);
+    callback sidebar-position-changed(string);
+    callback hover-switch-changed(bool);
+    callback wheel-switch-changed(bool);
+    callback remember-selected-changed(bool);
+    callback quick-search-enabled-changed(bool);
+    callback quick-search-width-changed(int);
+    callback quick-search-position-changed(string);
+    callback quick-search-hide-on-lost-focus-changed(bool);
+    callback quick-search-auto-open-changed(bool);
+    callback quick-search-hide-after-open-changed(bool);
+    callback quick-search-history-changed(bool);
+    callback quick-search-match-remark-changed(bool);
+    callback item-layout-changed(string);
+    // 工具按钮
+    callback backup-data();
+    callback restore-data();
+    callback check-invalid-items();
+    // 关闭设置窗口
+    callback close-requested();
+
+    SettingsPanel {
+        vertical-stretch: 1;
+        horizontal-stretch: 1;
+
+        theme-mode: root.theme-mode;
+        auto-start: root.auto-start;
+        window-topmost: root.window-topmost;
+        minimize-to-tray: root.minimize-to-tray;
+        tray-icon: root.tray-icon;
+        taskbar-show: root.taskbar-show;
+        follow-mouse: root.follow-mouse;
+        hide-on-lost-focus: root.hide-on-lost-focus;
+        lock-size: root.lock-size;
+        lock-position: root.lock-position;
+        always-center: root.always-center;
+        item-columns: root.item-columns;
+        item-icon-size: root.item-icon-size;
+        hide-name: root.hide-name;
+        hide-ellipsis: root.hide-ellipsis;
+        hide-after-open: root.hide-after-open;
+        record-open-count: root.record-open-count;
+        show-tooltip: root.show-tooltip;
+        show-path: root.show-path;
+        sidebar-width: root.sidebar-width;
+        sidebar-position: root.sidebar-position;
+        hover-switch: root.hover-switch;
+        wheel-switch: root.wheel-switch;
+        remember-selected: root.remember-selected;
+        quick-search-enabled: root.quick-search-enabled;
+        quick-search-width: root.quick-search-width;
+        quick-search-position: root.quick-search-position;
+        quick-search-hide-on-lost-focus: root.quick-search-hide-on-lost-focus;
+        quick-search-auto-open: root.quick-search-auto-open;
+        quick-search-hide-after-open: root.quick-search-hide-after-open;
+        quick-search-history: root.quick-search-history;
+        quick-search-match-remark: root.quick-search-match-remark;
+        item-layout: root.item-layout;
+
+        back-clicked => { root.close-requested(); }
+        theme-mode-changed(mode) => { root.theme-mode-changed(mode); }
+        auto-start-changed(v) => { root.auto-start-changed(v); }
+        window-topmost-changed(v) => { root.window-topmost-changed(v); }
+        minimize-to-tray-changed(v) => { root.minimize-to-tray-changed(v); }
+        tray-icon-changed(v) => { root.tray-icon-changed(v); }
+        taskbar-show-changed(v) => { root.taskbar-show-changed(v); }
+        follow-mouse-changed(v) => { root.follow-mouse-changed(v); }
+        hide-on-lost-focus-changed(v) => { root.hide-on-lost-focus-changed(v); }
+        lock-size-changed(v) => { root.lock-size-changed(v); }
+        lock-position-changed(v) => { root.lock-position-changed(v); }
+        always-center-changed(v) => { root.always-center-changed(v); }
+        item-columns-changed(v) => { root.item-columns-changed(v); }
+        item-icon-size-changed(v) => { root.item-icon-size-changed(v); }
+        hide-name-changed(v) => { root.hide-name-changed(v); }
+        hide-ellipsis-changed(v) => { root.hide-ellipsis-changed(v); }
+        hide-after-open-changed(v) => { root.hide-after-open-changed(v); }
+        record-open-count-changed(v) => { root.record-open-count-changed(v); }
+        show-tooltip-changed(v) => { root.show-tooltip-changed(v); }
+        show-path-changed(v) => { root.show-path-changed(v); }
+        sidebar-width-changed(v) => { root.sidebar-width-changed(v); }
+        sidebar-position-changed(v) => { root.sidebar-position-changed(v); }
+        hover-switch-changed(v) => { root.hover-switch-changed(v); }
+        wheel-switch-changed(v) => { root.wheel-switch-changed(v); }
+        remember-selected-changed(v) => { root.remember-selected-changed(v); }
+        quick-search-enabled-changed(v) => { root.quick-search-enabled-changed(v); }
+        quick-search-width-changed(v) => { root.quick-search-width-changed(v); }
+        quick-search-position-changed(v) => { root.quick-search-position-changed(v); }
+        quick-search-hide-on-lost-focus-changed(v) => { root.quick-search-hide-on-lost-focus-changed(v); }
+        quick-search-auto-open-changed(v) => { root.quick-search-auto-open-changed(v); }
+        quick-search-hide-after-open-changed(v) => { root.quick-search-hide-after-open-changed(v); }
+        quick-search-history-changed(v) => { root.quick-search-history-changed(v); }
+        quick-search-match-remark-changed(v) => { root.quick-search-match-remark-changed(v); }
+        item-layout-changed(v) => { root.item-layout-changed(v); }
+        backup-data => { root.backup-data(); }
+        restore-data => { root.restore-data(); }
+        check-invalid-items => { root.check-invalid-items(); }
     }
 }

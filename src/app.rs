@@ -10,11 +10,12 @@ use crate::db::Database;
 use crate::models::{Classification, Item};
 use crate::native;
 // MainWindow, ClassificationInfo, ItemInfo, MenuItem 由 slint::include_modules!() 生成在 crate 根
-use crate::{ClassificationInfo, ItemInfo, MenuItem, MainWindow, QuickSearchWindow};
+use crate::{ClassificationInfo, ItemInfo, MenuItem, MainWindow, QuickSearchWindow, SettingsWindow};
 
 pub struct App {
     main_window: MainWindow,
     quick_search_window: QuickSearchWindow,
+    settings_window: SettingsWindow,
     db: Arc<Database>,
     current_classification_id: Arc<Mutex<i64>>,
     expanded_classifications: Arc<Mutex<std::collections::HashSet<i64>>>,
@@ -39,6 +40,10 @@ impl App {
         // 3.1 创建快速搜索窗口（初始隐藏）
         let quick_search_window = QuickSearchWindow::new()?;
         quick_search_window.window().hide().ok();
+
+        // 3.1.1 创建设置窗口（初始隐藏）
+        let settings_window = SettingsWindow::new()?;
+        settings_window.window().hide().ok();
 
         // 3.2 注册全局热键 (Ctrl+Space) 唤起快速搜索
         let (hotkey_tx, hotkey_rx) = std::sync::mpsc::channel::<()>();
@@ -298,54 +303,91 @@ impl App {
         // 15. 设置按钮 - 切换到设置面板，加载当前设置值
         {
             let db_for_settings = db.clone();
-            let window_for_settings = main_window.as_weak();
+            let settings_weak = settings_window.as_weak();
+            let main_weak_for_settings = main_window.as_weak();
             main_window.on_settings_clicked(move || {
-                let w = match window_for_settings.upgrade() {
+                let sw = match settings_weak.upgrade() {
                     Some(w) => w,
                     None => return,
                 };
-                // 从数据库读取设置值
-                // 兼容旧版本: "dark" -> "classic-dark"
+                // 从数据库读取所有设置值
                 let raw_theme = db_for_settings.get_setting("theme_mode", "light");
-                let theme = if raw_theme == "dark" {
-                    "classic-dark".to_string()
-                } else {
-                    raw_theme
-                };
+                let theme = if raw_theme == "dark" { "classic-dark".to_string() } else { raw_theme };
                 let auto_start = db_for_settings.get_setting_bool("auto_start", false);
                 let topmost = db_for_settings.get_setting_bool("window_topmost", false);
+                let min_to_tray = db_for_settings.get_setting_bool("minimize_to_tray", false);
+                let tray_icon = db_for_settings.get_setting_bool("tray_icon", true);
+                let taskbar_show = db_for_settings.get_setting_bool("taskbar_show", true);
+                let follow_mouse = db_for_settings.get_setting_bool("follow_mouse", false);
+                let hide_lost = db_for_settings.get_setting_bool("hide_on_lost_focus", false);
+                let lock_size = db_for_settings.get_setting_bool("lock_size", false);
+                let lock_pos = db_for_settings.get_setting_bool("lock_position", false);
+                let always_center = db_for_settings.get_setting_bool("always_center", false);
                 let columns = db_for_settings.get_setting_i64("item_columns", 8) as i32;
                 let icon_size = db_for_settings.get_setting_i64("item_icon_size", 48) as i32;
-                let sidebar_w = db_for_settings.get_setting_i64("sidebar_width", 140) as i32;
                 let hide_name = db_for_settings.get_setting_bool("hide_name", false);
+                let hide_ellipsis = db_for_settings.get_setting_bool("hide_ellipsis", false);
                 let hide_after_open = db_for_settings.get_setting_bool("hide_after_open", false);
+                let record_open = db_for_settings.get_setting_bool("record_open_count", true);
+                let show_tooltip = db_for_settings.get_setting_bool("show_tooltip", true);
+                let show_path = db_for_settings.get_setting_bool("show_path", false);
+                let sidebar_w = db_for_settings.get_setting_i64("sidebar_width", 140) as i32;
+                let sidebar_pos = db_for_settings.get_setting("sidebar_position", "left");
+                let hover_switch = db_for_settings.get_setting_bool("hover_switch", false);
+                let wheel_switch = db_for_settings.get_setting_bool("wheel_switch", true);
+                let remember_sel = db_for_settings.get_setting_bool("remember_selected", true);
                 let qs_enabled = db_for_settings.get_setting_bool("quick_search_enabled", false);
                 let qs_width = db_for_settings.get_setting_i64("quick_search_width", 600) as i32;
-                log::info!(
-                    "打开设置: theme={}, auto_start={}, topmost={}, columns={}",
-                    theme, auto_start, topmost, columns
-                );
-                w.set_theme_mode(SharedString::from(theme));
-                w.set_auto_start(auto_start);
-                w.set_window_topmost(topmost);
-                w.set_item_columns(columns);
-                w.set_item_icon_size(icon_size);
-                w.set_sidebar_width(sidebar_w);
-                w.set_hide_name(hide_name);
-                w.set_hide_after_open(hide_after_open);
-                w.set_quick_search_enabled(qs_enabled);
-                w.set_quick_search_width(qs_width);
-                w.set_view_mode(SharedString::from("settings"));
-                // 同步全局主题
-                slint::invoke_from_event_loop({
-                    let w = w.as_weak();
-                    move || {
-                        if let Some(w) = w.upgrade() {
-                            apply_theme(&w);
-                        }
-                    }
-                })
-                .ok();
+                let qs_pos = db_for_settings.get_setting("quick_search_position", "center");
+                let qs_hide_lost = db_for_settings.get_setting_bool("quick_search_hide_on_lost_focus", true);
+                let qs_auto_open = db_for_settings.get_setting_bool("quick_search_auto_open", true);
+                let qs_hide_after = db_for_settings.get_setting_bool("quick_search_hide_after_open", true);
+                let qs_history = db_for_settings.get_setting_bool("quick_search_history", true);
+                let qs_match_remark = db_for_settings.get_setting_bool("quick_search_match_remark", false);
+                let item_layout = db_for_settings.get_setting("item_layout", "tile");
+
+                sw.set_theme_mode(SharedString::from(theme));
+                sw.set_auto_start(auto_start);
+                sw.set_window_topmost(topmost);
+                sw.set_minimize_to_tray(min_to_tray);
+                sw.set_tray_icon(tray_icon);
+                sw.set_taskbar_show(taskbar_show);
+                sw.set_follow_mouse(follow_mouse);
+                sw.set_hide_on_lost_focus(hide_lost);
+                sw.set_lock_size(lock_size);
+                sw.set_lock_position(lock_pos);
+                sw.set_always_center(always_center);
+                sw.set_item_columns(columns);
+                sw.set_item_icon_size(icon_size);
+                sw.set_hide_name(hide_name);
+                sw.set_hide_ellipsis(hide_ellipsis);
+                sw.set_hide_after_open(hide_after_open);
+                sw.set_record_open_count(record_open);
+                sw.set_show_tooltip(show_tooltip);
+                sw.set_show_path(show_path);
+                sw.set_sidebar_width(sidebar_w);
+                sw.set_sidebar_position(SharedString::from(sidebar_pos));
+                sw.set_hover_switch(hover_switch);
+                sw.set_wheel_switch(wheel_switch);
+                sw.set_remember_selected(remember_sel);
+                sw.set_quick_search_enabled(qs_enabled);
+                sw.set_quick_search_width(qs_width);
+                sw.set_quick_search_position(SharedString::from(qs_pos));
+                sw.set_quick_search_hide_on_lost_focus(qs_hide_lost);
+                sw.set_quick_search_auto_open(qs_auto_open);
+                sw.set_quick_search_hide_after_open(qs_hide_after);
+                sw.set_quick_search_history(qs_history);
+                sw.set_quick_search_match_remark(qs_match_remark);
+                sw.set_item_layout(SharedString::from(item_layout));
+
+                // 同步主题到设置窗口
+                if let Some(mw) = main_weak_for_settings.upgrade() {
+                    sw.set_theme_mode(mw.get_theme_mode());
+                }
+
+                sw.window().show().ok();
+                center_window_on_screen(&sw);
+                log::info!("设置窗口已打开");
             });
         }
 
@@ -354,7 +396,8 @@ impl App {
             let db_for_theme = db.clone();
             let window_for_theme = main_window.as_weak();
             let qs_for_theme = quick_search_window.as_weak();
-            main_window.on_theme_mode_changed(move |mode| {
+            let sw_for_theme = settings_window.as_weak();
+            settings_window.on_theme_mode_changed(move |mode| {
                 let mode_str = mode.to_string();
                 log::info!("主题切换: {}", mode_str);
                 let _ = db_for_theme.set_setting("theme_mode", &mode_str);
@@ -365,17 +408,19 @@ impl App {
                 if let Some(qs) = qs_for_theme.upgrade() {
                     qs.set_theme_mode(mode.clone());
                 }
+                if let Some(sw) = sw_for_theme.upgrade() {
+                    sw.set_theme_mode(mode.clone());
+                }
             });
         }
 
         // 15.2 开机自启切换
         {
             let db_for_autostart = db.clone();
-            let window_for_autostart = main_window.as_weak();
-            main_window.on_auto_start_changed(move |enabled| {
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_auto_start_changed(move |enabled| {
                 log::info!("开机自启切换: {}", enabled);
                 let _ = db_for_autostart.set_setting_bool("auto_start", enabled);
-                // 写注册表
                 #[cfg(target_os = "windows")]
                 {
                     let exe_path = std::env::current_exe()
@@ -386,8 +431,8 @@ impl App {
                         log::info!("注册表写入结果: {:?}", result);
                     }
                 }
-                if let Some(w) = window_for_autostart.upgrade() {
-                    w.set_auto_start(enabled);
+                if let Some(sw) = sw_weak.upgrade() {
+                    sw.set_auto_start(enabled);
                 }
             });
         }
@@ -395,117 +440,307 @@ impl App {
         // 15.3 窗口置顶切换
         {
             let db_for_topmost = db.clone();
-            let window_for_topmost = main_window.as_weak();
-            main_window.on_window_topmost_changed(move |enabled| {
+            let main_weak = main_window.as_weak();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_window_topmost_changed(move |enabled| {
                 log::info!("窗口置顶切换: {}", enabled);
                 let _ = db_for_topmost.set_setting_bool("window_topmost", enabled);
                 #[cfg(target_os = "windows")]
                 {
-                    if let Some(w) = window_for_topmost.upgrade() {
+                    if let Some(w) = main_weak.upgrade() {
                         set_window_topmost(&w, enabled);
                     }
                 }
-                if let Some(w) = window_for_topmost.upgrade() {
-                    w.set_window_topmost(enabled);
+                if let Some(sw) = sw_weak.upgrade() {
+                    sw.set_window_topmost(enabled);
                 }
             });
         }
 
-        // 15.4 项目列数调整
+        // 15.4 启动后最小化到托盘
         {
-            let db_for_cols = db.clone();
-            let window_for_cols = main_window.as_weak();
-            main_window.on_item_columns_changed(move |cols| {
-                log::info!("项目列数调整: {}", cols);
-                let _ = db_for_cols.set_setting_i64("item_columns", cols as i64);
-                if let Some(w) = window_for_cols.upgrade() {
-                    w.set_item_columns(cols);
-                }
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_minimize_to_tray_changed(move |v| {
+                let _ = db_clone.set_setting_bool("minimize_to_tray", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_minimize_to_tray(v); }
             });
         }
 
-        // 15.5 图标大小调整
+        // 15.5 托盘图标
         {
-            let db_for_icon = db.clone();
-            let window_for_icon = main_window.as_weak();
-            main_window.on_item_icon_size_changed(move |size| {
-                log::info!("图标大小调整: {}", size);
-                let _ = db_for_icon.set_setting_i64("item_icon_size", size as i64);
-                if let Some(w) = window_for_icon.upgrade() {
-                    w.set_item_icon_size(size);
-                }
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_tray_icon_changed(move |v| {
+                let _ = db_clone.set_setting_bool("tray_icon", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_tray_icon(v); }
             });
         }
 
-        // 15.6 分类栏宽度
+        // 15.6 任务栏显示
         {
-            let db_for_sw = db.clone();
-            let window_for_sw = main_window.as_weak();
-            main_window.on_sidebar_width_changed(move |w_val| {
-                log::info!("分类栏宽度: {}", w_val);
-                let _ = db_for_sw.set_setting_i64("sidebar_width", w_val as i64);
-                if let Some(w) = window_for_sw.upgrade() {
-                    w.set_sidebar_width(w_val);
-                }
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_taskbar_show_changed(move |v| {
+                let _ = db_clone.set_setting_bool("taskbar_show", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_taskbar_show(v); }
             });
         }
 
-        // 15.7 隐藏名称
+        // 15.7 显示时跟随鼠标
         {
-            let db_for_hn = db.clone();
-            let window_for_hn = main_window.as_weak();
-            main_window.on_hide_name_changed(move |v| {
-                log::info!("隐藏名称: {}", v);
-                let _ = db_for_hn.set_setting_bool("hide_name", v);
-                if let Some(w) = window_for_hn.upgrade() {
-                    w.set_hide_name(v);
-                }
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_follow_mouse_changed(move |v| {
+                let _ = db_clone.set_setting_bool("follow_mouse", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_follow_mouse(v); }
             });
         }
 
-        // 15.8 打开后隐藏
+        // 15.8 失去焦点隐藏
         {
-            let db_for_hao = db.clone();
-            let window_for_hao = main_window.as_weak();
-            main_window.on_hide_after_open_changed(move |v| {
-                log::info!("打开后隐藏: {}", v);
-                let _ = db_for_hao.set_setting_bool("hide_after_open", v);
-                if let Some(w) = window_for_hao.upgrade() {
-                    w.set_hide_after_open(v);
-                }
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_hide_on_lost_focus_changed(move |v| {
+                let _ = db_clone.set_setting_bool("hide_on_lost_focus", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_hide_on_lost_focus(v); }
             });
         }
 
-        // 15.9 快速搜索启用
+        // 15.9 锁定尺寸
         {
-            let db_for_qse = db.clone();
-            let window_for_qse = main_window.as_weak();
-            main_window.on_quick_search_enabled_changed(move |v| {
-                log::info!("快速搜索启用: {}", v);
-                let _ = db_for_qse.set_setting_bool("quick_search_enabled", v);
-                if let Some(w) = window_for_qse.upgrade() {
-                    w.set_quick_search_enabled(v);
-                }
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_lock_size_changed(move |v| {
+                let _ = db_clone.set_setting_bool("lock_size", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_lock_size(v); }
             });
         }
 
-        // 15.10 快速搜索窗口宽度
+        // 15.10 固定位置
         {
-            let db_for_qsw = db.clone();
-            let window_for_qsw = main_window.as_weak();
-            main_window.on_quick_search_width_changed(move |v| {
-                log::info!("快速搜索宽度: {}", v);
-                let _ = db_for_qsw.set_setting_i64("quick_search_width", v as i64);
-                if let Some(w) = window_for_qsw.upgrade() {
-                    w.set_quick_search_width(v);
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_lock_position_changed(move |v| {
+                let _ = db_clone.set_setting_bool("lock_position", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_lock_position(v); }
+            });
+        }
+
+        // 15.11 永远居中
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_always_center_changed(move |v| {
+                let _ = db_clone.set_setting_bool("always_center", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_always_center(v); }
+            });
+        }
+
+        // 15.12 项目列数调整
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_item_columns_changed(move |cols| {
+                let _ = db_clone.set_setting_i64("item_columns", cols as i64);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_item_columns(cols); }
+            });
+        }
+
+        // 15.13 图标大小调整
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_item_icon_size_changed(move |size| {
+                let _ = db_clone.set_setting_i64("item_icon_size", size as i64);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_item_icon_size(size); }
+            });
+        }
+
+        // 15.14 隐藏名称
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_hide_name_changed(move |v| {
+                let _ = db_clone.set_setting_bool("hide_name", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_hide_name(v); }
+            });
+        }
+
+        // 15.15 隐藏省略号
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_hide_ellipsis_changed(move |v| {
+                let _ = db_clone.set_setting_bool("hide_ellipsis", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_hide_ellipsis(v); }
+            });
+        }
+
+        // 15.16 打开后隐藏
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_hide_after_open_changed(move |v| {
+                let _ = db_clone.set_setting_bool("hide_after_open", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_hide_after_open(v); }
+            });
+        }
+
+        // 15.17 记录打开次数
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_record_open_count_changed(move |v| {
+                let _ = db_clone.set_setting_bool("record_open_count", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_record_open_count(v); }
+            });
+        }
+
+        // 15.18 显示项目信息提示
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_show_tooltip_changed(move |v| {
+                let _ = db_clone.set_setting_bool("show_tooltip", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_show_tooltip(v); }
+            });
+        }
+
+        // 15.19 显示路径
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_show_path_changed(move |v| {
+                let _ = db_clone.set_setting_bool("show_path", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_show_path(v); }
+            });
+        }
+
+        // 15.20 分类栏宽度
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_sidebar_width_changed(move |w_val| {
+                let _ = db_clone.set_setting_i64("sidebar_width", w_val as i64);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_sidebar_width(w_val); }
+            });
+        }
+
+        // 15.21 鼠标悬停切换
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_hover_switch_changed(move |v| {
+                let _ = db_clone.set_setting_bool("hover_switch", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_hover_switch(v); }
+            });
+        }
+
+        // 15.22 鼠标滚轮切换
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_wheel_switch_changed(move |v| {
+                let _ = db_clone.set_setting_bool("wheel_switch", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_wheel_switch(v); }
+            });
+        }
+
+        // 15.23 记住选择状态
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_remember_selected_changed(move |v| {
+                let _ = db_clone.set_setting_bool("remember_selected", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_remember_selected(v); }
+            });
+        }
+
+        // 15.24 快速搜索启用
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_quick_search_enabled_changed(move |v| {
+                let _ = db_clone.set_setting_bool("quick_search_enabled", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_quick_search_enabled(v); }
+            });
+        }
+
+        // 15.25 快速搜索窗口宽度
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_quick_search_width_changed(move |v| {
+                let _ = db_clone.set_setting_i64("quick_search_width", v as i64);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_quick_search_width(v); }
+            });
+        }
+
+        // 15.26 快速搜索失去焦点隐藏
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_quick_search_hide_on_lost_focus_changed(move |v| {
+                let _ = db_clone.set_setting_bool("quick_search_hide_on_lost_focus", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_quick_search_hide_on_lost_focus(v); }
+            });
+        }
+
+        // 15.27 快速搜索单结果自动打开
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_quick_search_auto_open_changed(move |v| {
+                let _ = db_clone.set_setting_bool("quick_search_auto_open", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_quick_search_auto_open(v); }
+            });
+        }
+
+        // 15.28 快速搜索打开后隐藏
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_quick_search_hide_after_open_changed(move |v| {
+                let _ = db_clone.set_setting_bool("quick_search_hide_after_open", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_quick_search_hide_after_open(v); }
+            });
+        }
+
+        // 15.29 快速搜索历史记录
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_quick_search_history_changed(move |v| {
+                let _ = db_clone.set_setting_bool("quick_search_history", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_quick_search_history(v); }
+            });
+        }
+
+        // 15.30 快速搜索匹配备注
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_quick_search_match_remark_changed(move |v| {
+                let _ = db_clone.set_setting_bool("quick_search_match_remark", v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_quick_search_match_remark(v); }
+            });
+        }
+
+        // 15.31 设置窗口关闭
+        {
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_close_requested(move || {
+                if let Some(sw) = sw_weak.upgrade() {
+                    sw.window().hide().ok();
                 }
             });
         }
 
-        // 15.11 工具: 数据备份
+        // 15.32 工具: 数据备份
         {
             let db_for_backup = db.clone();
-            main_window.on_backup_data(move || {
+            settings_window.on_backup_data(move || {
                 // 备份: 复制数据库文件到 data/backup_<时间戳>.db
                 if let Ok(db_path) = get_database_path() {
                     let ts = chrono_now_ms_str();
@@ -524,13 +759,11 @@ impl App {
             });
         }
 
-        // 15.12 工具: 数据还原
+        // 15.33 工具: 数据还原
         {
-            main_window.on_restore_data(move || {
+            settings_window.on_restore_data(move || {
                 if let Some(backup_file) = show_open_file_dialog() {
                     if let Ok(db_path) = get_database_path() {
-                        // 关闭当前连接再还原 (简化: 直接复制覆盖，当前连接会被破坏)
-                        // 实际应先关闭，这里提示用户重启
                         match std::fs::copy(&backup_file, &db_path) {
                             Ok(_) => show_info_dialog(
                                 "还原成功",
@@ -543,12 +776,12 @@ impl App {
             });
         }
 
-        // 15.13 工具: 检查无效项目
+        // 15.34 工具: 检查无效项目
         {
             let db_for_check = db.clone();
             let window_for_check = main_window.as_weak();
             let current_id_for_check = current_id.clone();
-            main_window.on_check_invalid_items(move || {
+            settings_window.on_check_invalid_items(move || {
                 let class_id = current_id_for_check.lock().unwrap().clone();
                 let items = db_for_check.list_items(class_id);
                 let mut invalid_count = 0;
@@ -566,7 +799,6 @@ impl App {
                         "检查完成",
                         &format!("发现 {} 个无效项目（目标路径不存在）", invalid_count),
                     );
-                    // 刷新显示，标记无效
                     if let Some(w) = window_for_check.upgrade() {
                         w.set_items(to_item_model(&items, 0));
                     }
@@ -1093,6 +1325,7 @@ impl App {
         Ok(Self {
             main_window,
             quick_search_window,
+            settings_window,
             db,
             current_classification_id: current_id,
             expanded_classifications,
@@ -1758,6 +1991,7 @@ fn build_menu_items(items: &[(&str, &str, &str, bool, bool)]) -> ModelRc<MenuIte
                 separator: *separator,
                 has_submenu: *has_submenu,
                 enabled: true,
+                checked: false,
             })
             .collect::<Vec<_>>(),
     );
