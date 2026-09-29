@@ -813,6 +813,19 @@ impl App {
             std::process::exit(0);
         });
 
+        // 16.0 标题栏拖拽 (无边框窗口)
+        {
+            let main_weak = main_window.as_weak();
+            main_window.on_title_bar_drag(move || {
+                #[cfg(target_os = "windows")]
+                {
+                    if let Some(w) = main_weak.upgrade() {
+                        drag_window(&w);
+                    }
+                }
+            });
+        }
+
         // 16.1 快速搜索窗口: 搜索文本变更 -> 实时过滤项目
         {
             let db_for_qs = db.clone();
@@ -1404,6 +1417,33 @@ fn set_window_topmost(_window: &MainWindow, topmost: bool) {
 
 #[cfg(not(target_os = "windows"))]
 fn set_window_topmost(_window: &MainWindow, _topmost: bool) {}
+
+/// 拖拽无边框窗口 - 通过 ReleaseCapture + SendMessage(WM_NCLBUTTONDOWN) 实现
+#[cfg(target_os = "windows")]
+fn drag_window<C: ComponentHandle>(_window: &C) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, ReleaseCapture, SendMessageW, WM_NCLBUTTONDOWN, HTCAPTION,
+    };
+    use windows::core::{HSTRING, PCWSTR};
+    use windows::Win32::Foundation::{WPARAM, LPARAM};
+
+    let title = HSTRING::from("Dawn Launcher");
+    unsafe {
+        let hwnd = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr()));
+        if hwnd.0 as usize != 0 {
+            let _ = ReleaseCapture();
+            let _ = SendMessageW(
+                hwnd,
+                WM_NCLBUTTONDOWN,
+                WPARAM(HTCAPTION as usize),
+                LPARAM(0),
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn drag_window<C: ComponentHandle>(_window: &C) {}
 
 /// 将窗口居中到主屏幕
 /// 使用 Slint Window API 获取窗口逻辑尺寸，结合 Windows GetSystemMetrics 获取屏幕尺寸

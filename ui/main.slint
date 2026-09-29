@@ -25,6 +25,7 @@ export component MainWindow inherits Window {
     preferred-height: 600px;
     min-width: 600px;
     min-height: 400px;
+    no-frame: true;
 
     // 数据属性
     in property <[ClassificationInfo]> classifications;
@@ -97,6 +98,8 @@ export component MainWindow inherits Window {
     callback quick-search-width-changed(int);
     // 触发快速搜索窗口
     callback quick-search-triggered();
+    // 标题栏拖拽
+    callback title-bar-drag();
     // 工具回调
     callback backup-data();
     callback restore-data();
@@ -122,6 +125,16 @@ export component MainWindow inherits Window {
         title-bar := Rectangle {
             height: 32px;
             background: ThemeSettings.sidebar-bg(root.theme-mode);
+
+            // 标题栏拖拽移动窗口 - 点击时通知 Rust 端
+            TouchArea {
+                mouse-cursor: pointer;
+                pointer-event(e) => {
+                    if (e.kind == PointerEventKind.down) {
+                        root.title-bar-drag();
+                    }
+                }
+            }
 
             HorizontalLayout {
                 // 标题
