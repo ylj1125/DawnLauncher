@@ -107,13 +107,18 @@ component setting-row inherits Rectangle {
     in property <string> theme-mode: "light";
     callback toggled(bool);
 
-    height: 64px;
+    height: 56px;
     horizontal-stretch: 1;
     background: ThemeSettings.card-bg(root.theme-mode);
     border-radius: ThemeSettings.border-radius;
+    border-width: 1px;
+    border-color: ThemeSettings.border-c(root.theme-mode);
 
     HorizontalLayout {
-        padding: ThemeSettings.spacing-normal;
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 10px;
+        padding-bottom: 10px;
         spacing: ThemeSettings.spacing-normal;
         alignment: center;
 
@@ -125,6 +130,7 @@ component setting-row inherits Rectangle {
                 text: root.title;
                 color: ThemeSettings.text-c(root.theme-mode);
                 font-size: ThemeSettings.font-size-normal;
+                font-weight: 500;
             }
 
             Text {
@@ -150,13 +156,18 @@ component tool-button inherits Rectangle {
     in property <string> theme-mode: "light";
     callback clicked();
 
-    height: 64px;
+    height: 56px;
     horizontal-stretch: 1;
     background: ThemeSettings.card-bg(root.theme-mode);
     border-radius: ThemeSettings.border-radius;
+    border-width: 1px;
+    border-color: ThemeSettings.border-c(root.theme-mode);
 
     HorizontalLayout {
-        padding: ThemeSettings.spacing-normal;
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 10px;
+        padding-bottom: 10px;
         spacing: ThemeSettings.spacing-normal;
         alignment: center;
 
@@ -168,6 +179,7 @@ component tool-button inherits Rectangle {
                 text: root.title;
                 color: ThemeSettings.text-c(root.theme-mode);
                 font-size: ThemeSettings.font-size-normal;
+                font-weight: 500;
             }
 
             Text {
@@ -179,10 +191,10 @@ component tool-button inherits Rectangle {
         }
 
         Rectangle {
-            width: 80px;
-            height: 32px;
+            width: 64px;
+            height: 30px;
             border-radius: ThemeSettings.border-radius;
-            background: btn-touch.has-hover ? #3b82f6 : ThemeSettings.accent-color;
+            background: btn-touch.has-hover ? #2563eb : ThemeSettings.accent-color;
 
             Text {
                 text: "执行";
@@ -298,27 +310,23 @@ export component SettingsPanel inherits Rectangle {
                 padding: ThemeSettings.spacing-normal;
                 spacing: 2px;
 
-                // 返回按钮
-                Rectangle {
-                    height: 32px;
-                    horizontal-stretch: 1;
-                    border-radius: ThemeSettings.border-radius;
-                    background: back-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
-
-                    Text {
-                        text: "← 返回";
-                        color: ThemeSettings.accent-color;
-                        font-size: ThemeSettings.font-size-normal;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-
-                    back-touch := TouchArea {
-                        clicked => { root.back-clicked(); }
-                    }
+                // 标题
+                Text {
+                    text: "设置";
+                    color: ThemeSettings.text-c(root.theme-mode);
+                    font-size: 16px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    padding-top: 4px;
+                    padding-bottom: 4px;
                 }
 
                 // 分隔
+                Rectangle { height: 4px; }
+                Rectangle {
+                    height: 1px;
+                    background: ThemeSettings.border-c(root.theme-mode);
+                }
                 Rectangle { height: 8px; }
 
                 // 导航项
@@ -488,6 +496,8 @@ export component SettingsPanel inherits Rectangle {
                         horizontal-stretch: 1;
                         background: ThemeSettings.card-bg(root.theme-mode);
                         border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
 
                         VerticalLayout {
                             padding: ThemeSettings.spacing-normal;
@@ -524,6 +534,8 @@ export component SettingsPanel inherits Rectangle {
                         horizontal-stretch: 1;
                         background: ThemeSettings.card-bg(root.theme-mode);
                         border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
 
                         VerticalLayout {
                             padding: ThemeSettings.spacing-normal;
@@ -612,6 +624,8 @@ export component SettingsPanel inherits Rectangle {
                         horizontal-stretch: 1;
                         background: ThemeSettings.card-bg(root.theme-mode);
                         border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
 
                         VerticalLayout {
                             padding: ThemeSettings.spacing-normal;
@@ -707,6 +721,8 @@ export component SettingsPanel inherits Rectangle {
                         horizontal-stretch: 1;
                         background: ThemeSettings.card-bg(root.theme-mode);
                         border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
 
                         VerticalLayout {
                             padding: ThemeSettings.spacing-normal;
@@ -1050,6 +1066,8 @@ export component SettingsPanel inherits Rectangle {
                         horizontal-stretch: 1;
                         background: ThemeSettings.card-bg(root.theme-mode);
                         border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
 
                         VerticalLayout {
                             padding: ThemeSettings.spacing-large;

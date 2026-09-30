@@ -1422,8 +1422,9 @@ fn set_window_topmost(_window: &MainWindow, _topmost: bool) {}
 #[cfg(target_os = "windows")]
 fn drag_window<C: ComponentHandle>(_window: &C) {
     use windows::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, ReleaseCapture, SendMessageW, WM_NCLBUTTONDOWN, HTCAPTION,
+        FindWindowW, SendMessageW, WM_NCLBUTTONDOWN, HTCAPTION,
     };
+    use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
     use windows::core::{HSTRING, PCWSTR};
     use windows::Win32::Foundation::{WPARAM, LPARAM};
 
@@ -1931,20 +1932,57 @@ fn show_info_dialog(title: &str, message: &str) {
 #[cfg(not(target_os = "windows"))]
 fn show_info_dialog(_title: &str, _message: &str) {}
 
-/// 显示输入对话框 (Windows 上通过 PowerShell 实现 InputBox)
+/// 显示输入对话框 (Windows 上通过 PowerShell + WinForms 实现，控制窗口大小)
 /// 返回 Some(输入内容) 表示用户确认，None 表示取消
 #[cfg(target_os = "windows")]
 fn show_input_dialog(title: &str, prompt: &str) -> Option<String> {
-    // 通过 PowerShell 的 [Microsoft.VisualBasic.Interaction]::InputBox 实现
-    // 使用 CREATE_NO_WINDOW 标志隐藏 PowerShell 控制台窗口
+    // 使用 WinForms 创建固定大小的输入框，避免默认 InputBox 过宽
     let script = format!(
         r#"
-Add-Type -AssemblyName Microsoft.VisualBasic
-$result = [Microsoft.VisualBasic.Interaction]::InputBox('{}', '{}', '')
-if ($result -ne '') {{ $result }} else {{ '' }}
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$form = New-Object System.Windows.Forms.Form
+$form.Text = '{}'
+$form.Size = New-Object System.Drawing.Size(360, 180)
+$form.StartPosition = 'CenterScreen'
+$form.FormBorderStyle = 'FixedDialog'
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.BackColor = '#ffffff'
+$form.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
+
+$label = New-Object System.Windows.Forms.Label
+$label.Text = '{}'
+$label.Location = New-Object System.Drawing.Point(20, 20)
+$label.Size = New-Object System.Drawing.Size(300, 25)
+$form.Controls.Add($label)
+
+$textbox = New-Object System.Windows.Forms.TextBox
+$textbox.Location = New-Object System.Drawing.Point(20, 50)
+$textbox.Size = New-Object System.Drawing.Size(300, 25)
+$form.Controls.Add($textbox)
+
+$okBtn = New-Object System.Windows.Forms.Button
+$okBtn.Text = '确定'
+$okBtn.Location = New-Object System.Drawing.Point(160, 90)
+$okBtn.Size = New-Object System.Drawing.Size(75, 28)
+$okBtn.DialogResult = [System.Windows.Forms.DialogResult]::OK
+$form.AcceptButton = $okBtn
+$form.Controls.Add($okBtn)
+
+$cancelBtn = New-Object System.Windows.Forms.Button
+$cancelBtn.Text = '取消'
+$cancelBtn.Location = New-Object System.Drawing.Point(245, 90)
+$cancelBtn.Size = New-Object System.Drawing.Size(75, 28)
+$cancelBtn.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+$form.CancelButton = $cancelBtn
+$form.Controls.Add($cancelBtn)
+
+$result = $form.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {{ $textbox.Text }} else {{ '' }}
 "#,
-        prompt.replace('\'', "''"),
-        title.replace('\'', "''")
+        title.replace('\'', "''"),
+        prompt.replace('\'', "''")
     );
     let output = run_hidden("powershell", &["-NoProfile", "-NonInteractive", "-Command", &script])?;
     let stdout = String::from_utf8_lossy(&output).trim().to_string();
