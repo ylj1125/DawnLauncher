@@ -37,8 +37,8 @@ export component ContextMenu inherits Rectangle {
     // ===== 菜单阴影层 =====
     // 通过偏移的半透明黑色矩形模拟投影效果
     menu-shadow := Rectangle {
-        x: root.menu-x + 4px;
-        y: root.menu-y + 4px;
+        x: Math.min(Math.max(root.menu-x, 4px), root.width - self.width - 4px) + 4px;
+        y: Math.min(Math.max(root.menu-y, 4px), root.height - self.height - 4px) + 4px;
         width: 180px;
         background: #00000022;
         border-radius: 8px;
@@ -54,8 +54,8 @@ export component ContextMenu inherits Rectangle {
 
     // ===== 菜单卡片（带边框、圆角、背景）=====
     menu-card := Rectangle {
-        x: root.menu-x;
-        y: root.menu-y;
+        x: Math.min(Math.max(root.menu-x, 4px), root.width - self.width - 4px);
+        y: Math.min(Math.max(root.menu-y, 4px), root.height - self.height - 4px);
         width: 180px;
         background: ThemeSettings.card-bg(root.theme-mode);
         border-radius: 8px;
