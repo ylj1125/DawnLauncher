@@ -130,26 +130,31 @@ export component MainWindow inherits Window {
             height: 32px;
             background: ThemeSettings.sidebar-bg(root.theme-mode);
 
-            // 标题栏拖拽移动窗口 - 点击时通知 Rust 端
-            TouchArea {
-                mouse-cursor: pointer;
-                pointer-event(e) => {
-                    if (e.kind == PointerEventKind.down) {
-                        root.title-bar-drag();
-                    }
-                }
-            }
-
             HorizontalLayout {
-                // 标题
-                Text {
-                    text: "Dawn Launcher";
-                    color: ThemeSettings.text-c(root.theme-mode);
-                    font-size: ThemeSettings.font-size-normal;
-                    font-weight: 700;
-                    vertical-alignment: center;
+                // 标题 + 拖拽区域
+                Rectangle {
                     horizontal-stretch: 1;
-                    padding-left: ThemeSettings.spacing-normal;
+                    height: parent.height;
+
+                    // 标题栏拖拽移动窗口 - 仅标题区域，不覆盖按钮
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down) {
+                                root.title-bar-drag();
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "Dawn Launcher";
+                        color: ThemeSettings.text-c(root.theme-mode);
+                        font-size: ThemeSettings.font-size-normal;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        padding-left: ThemeSettings.spacing-normal;
+                    }
                 }
 
                 // 设置按钮 (主界面才显示)
