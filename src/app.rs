@@ -813,6 +813,36 @@ impl App {
             std::process::exit(0);
         });
 
+        // 16.0.1 三明治菜单动作
+        {
+            let main_weak = main_window.as_weak();
+            main_window.on_menu_action(move |action| {
+                match action.as_str() {
+                    "settings" => {
+                        if let Some(mw) = main_weak.upgrade() {
+                            mw.invoke_settings_clicked();
+                        }
+                    }
+                    "tools" => {
+                        // 打开设置并定位到工具页
+                        if let Some(mw) = main_weak.upgrade() {
+                            mw.invoke_settings_clicked();
+                        }
+                    }
+                    "help" => {
+                        show_info_dialog(
+                            "帮助",
+                            "Dawn Launcher\n\n快捷键: Ctrl+Space 快速搜索\n\n操作:\n- 右键新建项目/分类\n- 拖拽文件添加项目\n- 分类左侧箭头折叠子分类\n- 项目区空白处右键排序",
+                        );
+                    }
+                    "exit" => {
+                        std::process::exit(0);
+                    }
+                    _ => {}
+                }
+            });
+        }
+
         // 16.0 标题栏拖拽 (无边框窗口)
         {
             let main_weak = main_window.as_weak();
@@ -1372,6 +1402,17 @@ impl App {
         // 保持 timer 不被 drop（Slint 事件循环会持有引用）
         std::mem::forget(timer);
 
+        // 窗口创建后应用圆角和阴影效果
+        let frame_timer = slint::Timer::default();
+        frame_timer.start(
+            slint::TimerMode::SingleShot,
+            std::time::Duration::from_millis(50),
+            move || {
+                apply_window_frame_effects();
+            },
+        );
+        std::mem::forget(frame_timer);
+
         self.main_window.run()
     }
 }
@@ -1445,6 +1486,45 @@ fn drag_window<C: ComponentHandle>(_window: &C) {
 
 #[cfg(not(target_os = "windows"))]
 fn drag_window<C: ComponentHandle>(_window: &C) {}
+
+/// 为主窗口设置圆角和阴影 (Windows DWM API)
+#[cfg(target_os = "windows")]
+fn apply_window_frame_effects() {
+    use windows::Win32::Graphics::Dwm::{
+        DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+    use windows::core::{HSTRING, PCWSTR};
+    use windows::Win32::UI::Controls::MARGINS;
+
+    let title = HSTRING::from("Dawn Launcher");
+    unsafe {
+        let hwnd = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr()));
+        if hwnd.0 as usize == 0 {
+            return;
+        }
+        // 圆角 (Windows 11)
+        let preference = DWMWCP_ROUND;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &preference as *const _ as *const _,
+            std::mem::size_of_val(&preference) as u32,
+        );
+        // 扩展非客户区到客户区，获得阴影 (margins = -1 表示全部扩展)
+        let margins = MARGINS {
+            cxLeftWidth: -1,
+            cxRightWidth: -1,
+            cyTopHeight: -1,
+            cyBottomHeight: -1,
+        };
+        let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_window_frame_effects() {}
 
 /// 将窗口居中到主屏幕
 /// 使用 Slint Window API 获取窗口逻辑尺寸，结合 Windows GetSystemMetrics 获取屏幕尺寸
@@ -1943,7 +2023,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $form = New-Object System.Windows.Forms.Form
 $form.Text = '{}'
-$form.Size = New-Object System.Drawing.Size(360, 180)
+$form.Size = New-Object System.Drawing.Size(360, 210)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
@@ -1954,26 +2034,26 @@ $form.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
 $label = New-Object System.Windows.Forms.Label
 $label.Text = '{}'
 $label.Location = New-Object System.Drawing.Point(20, 20)
-$label.Size = New-Object System.Drawing.Size(300, 25)
+$label.Size = New-Object System.Drawing.Size(310, 25)
 $form.Controls.Add($label)
 
 $textbox = New-Object System.Windows.Forms.TextBox
-$textbox.Location = New-Object System.Drawing.Point(20, 50)
-$textbox.Size = New-Object System.Drawing.Size(300, 25)
+$textbox.Location = New-Object System.Drawing.Point(20, 52)
+$textbox.Size = New-Object System.Drawing.Size(310, 25)
 $form.Controls.Add($textbox)
 
 $okBtn = New-Object System.Windows.Forms.Button
 $okBtn.Text = '确定'
-$okBtn.Location = New-Object System.Drawing.Point(160, 90)
-$okBtn.Size = New-Object System.Drawing.Size(75, 28)
+$okBtn.Location = New-Object System.Drawing.Point(165, 100)
+$okBtn.Size = New-Object System.Drawing.Size(75, 30)
 $okBtn.DialogResult = [System.Windows.Forms.DialogResult]::OK
 $form.AcceptButton = $okBtn
 $form.Controls.Add($okBtn)
 
 $cancelBtn = New-Object System.Windows.Forms.Button
 $cancelBtn.Text = '取消'
-$cancelBtn.Location = New-Object System.Drawing.Point(245, 90)
-$cancelBtn.Size = New-Object System.Drawing.Size(75, 28)
+$cancelBtn.Location = New-Object System.Drawing.Point(255, 100)
+$cancelBtn.Size = New-Object System.Drawing.Size(75, 30)
 $cancelBtn.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
 $form.CancelButton = $cancelBtn
 $form.Controls.Add($cancelBtn)

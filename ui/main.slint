@@ -65,6 +65,8 @@ export component MainWindow inherits Window {
     // ===== 批量操作模式 =====
     // 是否处于批量选择模式
     in-out property <bool> batch-mode: false;
+    // 三明治菜单显隐
+    in-out property <bool> main-menu-visible: false;
 
     // 回调
     callback classification-clicked(int);
@@ -100,6 +102,8 @@ export component MainWindow inherits Window {
     callback quick-search-triggered();
     // 标题栏拖拽
     callback title-bar-drag();
+    // 三明治菜单动作
+    callback menu-action(string); // "settings" / "tools" / "help" / "exit"
     // 工具回调
     callback backup-data();
     callback restore-data();
@@ -186,6 +190,27 @@ export component MainWindow inherits Window {
                     }
                 }
 
+                // 三明治菜单按钮
+                Rectangle {
+                    width: 40px;
+                    height: parent.height;
+                    background: menu-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+
+                    Text {
+                        text: "☰";
+                        color: ThemeSettings.text-c(root.theme-mode);
+                        font-size: 18px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    menu-touch := TouchArea {
+                        clicked => {
+                            root.main-menu-visible = !root.main-menu-visible;
+                        }
+                    }
+                }
+
                 // 关闭按钮
                 Rectangle {
                     width: 40px;
@@ -203,6 +228,160 @@ export component MainWindow inherits Window {
                     close-touch := TouchArea {
                         clicked => { root.window-close(); }
                     }
+                }
+            }
+
+            // 三明治下拉菜单
+            if root.main-menu-visible : Rectangle {
+                x: parent.width - 170px;
+                y: parent.height;
+                width: 160px;
+                background: ThemeSettings.card-bg(root.theme-mode);
+                border-radius: 6px;
+                border-width: 1px;
+                border-color: ThemeSettings.border-c(root.theme-mode);
+
+                // 阴影
+                Rectangle {
+                    x: 3px;
+                    y: 3px;
+                    width: parent.width;
+                    height: parent.height;
+                    background: #00000022;
+                    border-radius: 6px;
+                }
+
+                VerticalLayout {
+                    padding: 4px;
+                    spacing: 0px;
+
+                    // 设置
+                    Rectangle {
+                        height: 34px;
+                        border-radius: 4px;
+                        background: mi-settings.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 10px;
+                            alignment: start;
+                            Text { text: "⚙"; font-size: 14px; vertical-alignment: center; width: 16px; }
+                            Text {
+                                text: "设置";
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                font-size: ThemeSettings.font-size-normal;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                horizontal-alignment: left;
+                            }
+                        }
+                        mi-settings := TouchArea {
+                            clicked => {
+                                root.main-menu-visible = false;
+                                root.menu-action("settings");
+                            }
+                        }
+                    }
+
+                    // 工具
+                    Rectangle {
+                        height: 34px;
+                        border-radius: 4px;
+                        background: mi-tools.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 10px;
+                            alignment: start;
+                            Text { text: "🛠"; font-size: 14px; vertical-alignment: center; width: 16px; }
+                            Text {
+                                text: "工具";
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                font-size: ThemeSettings.font-size-normal;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                horizontal-alignment: left;
+                            }
+                        }
+                        mi-tools := TouchArea {
+                            clicked => {
+                                root.main-menu-visible = false;
+                                root.menu-action("tools");
+                            }
+                        }
+                    }
+
+                    // 分隔线
+                    VerticalLayout {
+                        height: 9px;
+                        padding: 4px;
+                        Rectangle { background: ThemeSettings.border-c(root.theme-mode); }
+                    }
+
+                    // 帮助
+                    Rectangle {
+                        height: 34px;
+                        border-radius: 4px;
+                        background: mi-help.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 10px;
+                            alignment: start;
+                            Text { text: "❓"; font-size: 14px; vertical-alignment: center; width: 16px; }
+                            Text {
+                                text: "帮助";
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                font-size: ThemeSettings.font-size-normal;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                horizontal-alignment: left;
+                            }
+                        }
+                        mi-help := TouchArea {
+                            clicked => {
+                                root.main-menu-visible = false;
+                                root.menu-action("help");
+                            }
+                        }
+                    }
+
+                    // 退出
+                    Rectangle {
+                        height: 34px;
+                        border-radius: 4px;
+                        background: mi-exit.has-hover ? #fee2e2 : transparent;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 10px;
+                            alignment: start;
+                            Text { text: "⏻"; font-size: 14px; vertical-alignment: center; width: 16px; }
+                            Text {
+                                text: "退出";
+                                color: #dc2626;
+                                font-size: ThemeSettings.font-size-normal;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                horizontal-alignment: left;
+                            }
+                        }
+                        mi-exit := TouchArea {
+                            clicked => {
+                                root.main-menu-visible = false;
+                                root.menu-action("exit");
+                            }
+                        }
+                    }
+                }
+
+                // 点击外部关闭菜单
+                menu-outside := TouchArea {
+                    x: -1000px;
+                    y: -1000px;
+                    width: 2000px;
+                    height: 2000px;
+                    clicked => { root.main-menu-visible = false; }
                 }
             }
         }
