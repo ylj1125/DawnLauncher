@@ -816,6 +816,7 @@ impl App {
         // 16.0.1 三明治菜单动作
         {
             let main_weak = main_window.as_weak();
+            let settings_weak = settings_window.as_weak();
             main_window.on_menu_action(move |action| {
                 match action.as_str() {
                     "settings" => {
@@ -824,7 +825,9 @@ impl App {
                         }
                     }
                     "tools" => {
-                        // 打开设置并定位到工具页
+                        if let Some(sw) = settings_weak.upgrade() {
+                            sw.set_active_section(SharedString::from("tools"));
+                        }
                         if let Some(mw) = main_weak.upgrade() {
                             mw.invoke_settings_clicked();
                         }

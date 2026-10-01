@@ -29,27 +29,30 @@ export component ContextMenu inherits Rectangle {
     // 点击菜单外部关闭
     callback closed();
 
-    // 点击空白区域关闭菜单
+    // 点击空白区域关闭菜单（全屏透明层）
     TouchArea {
         clicked => { root.closed(); }
     }
 
-    // ===== 菜单阴影层 =====
-    // 通过偏移的半透明黑色矩形模拟投影效果
-    menu-shadow := Rectangle {
-        x: Math.min(Math.max(root.menu-x, 4px), root.width - self.width - 4px) + 4px;
-        y: Math.min(Math.max(root.menu-y, 4px), root.height - self.height - 4px) + 4px;
-        width: 180px;
-        background: #00000022;
-        border-radius: 8px;
-        // 高度由内容决定，用 layout 撑开
-        VerticalLayout {
-            padding: 4px;
-            spacing: 0px;
-            for item[i] in root.items : Rectangle {
-                height: item.separator ? 9px : 32px;
-            }
+    // ===== 离屏测量布局（仅用于计算菜单高度，无 TouchArea，不干扰点击）=====
+    menu-measure := VerticalLayout {
+        x: -9999px;
+        y: -9999px;
+        padding: 4px;
+        spacing: 0px;
+        for item[i] in root.items : Rectangle {
+            height: item.separator ? 9px : 32px;
         }
+    }
+
+    // ===== 菜单阴影层（淡淡的投影，营造悬浮感）=====
+    menu-shadow := Rectangle {
+        x: Math.min(Math.max(root.menu-x, 4px), root.width - self.width - 4px) + 3px;
+        y: Math.min(Math.max(root.menu-y, 4px), root.height - self.height - 4px) + 3px;
+        width: 180px;
+        height: menu-measure.height;
+        background: #0000001a;
+        border-radius: 8px;
     }
 
     // ===== 菜单卡片（带边框、圆角、背景）=====
@@ -57,12 +60,12 @@ export component ContextMenu inherits Rectangle {
         x: Math.min(Math.max(root.menu-x, 4px), root.width - self.width - 4px);
         y: Math.min(Math.max(root.menu-y, 4px), root.height - self.height - 4px);
         width: 180px;
+        height: menu-measure.height;
         background: ThemeSettings.card-bg(root.theme-mode);
         border-radius: 8px;
         border-width: 1px;
         border-color: ThemeSettings.border-c(root.theme-mode);
 
-        // 用内容自适应高度
         VerticalLayout {
             padding: 4px;
             spacing: 0px;

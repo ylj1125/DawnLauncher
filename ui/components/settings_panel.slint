@@ -107,31 +107,34 @@ component setting-row inherits Rectangle {
     in property <string> theme-mode: "light";
     callback toggled(bool);
 
-    height: 56px;
+    height: 58px;
     horizontal-stretch: 1;
-    background: ThemeSettings.card-bg(root.theme-mode);
+    background: row-hover.has-hover
+        ? ThemeSettings.hover-c(root.theme-mode)
+        : ThemeSettings.card-bg(root.theme-mode);
     border-radius: ThemeSettings.border-radius;
     border-width: 1px;
     border-color: ThemeSettings.border-c(root.theme-mode);
 
     HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
-        padding-top: 10px;
-        padding-bottom: 10px;
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 11px;
+        padding-bottom: 11px;
         spacing: ThemeSettings.spacing-normal;
         alignment: center;
 
         VerticalLayout {
             horizontal-stretch: 1;
-            spacing: 2px;
+            spacing: 3px;
 
             Text {
                 text: root.title;
                 color: ThemeSettings.text-c(root.theme-mode);
                 font-size: ThemeSettings.font-size-normal;
-                font-weight: 500;
+                font-weight: 600;
                 horizontal-alignment: left;
+                horizontal-stretch: 1;
             }
 
             Text {
@@ -140,6 +143,7 @@ component setting-row inherits Rectangle {
                 font-size: ThemeSettings.font-size-small;
                 vertical-stretch: 1;
                 horizontal-alignment: left;
+                horizontal-stretch: 1;
             }
         }
 
@@ -149,6 +153,8 @@ component setting-row inherits Rectangle {
             toggled(v) => { root.toggled(v); }
         }
     }
+
+    row-hover := TouchArea { }
 }
 
 // 工具按钮行
@@ -158,31 +164,34 @@ component tool-button inherits Rectangle {
     in property <string> theme-mode: "light";
     callback clicked();
 
-    height: 56px;
+    height: 58px;
     horizontal-stretch: 1;
-    background: ThemeSettings.card-bg(root.theme-mode);
+    background: row-hover.has-hover
+        ? ThemeSettings.hover-c(root.theme-mode)
+        : ThemeSettings.card-bg(root.theme-mode);
     border-radius: ThemeSettings.border-radius;
     border-width: 1px;
     border-color: ThemeSettings.border-c(root.theme-mode);
 
     HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
-        padding-top: 10px;
-        padding-bottom: 10px;
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 11px;
+        padding-bottom: 11px;
         spacing: ThemeSettings.spacing-normal;
         alignment: center;
 
         VerticalLayout {
             horizontal-stretch: 1;
-            spacing: 2px;
+            spacing: 3px;
 
             Text {
                 text: root.title;
                 color: ThemeSettings.text-c(root.theme-mode);
                 font-size: ThemeSettings.font-size-normal;
-                font-weight: 500;
+                font-weight: 600;
                 horizontal-alignment: left;
+                horizontal-stretch: 1;
             }
 
             Text {
@@ -191,6 +200,7 @@ component tool-button inherits Rectangle {
                 font-size: ThemeSettings.font-size-small;
                 vertical-stretch: 1;
                 horizontal-alignment: left;
+                horizontal-stretch: 1;
             }
         }
 
@@ -213,6 +223,8 @@ component tool-button inherits Rectangle {
             }
         }
     }
+
+    row-hover := TouchArea { }
 }
 
 export component SettingsPanel inherits Rectangle {
@@ -400,12 +412,12 @@ export component SettingsPanel inherits Rectangle {
         }
 
         // ===== 右侧内容区 =====
-        ScrollView {
+        content-scroll := ScrollView {
             horizontal-stretch: 1;
             vertical-stretch: 1;
 
             VerticalLayout {
-                horizontal-stretch: 1;
+                width: content-scroll.viewport-width;
                 padding: ThemeSettings.spacing-large;
                 spacing: ThemeSettings.spacing-normal;
 
