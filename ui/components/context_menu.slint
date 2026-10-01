@@ -23,6 +23,8 @@ export component ContextMenu inherits Rectangle {
     // 显示位置
     in property <length> menu-x: 0px;
     in property <length> menu-y: 0px;
+    // 菜单高度（由 Rust 端计算传入）
+    in property <length> menu-height: 200px;
 
     // 选中菜单项回调，返回 item id
     callback item-selected(string);
@@ -34,23 +36,12 @@ export component ContextMenu inherits Rectangle {
         clicked => { root.closed(); }
     }
 
-    // ===== 离屏测量布局（仅用于计算菜单高度，无 TouchArea，不干扰点击）=====
-    menu-measure := VerticalLayout {
-        x: -9999px;
-        y: -9999px;
-        padding: 4px;
-        spacing: 0px;
-        for item[i] in root.items : Rectangle {
-            height: item.separator ? 9px : 32px;
-        }
-    }
-
     // ===== 菜单阴影层（淡淡的投影，营造悬浮感）=====
     menu-shadow := Rectangle {
         x: Math.min(Math.max(root.menu-x, 4px), root.width - self.width - 4px) + 3px;
         y: Math.min(Math.max(root.menu-y, 4px), root.height - self.height - 4px) + 3px;
         width: 180px;
-        height: menu-measure.height;
+        height: root.menu-height;
         background: #0000001a;
         border-radius: 8px;
     }
@@ -60,7 +51,7 @@ export component ContextMenu inherits Rectangle {
         x: Math.min(Math.max(root.menu-x, 4px), root.width - self.width - 4px);
         y: Math.min(Math.max(root.menu-y, 4px), root.height - self.height - 4px);
         width: 180px;
-        height: menu-measure.height;
+        height: root.menu-height;
         background: ThemeSettings.card-bg(root.theme-mode);
         border-radius: 8px;
         border-width: 1px;

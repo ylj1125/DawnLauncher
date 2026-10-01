@@ -387,14 +387,6 @@ export component SettingsPanel inherits Rectangle {
                     clicked => { root.active-section = "quicksearch"; }
                 }
                 nav-item {
-                    section: "tools";
-                    label: "工具";
-                    icon: "🛠";
-                    active: root.active-section == "tools";
-                    theme-mode: root.theme-mode;
-                    clicked => { root.active-section = "tools"; }
-                }
-                nav-item {
                     section: "about";
                     label: "关于";
                     icon: "ℹ";
@@ -417,7 +409,7 @@ export component SettingsPanel inherits Rectangle {
             vertical-stretch: 1;
 
             VerticalLayout {
-                width: content-scroll.viewport-width;
+                width: content-scroll.visible-width;
                 padding: ThemeSettings.spacing-large;
                 spacing: ThemeSettings.spacing-normal;
 
@@ -1051,33 +1043,6 @@ export component SettingsPanel inherits Rectangle {
                                 }
                             }
                         }
-                    }
-                }
-
-                // ========== 工具 ==========
-                if root.active-section == "tools" : VerticalLayout {
-                    horizontal-stretch: 1;
-                    spacing: ThemeSettings.spacing-normal;
-
-                    SettingGroupTitle { text: "数据管理"; theme-mode: root.theme-mode; }
-
-                    tool-button {
-                        title: "数据备份";
-                        desc: "备份当前所有数据到文件";
-                        theme-mode: root.theme-mode;
-                        clicked => { root.backup-data(); }
-                    }
-                    tool-button {
-                        title: "数据还原";
-                        desc: "从备份文件还原数据";
-                        theme-mode: root.theme-mode;
-                        clicked => { root.restore-data(); }
-                    }
-                    tool-button {
-                        title: "检查无效项目";
-                        desc: "扫描目标不存在的项目";
-                        theme-mode: root.theme-mode;
-                        clicked => { root.check-invalid-items(); }
                     }
                 }
 

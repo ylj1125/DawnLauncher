@@ -808,6 +808,75 @@ impl App {
             });
         }
 
+        // 15.35 主窗口工具回调: 数据备份
+        {
+            main_window.on_backup_data(move || {
+                if let Ok(db_path) = get_database_path() {
+                    let ts = chrono_now_ms_str();
+                    let backup_path = db_path
+                        .parent()
+                        .map(|p| p.join(format!("backup_{}.db", ts)))
+                        .unwrap_or_else(|| std::path::PathBuf::from(format!("backup_{}.db", ts)));
+                    match std::fs::copy(&db_path, &backup_path) {
+                        Ok(_) => show_info_dialog(
+                            "备份成功",
+                            &format!("已备份到:\n{}", backup_path.display()),
+                        ),
+                        Err(e) => show_error_dialog("备份失败", &format!("{}", e)),
+                    }
+                }
+            });
+        }
+
+        // 15.36 主窗口工具回调: 数据还原
+        {
+            main_window.on_restore_data(move || {
+                if let Some(backup_file) = show_open_file_dialog() {
+                    if let Ok(db_path) = get_database_path() {
+                        match std::fs::copy(&backup_file, &db_path) {
+                            Ok(_) => show_info_dialog(
+                                "还原成功",
+                                "数据已还原，请重启应用使更改生效。",
+                            ),
+                            Err(e) => show_error_dialog("还原失败", &format!("{}", e)),
+                        }
+                    }
+                }
+            });
+        }
+
+        // 15.37 主窗口工具回调: 检查无效项目
+        {
+            let db_for_check2 = db.clone();
+            let main_weak_check = main_window.as_weak();
+            let current_id_check2 = current_id.clone();
+            main_window.on_check_invalid_items(move || {
+                let class_id = current_id_check2.lock().unwrap().clone();
+                let items = db_for_check2.list_items(class_id);
+                let mut invalid_count = 0;
+                for item in &items {
+                    if (item.is_file() || item.is_folder()) {
+                        if let Some(target) = &item.data.target {
+                            if !std::path::Path::new(target).exists() {
+                                invalid_count += 1;
+                            }
+                        }
+                    }
+                }
+                if invalid_count > 0 {
+                    show_info_dialog(
+                        "检查完成",
+                        &format!("发现 {} 个无效项目（目标路径不存在）", invalid_count),
+                    );
+                    if let Some(w) = main_weak_check.upgrade() {
+                        w.set_items(to_item_model(&items, 0));
+                    }
+                } else {
+                    show_info_dialog("检查完成", "所有项目均有效");
+                }
+            });
+        }
+
         // 16. 窗口关闭
         main_window.on_window_close(move || {
             std::process::exit(0);
@@ -816,18 +885,9 @@ impl App {
         // 16.0.1 三明治菜单动作
         {
             let main_weak = main_window.as_weak();
-            let settings_weak = settings_window.as_weak();
             main_window.on_menu_action(move |action| {
                 match action.as_str() {
                     "settings" => {
-                        if let Some(mw) = main_weak.upgrade() {
-                            mw.invoke_settings_clicked();
-                        }
-                    }
-                    "tools" => {
-                        if let Some(sw) = settings_weak.upgrade() {
-                            sw.set_active_section(SharedString::from("tools"));
-                        }
                         if let Some(mw) = main_weak.upgrade() {
                             mw.invoke_settings_clicked();
                         }
@@ -2170,6 +2230,9 @@ fn show_context_menu(
     window.set_context_menu_source(SharedString::from(source));
     window.set_context_menu_x(x as f32);
     window.set_context_menu_y(y as f32);
+    // 计算菜单高度: 8px 内边距 + 每项高度(分隔线9px/普通项32px)
+    let height: f32 = 8.0 + items.iter().map(|i| if i.3 { 9.0 } else { 32.0 }).sum::<f32>();
+    window.set_context_menu_height(height);
     window.set_context_menu_items(build_menu_items(items));
     window.set_context_menu_visible(true);
 }

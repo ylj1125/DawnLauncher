@@ -53,6 +53,7 @@ export component MainWindow inherits Window {
     // 菜单位置
     in-out property <length> context-menu-x: 0px;
     in-out property <length> context-menu-y: 0px;
+    in-out property <length> context-menu-height: 200px;
     // 菜单项列表
     in-out property <[MenuItem]> context-menu-items: [];
     // 菜单来源标识（用于区分右键来源）
@@ -67,6 +68,8 @@ export component MainWindow inherits Window {
     in-out property <bool> batch-mode: false;
     // 三明治菜单显隐
     in-out property <bool> main-menu-visible: false;
+    // 工具弹窗显隐
+    in-out property <bool> tools-popup-visible: false;
 
     // 回调
     callback classification-clicked(int);
@@ -104,7 +107,7 @@ export component MainWindow inherits Window {
     callback title-bar-drag();
     // 三明治菜单动作
     callback menu-action(string); // "settings" / "tools" / "help" / "exit"
-    // 工具回调
+    // 工具操作回调
     callback backup-data();
     callback restore-data();
     callback check-invalid-items();
@@ -498,7 +501,7 @@ export component MainWindow inherits Window {
                     mi-tools := TouchArea {
                         clicked => {
                             root.main-menu-visible = false;
-                            root.menu-action("tools");
+                            root.tools-popup-visible = true;
                         }
                     }
                 }
@@ -569,6 +572,156 @@ export component MainWindow inherits Window {
         }
     }
 
+    // ===== 工具弹窗浮层 =====
+    if root.tools-popup-visible : Rectangle {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+
+        // 点击外部关闭
+        TouchArea {
+            clicked => { root.tools-popup-visible = false; }
+        }
+
+        // 工具弹窗卡片
+        Rectangle {
+            x: root.width - 230px;
+            y: 32px;
+            width: 220px;
+            background: ThemeSettings.card-bg(root.theme-mode);
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: ThemeSettings.border-c(root.theme-mode);
+
+            // 阴影
+            Rectangle {
+                x: 2px;
+                y: 2px;
+                width: parent.width;
+                height: parent.height;
+                background: #0000001a;
+                border-radius: 8px;
+            }
+
+            VerticalLayout {
+                padding: 4px;
+                spacing: 0px;
+
+                // 标题
+                Rectangle {
+                    height: 34px;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 10px;
+                        spacing: 8px;
+                        alignment: start;
+                        Text {
+                            text: "工具";
+                            color: ThemeSettings.text-c(root.theme-mode);
+                            font-size: ThemeSettings.font-size-normal;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            horizontal-alignment: left;
+                        }
+                    }
+                }
+
+                // 分隔线
+                VerticalLayout {
+                    height: 9px;
+                    padding: 4px;
+                    Rectangle { background: ThemeSettings.border-c(root.theme-mode); }
+                }
+
+                // 数据备份
+                Rectangle {
+                    height: 40px;
+                    border-radius: 4px;
+                    background: tp-backup.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 10px;
+                        spacing: 10px;
+                        alignment: start;
+                        Text { text: "💾"; font-size: 14px; vertical-alignment: center; width: 16px; }
+                        Text {
+                            text: "数据备份";
+                            color: ThemeSettings.text-c(root.theme-mode);
+                            font-size: ThemeSettings.font-size-normal;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            horizontal-alignment: left;
+                        }
+                    }
+                    tp-backup := TouchArea {
+                        clicked => {
+                            root.tools-popup-visible = false;
+                            root.backup-data();
+                        }
+                    }
+                }
+
+                // 数据还原
+                Rectangle {
+                    height: 40px;
+                    border-radius: 4px;
+                    background: tp-restore.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 10px;
+                        spacing: 10px;
+                        alignment: start;
+                        Text { text: "📂"; font-size: 14px; vertical-alignment: center; width: 16px; }
+                        Text {
+                            text: "数据还原";
+                            color: ThemeSettings.text-c(root.theme-mode);
+                            font-size: ThemeSettings.font-size-normal;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            horizontal-alignment: left;
+                        }
+                    }
+                    tp-restore := TouchArea {
+                        clicked => {
+                            root.tools-popup-visible = false;
+                            root.restore-data();
+                        }
+                    }
+                }
+
+                // 检查无效项目
+                Rectangle {
+                    height: 40px;
+                    border-radius: 4px;
+                    background: tp-check.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 10px;
+                        spacing: 10px;
+                        alignment: start;
+                        Text { text: "🔍"; font-size: 14px; vertical-alignment: center; width: 16px; }
+                        Text {
+                            text: "检查无效项目";
+                            color: ThemeSettings.text-c(root.theme-mode);
+                            font-size: ThemeSettings.font-size-normal;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            horizontal-alignment: left;
+                        }
+                    }
+                    tp-check := TouchArea {
+                        clicked => {
+                            root.tools-popup-visible = false;
+                            root.check-invalid-items();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ===== 右键菜单浮层（覆盖在所有内容之上）=====
     if root.context-menu-visible : ContextMenu {
         x: 0px;
@@ -580,6 +733,7 @@ export component MainWindow inherits Window {
         theme-mode: root.theme-mode;
         menu-x: root.context-menu-x;
         menu-y: root.context-menu-y;
+        menu-height: root.context-menu-height;
 
         item-selected(id) => {
             root.context-menu-visible = false;
