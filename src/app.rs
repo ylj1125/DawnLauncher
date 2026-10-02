@@ -386,7 +386,15 @@ impl App {
                 }
 
                 sw.window().show().ok();
-                center_window_on_screen(&sw);
+                // 定位到主窗口内部居中
+                if let Some(mw) = main_weak_for_settings.upgrade() {
+                    let mw_pos = mw.window().position();
+                    let mw_size = mw.window().size();
+                    let sw_size = sw.window().size();
+                    let x = mw_pos.x as f32 + (mw_size.width as f32 - sw_size.width as f32) / 2.0;
+                    let y = mw_pos.y as f32 + (mw_size.height as f32 - sw_size.height as f32) / 2.0;
+                    sw.window().set_position(slint::LogicalPosition::new(x, y));
+                }
                 log::info!("设置窗口已打开");
             });
         }

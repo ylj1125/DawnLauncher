@@ -160,25 +160,6 @@ export component MainWindow inherits Window {
                     }
                 }
 
-                // 设置按钮 (主界面才显示)
-                Rectangle {
-                    width: 40px;
-                    height: parent.height;
-                    background: settings-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
-
-                    Text {
-                        text: "⚙";
-                        color: ThemeSettings.text-c(root.theme-mode);
-                        font-size: 16px;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-
-                    settings-touch := TouchArea {
-                        clicked => { root.settings-clicked(); }
-                    }
-                }
-
                 // 快速搜索按钮
                 Rectangle {
                     width: 40px;
@@ -431,18 +412,19 @@ export component MainWindow inherits Window {
             x: root.width - 170px;
             y: 32px;
             width: 160px;
+            height: 153px;
             background: ThemeSettings.card-bg(root.theme-mode);
             border-radius: 8px;
             border-width: 1px;
             border-color: ThemeSettings.border-c(root.theme-mode);
 
-            // 阴影
+            // 阴影（淡淡的投影）
             Rectangle {
-                x: 2px;
+                x: 1px;
                 y: 2px;
                 width: parent.width;
                 height: parent.height;
-                background: #0000001a;
+                background: #00000015;
                 border-radius: 8px;
             }
 
@@ -589,18 +571,19 @@ export component MainWindow inherits Window {
             x: root.width - 230px;
             y: 32px;
             width: 220px;
+            height: 171px;
             background: ThemeSettings.card-bg(root.theme-mode);
             border-radius: 8px;
             border-width: 1px;
             border-color: ThemeSettings.border-c(root.theme-mode);
 
-            // 阴影
+            // 阴影（淡淡的投影）
             Rectangle {
-                x: 2px;
+                x: 1px;
                 y: 2px;
                 width: parent.width;
                 height: parent.height;
-                background: #0000001a;
+                background: #00000015;
                 border-radius: 8px;
             }
 

@@ -38,11 +38,11 @@ export component ContextMenu inherits Rectangle {
 
     // ===== 菜单阴影层（淡淡的投影，营造悬浮感）=====
     menu-shadow := Rectangle {
-        x: Math.min(Math.max(root.menu-x, 4px), root.width - self.width - 4px) + 3px;
-        y: Math.min(Math.max(root.menu-y, 4px), root.height - self.height - 4px) + 3px;
+        x: Math.min(Math.max(root.menu-x, 4px), root.width - self.width - 4px) + 1px;
+        y: Math.min(Math.max(root.menu-y, 4px), root.height - self.height - 4px) + 2px;
         width: 180px;
         height: root.menu-height;
-        background: #0000001a;
+        background: #00000015;
         border-radius: 8px;
     }
 
