@@ -409,9 +409,9 @@ export component MainWindow inherits Window {
 
         // 菜单卡片（右上角，标题栏下方）
         Rectangle {
-            x: root.width - 170px;
+            x: root.width - 130px;
             y: 32px;
-            width: 160px;
+            width: 120px;
             height: 153px;
             background: ThemeSettings.card-bg(root.theme-mode);
             border-radius: 8px;
@@ -495,7 +495,7 @@ export component MainWindow inherits Window {
                     Rectangle { background: ThemeSettings.border-c(root.theme-mode); }
                 }
 
-                // 帮助
+                // 关于
                 Rectangle {
                     height: 34px;
                     border-radius: 4px;
@@ -507,7 +507,7 @@ export component MainWindow inherits Window {
                         alignment: start;
                         Text { text: "❓"; font-size: 14px; vertical-alignment: center; width: 16px; }
                         Text {
-                            text: "帮助";
+                            text: "关于";
                             color: ThemeSettings.text-c(root.theme-mode);
                             font-size: ThemeSettings.font-size-normal;
                             vertical-alignment: center;
@@ -568,9 +568,9 @@ export component MainWindow inherits Window {
 
         // 工具弹窗卡片
         Rectangle {
-            x: root.width - 230px;
+            x: root.width - 180px;
             y: 32px;
-            width: 220px;
+            width: 170px;
             height: 171px;
             background: ThemeSettings.card-bg(root.theme-mode);
             border-radius: 8px;

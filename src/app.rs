@@ -902,8 +902,8 @@ impl App {
                     }
                     "help" => {
                         show_info_dialog(
-                            "帮助",
-                            "Dawn Launcher\n\n快捷键: Ctrl+Space 快速搜索\n\n操作:\n- 右键新建项目/分类\n- 拖拽文件添加项目\n- 分类左侧箭头折叠子分类\n- 项目区空白处右键排序",
+                            "关于",
+                            "Dawn Launcher v0.7.0\n轻量级桌面快捷启动工具\n\n快捷键: Ctrl+Space 快速搜索\n\n操作:\n- 右键新建项目/分类\n- 拖拽文件添加项目\n- 分类左侧箭头折叠子分类\n- 项目区空白处右键排序",
                         );
                     }
                     "exit" => {
