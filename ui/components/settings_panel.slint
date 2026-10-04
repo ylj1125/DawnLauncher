@@ -126,6 +126,7 @@ component setting-row inherits Rectangle {
 
         VerticalLayout {
             horizontal-stretch: 1;
+            width: 100%;
             spacing: 3px;
 
             Text {
@@ -134,7 +135,7 @@ component setting-row inherits Rectangle {
                 font-size: ThemeSettings.font-size-normal;
                 font-weight: 600;
                 horizontal-alignment: left;
-                horizontal-stretch: 1;
+                width: 100%;
             }
 
             Text {
@@ -143,7 +144,7 @@ component setting-row inherits Rectangle {
                 font-size: ThemeSettings.font-size-small;
                 vertical-stretch: 1;
                 horizontal-alignment: left;
-                horizontal-stretch: 1;
+                width: 100%;
             }
         }
 
@@ -183,6 +184,7 @@ component tool-button inherits Rectangle {
 
         VerticalLayout {
             horizontal-stretch: 1;
+            width: 100%;
             spacing: 3px;
 
             Text {
@@ -191,7 +193,7 @@ component tool-button inherits Rectangle {
                 font-size: ThemeSettings.font-size-normal;
                 font-weight: 600;
                 horizontal-alignment: left;
-                horizontal-stretch: 1;
+                width: 100%;
             }
 
             Text {
@@ -200,7 +202,7 @@ component tool-button inherits Rectangle {
                 font-size: ThemeSettings.font-size-small;
                 vertical-stretch: 1;
                 horizontal-alignment: left;
-                horizontal-stretch: 1;
+                width: 100%;
             }
         }
 
@@ -325,28 +327,11 @@ export component SettingsPanel inherits Rectangle {
             VerticalLayout {
                 padding-left: ThemeSettings.spacing-normal;
                 padding-right: ThemeSettings.spacing-normal;
-                padding-top: 4px;
-                padding-bottom: 4px;
+                padding-top: 12px;
+                padding-bottom: 12px;
                 spacing: 2px;
-
-                // 标题
-                Text {
-                    text: "设置";
-                    color: ThemeSettings.text-c(root.theme-mode);
-                    font-size: 16px;
-                    font-weight: 700;
-                    horizontal-alignment: center;
-                    padding-top: 4px;
-                    padding-bottom: 4px;
-                }
-
-                // 分隔
-                Rectangle { height: 4px; }
-                Rectangle {
-                    height: 1px;
-                    background: ThemeSettings.border-c(root.theme-mode);
-                }
-                Rectangle { height: 8px; }
+                vertical-stretch: 1;
+                alignment: start;
 
                 // 导航项
                 nav-item {
@@ -404,7 +389,8 @@ export component SettingsPanel inherits Rectangle {
             vertical-stretch: 1;
 
             VerticalLayout {
-                width: parent.width;
+                horizontal-stretch: 1;
+                width: content-scroll.viewport-width;
                 padding: ThemeSettings.spacing-large;
                 spacing: ThemeSettings.spacing-normal;
 

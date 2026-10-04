@@ -2094,7 +2094,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $form = New-Object System.Windows.Forms.Form
 $form.Text = '{}'
-$form.Size = New-Object System.Drawing.Size(360, 210)
+$form.Size = New-Object System.Drawing.Size(400, 210)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
@@ -2105,17 +2105,17 @@ $form.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
 $label = New-Object System.Windows.Forms.Label
 $label.Text = '{}'
 $label.Location = New-Object System.Drawing.Point(20, 20)
-$label.Size = New-Object System.Drawing.Size(310, 25)
+$label.Size = New-Object System.Drawing.Size(345, 25)
 $form.Controls.Add($label)
 
 $textbox = New-Object System.Windows.Forms.TextBox
 $textbox.Location = New-Object System.Drawing.Point(20, 52)
-$textbox.Size = New-Object System.Drawing.Size(310, 25)
+$textbox.Size = New-Object System.Drawing.Size(345, 25)
 $form.Controls.Add($textbox)
 
 $okBtn = New-Object System.Windows.Forms.Button
 $okBtn.Text = '确定'
-$okBtn.Location = New-Object System.Drawing.Point(165, 100)
+$okBtn.Location = New-Object System.Drawing.Point(195, 100)
 $okBtn.Size = New-Object System.Drawing.Size(75, 30)
 $okBtn.DialogResult = [System.Windows.Forms.DialogResult]::OK
 $form.AcceptButton = $okBtn
@@ -2123,7 +2123,7 @@ $form.Controls.Add($okBtn)
 
 $cancelBtn = New-Object System.Windows.Forms.Button
 $cancelBtn.Text = '取消'
-$cancelBtn.Location = New-Object System.Drawing.Point(255, 100)
+$cancelBtn.Location = New-Object System.Drawing.Point(285, 100)
 $cancelBtn.Size = New-Object System.Drawing.Size(75, 30)
 $cancelBtn.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
 $form.CancelButton = $cancelBtn
