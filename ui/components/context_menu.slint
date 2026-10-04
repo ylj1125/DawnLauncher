@@ -40,7 +40,7 @@ export component ContextMenu inherits Rectangle {
     menu-shadow := Rectangle {
         x: Math.min(Math.max(root.menu-x, 4px), root.width - self.width - 4px) + 1px;
         y: Math.min(Math.max(root.menu-y, 4px), root.height - self.height - 4px) + 2px;
-        width: 140px;
+        width: 165px;
         height: root.menu-height;
         background: #00000015;
         border-radius: 8px;
@@ -50,7 +50,7 @@ export component ContextMenu inherits Rectangle {
     menu-card := Rectangle {
         x: Math.min(Math.max(root.menu-x, 4px), root.width - self.width - 4px);
         y: Math.min(Math.max(root.menu-y, 4px), root.height - self.height - 4px);
-        width: 140px;
+        width: 165px;
         height: root.menu-height;
         background: ThemeSettings.card-bg(root.theme-mode);
         border-radius: 8px;
