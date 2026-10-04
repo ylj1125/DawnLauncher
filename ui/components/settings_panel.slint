@@ -133,7 +133,6 @@ component setting-row inherits Rectangle {
                 text: root.title;
                 color: ThemeSettings.text-c(root.theme-mode);
                 font-size: ThemeSettings.font-size-normal;
-                font-weight: 600;
                 horizontal-alignment: left;
                 width: 100%;
             }
@@ -191,7 +190,6 @@ component tool-button inherits Rectangle {
                 text: root.title;
                 color: ThemeSettings.text-c(root.theme-mode);
                 font-size: ThemeSettings.font-size-normal;
-                font-weight: 600;
                 horizontal-alignment: left;
                 width: 100%;
             }
@@ -390,7 +388,7 @@ export component SettingsPanel inherits Rectangle {
 
             VerticalLayout {
                 horizontal-stretch: 1;
-                width: content-scroll.viewport-width - 14px;
+                width: content-scroll.viewport-width - 20px;
                 padding: ThemeSettings.spacing-large;
                 spacing: ThemeSettings.spacing-normal;
 
