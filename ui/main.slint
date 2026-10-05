@@ -167,9 +167,10 @@ export component MainWindow inherits Window {
                     background: search-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
 
                     Text {
-                        text: "🔍";
+                        text: "⌕";
                         color: ThemeSettings.text-c(root.theme-mode);
-                        font-size: 15px;
+                        font-size: 18px;
+                        font-weight: 600;
                         horizontal-alignment: center;
                         vertical-alignment: center;
                     }
@@ -684,7 +685,7 @@ export component MainWindow inherits Window {
                         padding-right: 10px;
                         spacing: 10px;
                         alignment: start;
-                        Text { text: "🔍"; font-size: 14px; vertical-alignment: center; horizontal-alignment: center; width: 16px; color: ThemeSettings.text-c(root.theme-mode); }
+                        Text { text: "⌕"; font-size: 14px; vertical-alignment: center; horizontal-alignment: center; width: 16px; color: ThemeSettings.text-c(root.theme-mode); }
                         Text {
                             text: "检查无效项目";
                             color: ThemeSettings.text-c(root.theme-mode);
@@ -769,8 +770,9 @@ export component QuickSearchWindow inherits Window {
                 alignment: center;
 
                 Text {
-                    text: "🔍";
-                    font-size: 18px;
+                    text: "⌕";
+                    font-size: 20px;
+                    font-weight: 600;
                     color: ThemeSettings.text-sec(root.theme-mode);
                     vertical-alignment: center;
                 }
