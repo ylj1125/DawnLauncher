@@ -166,13 +166,13 @@ export component MainWindow inherits Window {
                     height: parent.height;
                     background: search-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
 
-                    Text {
-                        text: "⌕";
-                        color: ThemeSettings.text-c(root.theme-mode);
-                        font-size: 18px;
-                        font-weight: 600;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                    Image {
+                        source: @image-url("assets/search.svg");
+                        width: 18px;
+                        height: 18px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        colorize: ThemeSettings.text-c(root.theme-mode);
                     }
 
                     search-touch := TouchArea {
@@ -685,7 +685,13 @@ export component MainWindow inherits Window {
                         padding-right: 10px;
                         spacing: 10px;
                         alignment: start;
-                        Text { text: "⌕"; font-size: 14px; vertical-alignment: center; horizontal-alignment: center; width: 16px; color: ThemeSettings.text-c(root.theme-mode); }
+                        Image {
+                            source: @image-url("assets/search.svg");
+                            width: 16px;
+                            height: 16px;
+                            colorize: ThemeSettings.text-c(root.theme-mode);
+                            vertical-alignment: center;
+                        }
                         Text {
                             text: "检查无效项目";
                             color: ThemeSettings.text-c(root.theme-mode);
@@ -769,12 +775,11 @@ export component QuickSearchWindow inherits Window {
                 spacing: ThemeSettings.spacing-normal;
                 alignment: center;
 
-                Text {
-                    text: "⌕";
-                    font-size: 20px;
-                    font-weight: 600;
-                    color: ThemeSettings.text-sec(root.theme-mode);
-                    vertical-alignment: center;
+                Image {
+                    source: @image-url("assets/search.svg");
+                    width: 20px;
+                    height: 20px;
+                    colorize: ThemeSettings.text-sec(root.theme-mode);
                 }
 
                 input := LineEdit {
