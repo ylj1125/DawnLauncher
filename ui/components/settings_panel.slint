@@ -385,10 +385,11 @@ export component SettingsPanel inherits Rectangle {
         content-scroll := ScrollView {
             horizontal-stretch: 1;
             vertical-stretch: 1;
+            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
 
             VerticalLayout {
                 horizontal-stretch: 1;
-                width: root.width - 200px;
+                width: content-scroll.width - 30px;
                 padding: ThemeSettings.spacing-large;
                 spacing: ThemeSettings.spacing-normal;
 
