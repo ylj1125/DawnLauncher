@@ -741,10 +741,10 @@ export component QuickSearchWindow inherits Window {
     title: "快速搜索";
     background: ThemeSettings.bg-color(root.theme-mode);
     default-font-family: ThemeSettings.font-family;
-    preferred-width: 600px;
-    preferred-height: 400px;
-    min-width: 400px;
-    min-height: 300px;
+    preferred-width: 560px;
+    preferred-height: 48px;
+    min-width: 360px;
+    min-height: 48px;
     no-frame: true;
 
     in property <string> theme-mode: "light";
@@ -757,12 +757,12 @@ export component QuickSearchWindow inherits Window {
     callback close-requested();
 
     VerticalLayout {
-        padding: ThemeSettings.spacing-normal;
-        spacing: ThemeSettings.spacing-normal;
+        padding: 6px;
+        spacing: 0px;
 
-        // 搜索框
+        // 搜索框（单行）
         Rectangle {
-            height: 44px;
+            height: 38px;
             horizontal-stretch: 1;
             background: ThemeSettings.card-bg(root.theme-mode);
             border-radius: ThemeSettings.border-radius;
@@ -770,15 +770,15 @@ export component QuickSearchWindow inherits Window {
             border-color: ThemeSettings.border-c(root.theme-mode);
 
             HorizontalLayout {
-                padding-left: ThemeSettings.spacing-normal;
-                padding-right: ThemeSettings.spacing-normal;
-                spacing: ThemeSettings.spacing-normal;
+                padding-left: 10px;
+                padding-right: 8px;
+                spacing: 8px;
                 alignment: center;
 
                 Image {
                     source: @image-url("assets/search.svg");
-                    width: 20px;
-                    height: 20px;
+                    width: 18px;
+                    height: 18px;
                     colorize: ThemeSettings.text-sec(root.theme-mode);
                 }
 
@@ -791,15 +791,15 @@ export component QuickSearchWindow inherits Window {
                 }
 
                 Rectangle {
-                    width: 28px;
-                    height: 28px;
+                    width: 26px;
+                    height: 26px;
                     border-radius: 4px;
                     background: close-touch.has-hover ? #e81123 : transparent;
 
                     Text {
                         text: "×";
                         color: ThemeSettings.text-c(root.theme-mode);
-                        font-size: 18px;
+                        font-size: 16px;
                         horizontal-alignment: center;
                         vertical-alignment: center;
                     }
@@ -811,41 +811,41 @@ export component QuickSearchWindow inherits Window {
             }
         }
 
-        // 结果列表
-        ScrollView {
-            vertical-stretch: 1;
+        // 结果列表（有结果时显示）
+        if root.search-results.length > 0 : Rectangle {
+            height: 300px;
             horizontal-stretch: 1;
+            background: transparent;
 
-            if root.search-results.length == 0 : Text {
-                text: root.search-text == "" ? "输入关键词搜索项目" : "未找到匹配的项目";
-                color: ThemeSettings.text-sec(root.theme-mode);
-                font-size: ThemeSettings.font-size-normal;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
+            ScrollView {
+                vertical-stretch: 1;
+                horizontal-stretch: 1;
 
-            VerticalLayout {
-                spacing: ThemeSettings.spacing-small;
+                VerticalLayout {
+                    spacing: ThemeSettings.spacing-small;
+                    padding-top: 6px;
 
-                for item in root.search-results : ItemCard {
-                    item-id: item.id;
-                    name: item.name;
-                    icon: item.icon;
-                    invalid: item.invalid;
-                    selected: item.selected;
-                    theme-mode: root.theme-mode;
-                    double-clicked => { root.result-double-clicked(item.id); }
-                    clicked => { root.result-clicked(item.id); }
+                    for item in root.search-results : ItemCard {
+                        item-id: item.id;
+                        name: item.name;
+                        icon: item.icon;
+                        invalid: item.invalid;
+                        selected: item.selected;
+                        theme-mode: root.theme-mode;
+                        double-clicked => { root.result-double-clicked(item.id); }
+                        clicked => { root.result-clicked(item.id); }
+                    }
                 }
             }
         }
 
-        // 底部提示
-        Text {
-            text: "双击打开项目 · Esc 关闭";
+        // 无结果提示
+        if root.search-results.length == 0 && root.search-text != "" : Text {
+            text: "未找到匹配的项目";
             color: ThemeSettings.text-sec(root.theme-mode);
             font-size: ThemeSettings.font-size-small;
             horizontal-alignment: center;
+            padding-top: 12px;
         }
     }
 }
