@@ -356,16 +356,31 @@ export component MainWindow inherits Window {
                             colorize: ThemeSettings.text-sec(root.theme-mode);
                         }
 
-                        search-input := LineEdit {
+                        // 输入框区域
+                        Rectangle {
                             horizontal-stretch: 1;
-                            placeholder-text: "搜索项目名称...";
-                            text: root.search-text;
-                            font-size: ThemeSettings.font-size-normal;
-                            edited => {
-                                root.search-text = self.text;
-                                root.search-text-changed(self.text);
+                            height: 100%;
+
+                            search-input := TextInput {
+                                width: 100%;
+                                height: 100%;
+                                text: root.search-text;
+                                font-size: ThemeSettings.font-size-normal;
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                vertical-alignment: center;
+                                edited => {
+                                    root.search-text = self.text;
+                                    root.search-text-changed(self.text);
+                                }
+                                accepted => { root.search-accepted(); }
                             }
-                            accepted => { root.search-accepted(); }
+
+                            if root.search-text == "" : Text {
+                                text: "搜索项目名称...";
+                                color: ThemeSettings.text-sec(root.theme-mode);
+                                font-size: ThemeSettings.font-size-normal;
+                                vertical-alignment: center;
+                            }
                         }
 
                         if root.search-text != "" : Rectangle {
