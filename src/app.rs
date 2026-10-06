@@ -103,6 +103,7 @@ impl App {
                 let new_model = slint::VecModel::from(new_classes);
                 w.set_classifications(ModelRc::from(Rc::new(new_model)));
                 w.set_items(item_model);
+                w.set_search_text(SharedString::from(""));
                 w.set_status_text(SharedString::from(format!("{} 项", items.len())));
             }
             *current_id_for_class.lock().unwrap() = id.into();
@@ -994,6 +995,74 @@ impl App {
                     qs.window().show().ok();
                     center_window_on_screen(&qs);
                     log::info!("快速搜索窗口已显示");
+                }
+            });
+        }
+
+        // 16.5 应用内搜索: 文本变更 -> 实时过滤项目
+        {
+            let db_for_search = db.clone();
+            let main_weak_search = main_window.as_weak();
+            let current_id_for_search = current_id.clone();
+            main_window.on_search_text_changed(move |text| {
+                let query = text.to_string();
+                if let Some(w) = main_weak_search.upgrade() {
+                    if query.trim().is_empty() {
+                        // 清空搜索 -> 恢复当前分类项目
+                        let class_id = current_id_for_search.lock().unwrap().clone();
+                        let items = db_for_search.list_items(class_id);
+                        w.set_items(to_item_model(&items, 0));
+                        w.set_status_text(SharedString::from(format!("{} 项", items.len())));
+                    } else {
+                        // 搜索匹配项目（跨全部分类）
+                        let results = db_for_search.search_items(&query);
+                        w.set_items(to_item_model(&results, 0));
+                        w.set_status_text(SharedString::from(
+                            if results.is_empty() {
+                                format!("未找到 \"{}\"", query)
+                            } else {
+                                format!("找到 {} 个匹配项目", results.len())
+                            }
+                        ));
+                    }
+                }
+            });
+        }
+
+        // 16.6 应用内搜索: 回车 -> 打开第一个匹配项目
+        {
+            let db_for_accept = db.clone();
+            let main_weak_accept = main_window.as_weak();
+            main_window.on_search_accepted(move || {
+                if let Some(w) = main_weak_accept.upgrade() {
+                    let items: Vec<ItemInfo> = w.get_items().iter().collect();
+                    if let Some(first) = items.first() {
+                        let id = first.id as i64;
+                        let all_items = db_for_accept.list_all_items();
+                        if let Some(item) = all_items.iter().find(|i| i.id == id) {
+                            open_item(item);
+                            db_for_accept.record_item_open(id);
+                            // 打开后隐藏主窗口（若设置）
+                            if w.get_hide_after_open() {
+                                w.window().hide().ok();
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 16.7 应用内搜索: 清除 -> 恢复当前分类项目
+        {
+            let db_for_clear = db.clone();
+            let main_weak_clear = main_window.as_weak();
+            let current_id_for_clear = current_id.clone();
+            main_window.on_search_cleared(move || {
+                if let Some(w) = main_weak_clear.upgrade() {
+                    let class_id = current_id_for_clear.lock().unwrap().clone();
+                    let items = db_for_clear.list_items(class_id);
+                    w.set_items(to_item_model(&items, 0));
+                    w.set_status_text(SharedString::from(format!("{} 项", items.len())));
                 }
             });
         }

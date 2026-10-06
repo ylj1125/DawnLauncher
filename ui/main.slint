@@ -103,6 +103,12 @@ export component MainWindow inherits Window {
     callback quick-search-width-changed(int);
     // 触发快速搜索窗口
     callback quick-search-triggered();
+    // 应用内搜索
+    callback search-text-changed(string);
+    callback search-accepted();
+    callback search-cleared();
+    in-out property <string> search-text: "";
+    in property <bool> search-active: false;
     // 标题栏拖拽
     callback title-bar-drag();
     // 三明治菜单动作
@@ -328,6 +334,65 @@ export component MainWindow inherits Window {
                     }
                 }
 
+                // 搜索栏
+                Rectangle {
+                    height: 40px;
+                    horizontal-stretch: 1;
+                    background: ThemeSettings.card-bg(root.theme-mode);
+                    border-radius: ThemeSettings.border-radius;
+                    border-width: 1px;
+                    border-color: root.search-active ? ThemeSettings.accent-color : ThemeSettings.border-c(root.theme-mode);
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 8px;
+                        spacing: 8px;
+                        alignment: center;
+
+                        Image {
+                            source: @image-url("assets/search.svg");
+                            width: 18px;
+                            height: 18px;
+                            colorize: ThemeSettings.text-sec(root.theme-mode);
+                        }
+
+                        search-input := LineEdit {
+                            horizontal-stretch: 1;
+                            placeholder-text: "搜索项目名称...";
+                            text: root.search-text;
+                            font-size: ThemeSettings.font-size-normal;
+                            edited => {
+                                root.search-text = self.text;
+                                root.search-text-changed(self.text);
+                            }
+                            accepted => { root.search-accepted(); }
+                        }
+
+                        if root.search-text != "" : Rectangle {
+                            width: 26px;
+                            height: 26px;
+                            border-radius: 4px;
+                            background: search-clear-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+
+                            Text {
+                                text: "×";
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                font-size: 16px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            search-clear-touch := TouchArea {
+                                clicked => {
+                                    root.search-text = "";
+                                    search-input.text = "";
+                                    root.search-cleared();
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // 项目网格区 (支持拖拽)
                 Rectangle {
                     vertical-stretch: 1;
@@ -348,10 +413,12 @@ export component MainWindow inherits Window {
 
                     // 空状态提示
                     if root.items.length == 0 : Text {
-                        text: root.drag-hover ?
-                            "松开以添加项目" :
-                            "暂无项目\n\n右键新建项目\n或将文件/快捷方式拖入此区域";
-                        color: ThemeSettings.text-sec(root.theme-mode);
+                        text: root.search-text != "" ?
+                            "没有该项目" :
+                            (root.drag-hover ?
+                                "松开以添加项目" :
+                                "暂无项目\n\n右键新建项目\n或将文件/快捷方式拖入此区域");
+                        color: root.search-text != "" ? ThemeSettings.text-sec(root.theme-mode) : ThemeSettings.text-sec(root.theme-mode);
                         font-size: ThemeSettings.font-size-normal;
                         horizontal-alignment: center;
                         vertical-alignment: center;
