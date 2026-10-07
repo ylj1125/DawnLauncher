@@ -155,13 +155,19 @@ export component MainWindow inherits Window {
                         }
                     }
 
-                    Text {
-                        text: "Dawn Launcher";
-                        color: ThemeSettings.text-c(root.theme-mode);
-                        font-size: ThemeSettings.font-size-normal;
-                        font-weight: 700;
-                        vertical-alignment: center;
+                    HorizontalLayout {
+                        width: 100%;
+                        height: 100%;
                         padding-left: ThemeSettings.spacing-normal;
+                        alignment: center;
+
+                        Text {
+                            text: "Dawn Launcher";
+                            color: ThemeSettings.text-c(root.theme-mode);
+                            font-size: ThemeSettings.font-size-normal;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
                     }
                 }
 
