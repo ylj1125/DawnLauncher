@@ -157,76 +157,7 @@ component setting-row inherits Rectangle {
     row-hover := TouchArea { }
 }
 
-// 工具按钮行
-component tool-button inherits Rectangle {
-    in property <string> title: "";
-    in property <string> desc: "";
-    in property <string> theme-mode: "light";
-    callback clicked();
-
-    height: 58px;
-    horizontal-stretch: 1;
-    background: row-hover.has-hover
-        ? ThemeSettings.hover-c(root.theme-mode)
-        : ThemeSettings.card-bg(root.theme-mode);
-    border-radius: ThemeSettings.border-radius;
-    border-width: 1px;
-    border-color: ThemeSettings.border-c(root.theme-mode);
-
-    HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 20px;
-        padding-top: 11px;
-        padding-bottom: 11px;
-        spacing: ThemeSettings.spacing-normal;
-        alignment: center;
-
-        VerticalLayout {
-            horizontal-stretch: 1;
-            width: 100%;
-            spacing: 3px;
-
-            Text {
-                text: root.title;
-                color: ThemeSettings.text-c(root.theme-mode);
-                font-size: ThemeSettings.font-size-normal;
-                horizontal-alignment: left;
-                width: 100%;
-            }
-
-            Text {
-                text: root.desc;
-                color: ThemeSettings.text-sec(root.theme-mode);
-                font-size: ThemeSettings.font-size-small;
-                vertical-stretch: 1;
-                horizontal-alignment: left;
-                width: 100%;
-            }
-        }
-
-        Rectangle {
-            width: 64px;
-            height: 30px;
-            border-radius: ThemeSettings.border-radius;
-            background: btn-touch.has-hover ? #2563eb : ThemeSettings.accent-color;
-
-            Text {
-                text: "执行";
-                color: #ffffff;
-                font-size: ThemeSettings.font-size-small;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-
-            btn-touch := TouchArea {
-                clicked => { root.clicked(); }
-            }
-        }
-    }
-
-    row-hover := TouchArea { }
-}
-
+// 设置面板
 export component SettingsPanel inherits Rectangle {
     background: ThemeSettings.bg-color(root.theme-mode);
 

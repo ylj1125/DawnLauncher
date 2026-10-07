@@ -161,7 +161,6 @@ export component MainWindow inherits Window {
                         font-size: ThemeSettings.font-size-normal;
                         font-weight: 700;
                         vertical-alignment: center;
-                        horizontal-stretch: 1;
                         padding-left: ThemeSettings.spacing-normal;
                     }
                 }
@@ -182,6 +181,8 @@ export component MainWindow inherits Window {
                     }
 
                     search-touch := TouchArea {
+                        width: 100%;
+                        height: 100%;
                         clicked => { root.quick-search-triggered(); }
                     }
                 }
@@ -205,6 +206,8 @@ export component MainWindow inherits Window {
                     }
 
                     menu-touch := TouchArea {
+                        width: 100%;
+                        height: 100%;
                         clicked => {
                             root.main-menu-visible = !root.main-menu-visible;
                         }
@@ -226,6 +229,8 @@ export component MainWindow inherits Window {
                     }
 
                     close-touch := TouchArea {
+                        width: 100%;
+                        height: 100%;
                         clicked => { root.window-close(); }
                     }
                 }
