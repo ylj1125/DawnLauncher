@@ -108,7 +108,8 @@ export component MainWindow inherits Window {
     callback search-accepted();
     callback search-cleared();
     in-out property <string> search-text: "";
-    in property <bool> search-active: false;
+    in-out property <bool> search-active: false;
+    in-out property <bool> search-bar-visible: false;
     // 标题栏拖拽
     callback title-bar-drag();
     // 三明治菜单动作
@@ -159,10 +160,10 @@ export component MainWindow inherits Window {
                         width: 100%;
                         height: 100%;
                         padding-left: ThemeSettings.spacing-normal;
-                        alignment: center;
+                        alignment: start;
 
                         Text {
-                            text: "Dawn Launcher";
+                            text: "Dawn Launcher v0.7.2";
                             color: ThemeSettings.text-c(root.theme-mode);
                             font-size: ThemeSettings.font-size-normal;
                             font-weight: 700;
@@ -189,7 +190,16 @@ export component MainWindow inherits Window {
                     search-touch := TouchArea {
                         width: 100%;
                         height: 100%;
-                        clicked => { root.quick-search-triggered(); }
+                        clicked => {
+                            root.search-bar-visible = !root.search-bar-visible;
+                            if (root.search-bar-visible) {
+                                root.search-active = true;
+                            } else {
+                                root.search-active = false;
+                                root.search-text = "";
+                                root.search-cleared();
+                            }
+                        }
                     }
                 }
 
@@ -345,8 +355,8 @@ export component MainWindow inherits Window {
                     }
                 }
 
-                // 搜索栏
-                Rectangle {
+                // 搜索栏（默认隐藏，点击搜索图标显示）
+                if root.search-bar-visible : Rectangle {
                     height: 40px;
                     horizontal-stretch: 1;
                     background: ThemeSettings.card-bg(root.theme-mode);
@@ -391,6 +401,8 @@ export component MainWindow inherits Window {
                                 color: ThemeSettings.text-sec(root.theme-mode);
                                 font-size: ThemeSettings.font-size-normal;
                                 vertical-alignment: center;
+                                horizontal-alignment: left;
+                                width: 100%;
                             }
                         }
 
@@ -938,7 +950,6 @@ export component QuickSearchWindow inherits Window {
             color: ThemeSettings.text-sec(root.theme-mode);
             font-size: ThemeSettings.font-size-small;
             horizontal-alignment: center;
-            padding-top: 12px;
         }
     }
 }
