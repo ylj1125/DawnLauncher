@@ -551,8 +551,9 @@ impl App {
             let db_clone = db.clone();
             let sw_weak = settings_window.as_weak();
             settings_window.on_item_columns_changed(move |cols| {
-                let _ = db_clone.set_setting_i64("item_columns", cols as i64);
-                if let Some(sw) = sw_weak.upgrade() { sw.set_item_columns(cols); }
+                let cols_i = cols as i32;
+                let _ = db_clone.set_setting_i64("item_columns", cols_i as i64);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_item_columns(cols_i); }
             });
         }
 
@@ -561,8 +562,9 @@ impl App {
             let db_clone = db.clone();
             let sw_weak = settings_window.as_weak();
             settings_window.on_item_icon_size_changed(move |size| {
-                let _ = db_clone.set_setting_i64("item_icon_size", size as i64);
-                if let Some(sw) = sw_weak.upgrade() { sw.set_item_icon_size(size); }
+                let size_i = size as i32;
+                let _ = db_clone.set_setting_i64("item_icon_size", size_i as i64);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_item_icon_size(size_i); }
             });
         }
 
@@ -631,8 +633,9 @@ impl App {
             let db_clone = db.clone();
             let sw_weak = settings_window.as_weak();
             settings_window.on_sidebar_width_changed(move |w_val| {
-                let _ = db_clone.set_setting_i64("sidebar_width", w_val as i64);
-                if let Some(sw) = sw_weak.upgrade() { sw.set_sidebar_width(w_val); }
+                let w_i = w_val as i32;
+                let _ = db_clone.set_setting_i64("sidebar_width", w_i as i64);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_sidebar_width(w_i); }
             });
         }
 
@@ -681,8 +684,9 @@ impl App {
             let db_clone = db.clone();
             let sw_weak = settings_window.as_weak();
             settings_window.on_quick_search_width_changed(move |v| {
-                let _ = db_clone.set_setting_i64("quick_search_width", v as i64);
-                if let Some(sw) = sw_weak.upgrade() { sw.set_quick_search_width(v); }
+                let v_i = v as i32;
+                let _ = db_clone.set_setting_i64("quick_search_width", v_i as i64);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_quick_search_width(v_i); }
             });
         }
 

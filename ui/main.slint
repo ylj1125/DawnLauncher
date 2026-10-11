@@ -94,13 +94,13 @@ export component MainWindow inherits Window {
     callback theme-mode-changed(string);
     callback auto-start-changed(bool);
     callback window-topmost-changed(bool);
-    callback item-columns-changed(int);
-    callback item-icon-size-changed(int);
-    callback sidebar-width-changed(int);
+    callback item-columns-changed(float);
+    callback item-icon-size-changed(float);
+    callback sidebar-width-changed(float);
     callback hide-name-changed(bool);
     callback hide-after-open-changed(bool);
     callback quick-search-enabled-changed(bool);
-    callback quick-search-width-changed(int);
+    callback quick-search-width-changed(float);
     // 触发快速搜索窗口
     callback quick-search-triggered();
     // 应用内搜索
@@ -1018,21 +1018,21 @@ export component SettingsWindow inherits Window {
     callback lock-size-changed(bool);
     callback lock-position-changed(bool);
     callback always-center-changed(bool);
-    callback item-columns-changed(int);
-    callback item-icon-size-changed(int);
+    callback item-columns-changed(float);
+    callback item-icon-size-changed(float);
     callback hide-name-changed(bool);
     callback hide-ellipsis-changed(bool);
     callback hide-after-open-changed(bool);
     callback record-open-count-changed(bool);
     callback show-tooltip-changed(bool);
     callback show-path-changed(bool);
-    callback sidebar-width-changed(int);
+    callback sidebar-width-changed(float);
     callback sidebar-position-changed(string);
     callback hover-switch-changed(bool);
     callback wheel-switch-changed(bool);
     callback remember-selected-changed(bool);
     callback quick-search-enabled-changed(bool);
-    callback quick-search-width-changed(int);
+    callback quick-search-width-changed(float);
     callback quick-search-position-changed(string);
     callback quick-search-hide-on-lost-focus-changed(bool);
     callback quick-search-auto-open-changed(bool);

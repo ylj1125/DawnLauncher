@@ -4,7 +4,7 @@
 
 import { ScrollView } from "std-widgets.slint";
 import { ThemeSettings } from "../theme.slint";
-import { SettingSwitch, SettingGroupTitle } from "./setting_widgets.slint";
+import { SettingSwitch, SettingGroupTitle, SettingSlider } from "./setting_widgets.slint";
 
 // 主题预设按钮
 component theme-btn inherits Rectangle {
@@ -14,8 +14,8 @@ component theme-btn inherits Rectangle {
     in property <string> theme-mode: "light";
     callback selected(string);
 
-    width: 64px;
-    height: 56px;
+    width: 84px;
+    height: 68px;
     border-radius: ThemeSettings.border-radius;
     border-width: 1px;
     border-color: root.current-theme == root.theme
@@ -24,15 +24,15 @@ component theme-btn inherits Rectangle {
     background: ThemeSettings.hover-c(root.theme-mode);
 
     VerticalLayout {
-        padding: 4px;
-        spacing: 2px;
+        padding: 5px;
+        spacing: 4px;
         alignment: center;
 
         // 主题颜色预览条
         Rectangle {
-            height: 16px;
+            height: 22px;
             horizontal-stretch: 1;
-            border-radius: 3px;
+            border-radius: 4px;
             background: ThemeSettings.bg-color(root.theme);
 
             HorizontalLayout {
@@ -46,12 +46,14 @@ component theme-btn inherits Rectangle {
         Text {
             text: root.label;
             color: ThemeSettings.text-c(root.theme-mode);
-            font-size: 10px;
+            font-size: 11px;
             horizontal-alignment: center;
         }
     }
 
     TouchArea {
+        width: 100%;
+        height: 100%;
         clicked => { root.selected(root.theme); }
     }
 }
@@ -212,21 +214,21 @@ export component SettingsPanel inherits Rectangle {
     callback lock-size-changed(bool);
     callback lock-position-changed(bool);
     callback always-center-changed(bool);
-    callback item-columns-changed(int);
-    callback item-icon-size-changed(int);
+    callback item-columns-changed(float);
+    callback item-icon-size-changed(float);
     callback hide-name-changed(bool);
     callback hide-ellipsis-changed(bool);
     callback hide-after-open-changed(bool);
     callback record-open-count-changed(bool);
     callback show-tooltip-changed(bool);
     callback show-path-changed(bool);
-    callback sidebar-width-changed(int);
+    callback sidebar-width-changed(float);
     callback sidebar-position-changed(string);
     callback hover-switch-changed(bool);
     callback wheel-switch-changed(bool);
     callback remember-selected-changed(bool);
     callback quick-search-enabled-changed(bool);
-    callback quick-search-width-changed(int);
+    callback quick-search-width-changed(float);
     callback quick-search-position-changed(string);
     callback quick-search-hide-on-lost-focus-changed(bool);
     callback quick-search-auto-open-changed(bool);
@@ -480,9 +482,9 @@ export component SettingsPanel inherits Rectangle {
 
                     SettingGroupTitle { text: "显示"; theme-mode: root.theme-mode; }
 
-                    // 项目列数滑块
+                    // 项目列数
                     Rectangle {
-                        height: 88px;
+                        height: 80px;
                         horizontal-stretch: 1;
                         background: ThemeSettings.card-bg(root.theme-mode);
                         border-radius: ThemeSettings.border-radius;
@@ -517,6 +519,7 @@ export component SettingsPanel inherits Rectangle {
                                 spacing: ThemeSettings.spacing-small;
                                 alignment: center;
 
+                                // 减号按钮
                                 Rectangle {
                                     width: 28px; height: 28px;
                                     border-radius: ThemeSettings.border-radius;
@@ -529,28 +532,24 @@ export component SettingsPanel inherits Rectangle {
                                         vertical-alignment: center;
                                     }
                                     minus-touch := TouchArea {
+                                        width: 100%;
+                                        height: 100%;
                                         clicked => { if (root.item-columns > 2) { root.item-columns-changed(root.item-columns - 1); } }
                                     }
                                 }
 
-                                Rectangle {
-                                    height: 28px;
+                                // 可拖动滑块
+                                SettingSlider {
                                     horizontal-stretch: 1;
-                                    Rectangle {
-                                        height: 6px;
-                                        y: (parent.height - self.height) / 2;
-                                        width: parent.width;
-                                        background: ThemeSettings.border-c(root.theme-mode);
-                                        border-radius: 3px;
-                                        Rectangle {
-                                            width: parent.width * ((root.item-columns - 2) / 14.0);
-                                            height: parent.height;
-                                            background: ThemeSettings.accent-color;
-                                            border-radius: 3px;
-                                        }
-                                    }
+                                    value: root.item-columns;
+                                    min: 2;
+                                    max: 16;
+                                    step: 1;
+                                    theme-mode: root.theme-mode;
+                                    changed(v) => { root.item-columns-changed(v); }
                                 }
 
+                                // 加号按钮
                                 Rectangle {
                                     width: 28px; height: 28px;
                                     border-radius: ThemeSettings.border-radius;
@@ -563,6 +562,8 @@ export component SettingsPanel inherits Rectangle {
                                         vertical-alignment: center;
                                     }
                                     plus-touch := TouchArea {
+                                        width: 100%;
+                                        height: 100%;
                                         clicked => { if (root.item-columns < 16) { root.item-columns-changed(root.item-columns + 1); } }
                                     }
                                 }
@@ -570,9 +571,9 @@ export component SettingsPanel inherits Rectangle {
                         }
                     }
 
-                    // 图标大小滑块
+                    // 图标大小
                     Rectangle {
-                        height: 88px;
+                        height: 80px;
                         horizontal-stretch: 1;
                         background: ThemeSettings.card-bg(root.theme-mode);
                         border-radius: ThemeSettings.border-radius;
@@ -607,6 +608,7 @@ export component SettingsPanel inherits Rectangle {
                                 spacing: ThemeSettings.spacing-small;
                                 alignment: center;
 
+                                // 减号按钮
                                 Rectangle {
                                     width: 28px; height: 28px;
                                     border-radius: ThemeSettings.border-radius;
@@ -619,28 +621,24 @@ export component SettingsPanel inherits Rectangle {
                                         vertical-alignment: center;
                                     }
                                     icon-minus-touch := TouchArea {
+                                        width: 100%;
+                                        height: 100%;
                                         clicked => { if (root.item-icon-size > 16) { root.item-icon-size-changed(root.item-icon-size - 8); } }
                                     }
                                 }
 
-                                Rectangle {
-                                    height: 28px;
+                                // 可拖动滑块
+                                SettingSlider {
                                     horizontal-stretch: 1;
-                                    Rectangle {
-                                        height: 6px;
-                                        y: (parent.height - self.height) / 2;
-                                        width: parent.width;
-                                        background: ThemeSettings.border-c(root.theme-mode);
-                                        border-radius: 3px;
-                                        Rectangle {
-                                            width: parent.width * ((root.item-icon-size - 16) / 80.0);
-                                            height: parent.height;
-                                            background: ThemeSettings.accent-color;
-                                            border-radius: 3px;
-                                        }
-                                    }
+                                    value: root.item-icon-size;
+                                    min: 16;
+                                    max: 96;
+                                    step: 8;
+                                    theme-mode: root.theme-mode;
+                                    changed(v) => { root.item-icon-size-changed(v); }
                                 }
 
+                                // 加号按钮
                                 Rectangle {
                                     width: 28px; height: 28px;
                                     border-radius: ThemeSettings.border-radius;
@@ -653,6 +651,8 @@ export component SettingsPanel inherits Rectangle {
                                         vertical-alignment: center;
                                     }
                                     icon-plus-touch := TouchArea {
+                                        width: 100%;
+                                        height: 100%;
                                         clicked => { if (root.item-icon-size < 96) { root.item-icon-size-changed(root.item-icon-size + 8); } }
                                     }
                                 }
@@ -670,7 +670,7 @@ export component SettingsPanel inherits Rectangle {
 
                     // 分类栏宽度
                     Rectangle {
-                        height: 88px;
+                        height: 80px;
                         horizontal-stretch: 1;
                         background: ThemeSettings.card-bg(root.theme-mode);
                         border-radius: ThemeSettings.border-radius;
@@ -705,6 +705,7 @@ export component SettingsPanel inherits Rectangle {
                                 spacing: ThemeSettings.spacing-small;
                                 alignment: center;
 
+                                // 减号按钮
                                 Rectangle {
                                     width: 28px; height: 28px;
                                     border-radius: ThemeSettings.border-radius;
@@ -717,28 +718,24 @@ export component SettingsPanel inherits Rectangle {
                                         vertical-alignment: center;
                                     }
                                     sw-minus-touch := TouchArea {
+                                        width: 100%;
+                                        height: 100%;
                                         clicked => { if (root.sidebar-width > 80) { root.sidebar-width-changed(root.sidebar-width - 10); } }
                                     }
                                 }
 
-                                Rectangle {
-                                    height: 28px;
+                                // 可拖动滑块
+                                SettingSlider {
                                     horizontal-stretch: 1;
-                                    Rectangle {
-                                        height: 6px;
-                                        y: (parent.height - self.height) / 2;
-                                        width: parent.width;
-                                        background: ThemeSettings.border-c(root.theme-mode);
-                                        border-radius: 3px;
-                                        Rectangle {
-                                            width: parent.width * ((root.sidebar-width - 80) / 160.0);
-                                            height: parent.height;
-                                            background: ThemeSettings.accent-color;
-                                            border-radius: 3px;
-                                        }
-                                    }
+                                    value: root.sidebar-width;
+                                    min: 80;
+                                    max: 240;
+                                    step: 10;
+                                    theme-mode: root.theme-mode;
+                                    changed(v) => { root.sidebar-width-changed(v); }
                                 }
 
+                                // 加号按钮
                                 Rectangle {
                                     width: 28px; height: 28px;
                                     border-radius: ThemeSettings.border-radius;
@@ -751,6 +748,8 @@ export component SettingsPanel inherits Rectangle {
                                         vertical-alignment: center;
                                     }
                                     sw-plus-touch := TouchArea {
+                                        width: 100%;
+                                        height: 100%;
                                         clicked => { if (root.sidebar-width < 240) { root.sidebar-width-changed(root.sidebar-width + 10); } }
                                     }
                                 }
@@ -899,7 +898,7 @@ export component SettingsPanel inherits Rectangle {
 
                         // 搜索窗口宽度
                         Rectangle {
-                            height: 88px;
+                            height: 80px;
                             horizontal-stretch: 1;
                             background: ThemeSettings.card-bg(root.theme-mode);
                             border-radius: ThemeSettings.border-radius;
@@ -932,6 +931,7 @@ export component SettingsPanel inherits Rectangle {
                                     spacing: ThemeSettings.spacing-small;
                                     alignment: center;
 
+                                    // 减号按钮
                                     Rectangle {
                                         width: 28px; height: 28px;
                                         border-radius: ThemeSettings.border-radius;
@@ -944,28 +944,24 @@ export component SettingsPanel inherits Rectangle {
                                             vertical-alignment: center;
                                         }
                                         qs-minus-touch := TouchArea {
+                                            width: 100%;
+                                            height: 100%;
                                             clicked => { if (root.quick-search-width > 300) { root.quick-search-width-changed(root.quick-search-width - 50); } }
                                         }
                                     }
 
-                                    Rectangle {
-                                        height: 28px;
+                                    // 可拖动滑块
+                                    SettingSlider {
                                         horizontal-stretch: 1;
-                                        Rectangle {
-                                            height: 6px;
-                                            y: (parent.height - self.height) / 2;
-                                            width: parent.width;
-                                            background: ThemeSettings.border-c(root.theme-mode);
-                                            border-radius: 3px;
-                                            Rectangle {
-                                                width: parent.width * ((root.quick-search-width - 300) / 700.0);
-                                                height: parent.height;
-                                                background: ThemeSettings.accent-color;
-                                                border-radius: 3px;
-                                            }
-                                        }
+                                        value: root.quick-search-width;
+                                        min: 300;
+                                        max: 1000;
+                                        step: 50;
+                                        theme-mode: root.theme-mode;
+                                        changed(v) => { root.quick-search-width-changed(v); }
                                     }
 
+                                    // 加号按钮
                                     Rectangle {
                                         width: 28px; height: 28px;
                                         border-radius: ThemeSettings.border-radius;
@@ -978,6 +974,8 @@ export component SettingsPanel inherits Rectangle {
                                             vertical-alignment: center;
                                         }
                                         qs-plus-touch := TouchArea {
+                                            width: 100%;
+                                            height: 100%;
                                             clicked => { if (root.quick-search-width < 1000) { root.quick-search-width-changed(root.quick-search-width + 50); } }
                                         }
                                     }
