@@ -14,8 +14,8 @@ component theme-btn inherits Rectangle {
     in property <string> theme-mode: "light";
     callback selected(string);
 
-    width: 84px;
-    height: 68px;
+    width: 100px;
+    height: 80px;
     border-radius: ThemeSettings.border-radius;
     border-width: 1px;
     border-color: root.current-theme == root.theme
@@ -24,13 +24,13 @@ component theme-btn inherits Rectangle {
     background: ThemeSettings.hover-c(root.theme-mode);
 
     VerticalLayout {
-        padding: 5px;
-        spacing: 4px;
+        padding: 6px;
+        spacing: 5px;
         alignment: center;
 
         // 主题颜色预览条
         Rectangle {
-            height: 22px;
+            height: 28px;
             horizontal-stretch: 1;
             border-radius: 4px;
             background: ThemeSettings.bg-color(root.theme);
@@ -46,7 +46,7 @@ component theme-btn inherits Rectangle {
         Text {
             text: root.label;
             color: ThemeSettings.text-c(root.theme-mode);
-            font-size: 11px;
+            font-size: 12px;
             horizontal-alignment: center;
         }
     }
@@ -515,61 +515,19 @@ export component SettingsPanel inherits Rectangle {
                                 }
                             }
 
-                            HorizontalLayout {
-                                spacing: ThemeSettings.spacing-small;
-                                alignment: center;
-
-                                // 减号按钮
-                                Rectangle {
-                                    width: 28px; height: 28px;
-                                    border-radius: ThemeSettings.border-radius;
-                                    background: minus-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : ThemeSettings.border-c(root.theme-mode);
-                                    Text {
-                                        text: "−";
-                                        color: ThemeSettings.text-c(root.theme-mode);
-                                        font-size: 18px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                    minus-touch := TouchArea {
-                                        width: 100%;
-                                        height: 100%;
-                                        clicked => { if (root.item-columns > 2) { root.item-columns-changed(root.item-columns - 1); } }
-                                    }
-                                }
-
-                                // 可拖动滑块
-                                SettingSlider {
-                                    horizontal-stretch: 1;
-                                    value: root.item-columns;
-                                    min: 2;
-                                    max: 16;
-                                    step: 1;
-                                    theme-mode: root.theme-mode;
-                                    changed(v) => { root.item-columns-changed(v); }
-                                }
-
-                                // 加号按钮
-                                Rectangle {
-                                    width: 28px; height: 28px;
-                                    border-radius: ThemeSettings.border-radius;
-                                    background: plus-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : ThemeSettings.border-c(root.theme-mode);
-                                    Text {
-                                        text: "+";
-                                        color: ThemeSettings.text-c(root.theme-mode);
-                                        font-size: 18px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                    plus-touch := TouchArea {
-                                        width: 100%;
-                                        height: 100%;
-                                        clicked => { if (root.item-columns < 16) { root.item-columns-changed(root.item-columns + 1); } }
-                                    }
-                                }
+                            // 可拖动滑块
+                            SettingSlider {
+                                horizontal-stretch: 1;
+                                value: root.item-columns;
+                                min: 2;
+                                max: 16;
+                                step: 1;
+                                theme-mode: root.theme-mode;
+                                changed(v) => { root.item-columns-changed(v); }
                             }
                         }
                     }
+                }
 
                     // 图标大小
                     Rectangle {
@@ -604,58 +562,15 @@ export component SettingsPanel inherits Rectangle {
                                 }
                             }
 
-                            HorizontalLayout {
-                                spacing: ThemeSettings.spacing-small;
-                                alignment: center;
-
-                                // 减号按钮
-                                Rectangle {
-                                    width: 28px; height: 28px;
-                                    border-radius: ThemeSettings.border-radius;
-                                    background: icon-minus-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : ThemeSettings.border-c(root.theme-mode);
-                                    Text {
-                                        text: "−";
-                                        color: ThemeSettings.text-c(root.theme-mode);
-                                        font-size: 18px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                    icon-minus-touch := TouchArea {
-                                        width: 100%;
-                                        height: 100%;
-                                        clicked => { if (root.item-icon-size > 16) { root.item-icon-size-changed(root.item-icon-size - 8); } }
-                                    }
-                                }
-
-                                // 可拖动滑块
-                                SettingSlider {
-                                    horizontal-stretch: 1;
-                                    value: root.item-icon-size;
-                                    min: 16;
-                                    max: 96;
-                                    step: 8;
-                                    theme-mode: root.theme-mode;
-                                    changed(v) => { root.item-icon-size-changed(v); }
-                                }
-
-                                // 加号按钮
-                                Rectangle {
-                                    width: 28px; height: 28px;
-                                    border-radius: ThemeSettings.border-radius;
-                                    background: icon-plus-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : ThemeSettings.border-c(root.theme-mode);
-                                    Text {
-                                        text: "+";
-                                        color: ThemeSettings.text-c(root.theme-mode);
-                                        font-size: 18px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                    icon-plus-touch := TouchArea {
-                                        width: 100%;
-                                        height: 100%;
-                                        clicked => { if (root.item-icon-size < 96) { root.item-icon-size-changed(root.item-icon-size + 8); } }
-                                    }
-                                }
+                            // 可拖动滑块
+                            SettingSlider {
+                                horizontal-stretch: 1;
+                                value: root.item-icon-size;
+                                min: 16;
+                                max: 96;
+                                step: 8;
+                                theme-mode: root.theme-mode;
+                                changed(v) => { root.item-icon-size-changed(v); }
                             }
                         }
                     }
@@ -701,58 +616,15 @@ export component SettingsPanel inherits Rectangle {
                                 }
                             }
 
-                            HorizontalLayout {
-                                spacing: ThemeSettings.spacing-small;
-                                alignment: center;
-
-                                // 减号按钮
-                                Rectangle {
-                                    width: 28px; height: 28px;
-                                    border-radius: ThemeSettings.border-radius;
-                                    background: sw-minus-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : ThemeSettings.border-c(root.theme-mode);
-                                    Text {
-                                        text: "−";
-                                        color: ThemeSettings.text-c(root.theme-mode);
-                                        font-size: 18px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                    sw-minus-touch := TouchArea {
-                                        width: 100%;
-                                        height: 100%;
-                                        clicked => { if (root.sidebar-width > 80) { root.sidebar-width-changed(root.sidebar-width - 10); } }
-                                    }
-                                }
-
-                                // 可拖动滑块
-                                SettingSlider {
-                                    horizontal-stretch: 1;
-                                    value: root.sidebar-width;
-                                    min: 80;
-                                    max: 240;
-                                    step: 10;
-                                    theme-mode: root.theme-mode;
-                                    changed(v) => { root.sidebar-width-changed(v); }
-                                }
-
-                                // 加号按钮
-                                Rectangle {
-                                    width: 28px; height: 28px;
-                                    border-radius: ThemeSettings.border-radius;
-                                    background: sw-plus-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : ThemeSettings.border-c(root.theme-mode);
-                                    Text {
-                                        text: "+";
-                                        color: ThemeSettings.text-c(root.theme-mode);
-                                        font-size: 18px;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                    sw-plus-touch := TouchArea {
-                                        width: 100%;
-                                        height: 100%;
-                                        clicked => { if (root.sidebar-width < 240) { root.sidebar-width-changed(root.sidebar-width + 10); } }
-                                    }
-                                }
+                            // 可拖动滑块
+                            SettingSlider {
+                                horizontal-stretch: 1;
+                                value: root.sidebar-width;
+                                min: 80;
+                                max: 240;
+                                step: 10;
+                                theme-mode: root.theme-mode;
+                                changed(v) => { root.sidebar-width-changed(v); }
                             }
                         }
                     }
@@ -927,58 +799,15 @@ export component SettingsPanel inherits Rectangle {
                                     }
                                 }
 
-                                HorizontalLayout {
-                                    spacing: ThemeSettings.spacing-small;
-                                    alignment: center;
-
-                                    // 减号按钮
-                                    Rectangle {
-                                        width: 28px; height: 28px;
-                                        border-radius: ThemeSettings.border-radius;
-                                        background: qs-minus-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : ThemeSettings.border-c(root.theme-mode);
-                                        Text {
-                                            text: "−";
-                                            color: ThemeSettings.text-c(root.theme-mode);
-                                            font-size: 18px;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                        }
-                                        qs-minus-touch := TouchArea {
-                                            width: 100%;
-                                            height: 100%;
-                                            clicked => { if (root.quick-search-width > 300) { root.quick-search-width-changed(root.quick-search-width - 50); } }
-                                        }
-                                    }
-
-                                    // 可拖动滑块
-                                    SettingSlider {
-                                        horizontal-stretch: 1;
-                                        value: root.quick-search-width;
-                                        min: 300;
-                                        max: 1000;
-                                        step: 50;
-                                        theme-mode: root.theme-mode;
-                                        changed(v) => { root.quick-search-width-changed(v); }
-                                    }
-
-                                    // 加号按钮
-                                    Rectangle {
-                                        width: 28px; height: 28px;
-                                        border-radius: ThemeSettings.border-radius;
-                                        background: qs-plus-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : ThemeSettings.border-c(root.theme-mode);
-                                        Text {
-                                            text: "+";
-                                            color: ThemeSettings.text-c(root.theme-mode);
-                                            font-size: 18px;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                        }
-                                        qs-plus-touch := TouchArea {
-                                            width: 100%;
-                                            height: 100%;
-                                            clicked => { if (root.quick-search-width < 1000) { root.quick-search-width-changed(root.quick-search-width + 50); } }
-                                        }
-                                    }
+                                // 可拖动滑块
+                                SettingSlider {
+                                    horizontal-stretch: 1;
+                                    value: root.quick-search-width;
+                                    min: 300;
+                                    max: 1000;
+                                    step: 50;
+                                    theme-mode: root.theme-mode;
+                                    changed(v) => { root.quick-search-width-changed(v); }
                                 }
                             }
                         }

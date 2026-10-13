@@ -59,38 +59,41 @@ export component SettingSlider inherits Rectangle {
 
     callback changed(float);
 
-    height: 24px;
+    height: 28px;
 
     // 进度百分比
     in property <float> ratio: max > min ? (value - min) / (max - min) : 0;
 
-    // 轨道
+    // 轨道（背景）
     Rectangle {
-        height: 6px;
+        height: 8px;
         y: (parent.height - self.height) / 2;
         width: 100%;
         background: ThemeSettings.border-c(root.theme-mode);
-        border-radius: 3px;
+        border-radius: 4px;
 
         // 填充进度
         Rectangle {
             height: 100%;
             width: parent.width * root.ratio;
             background: ThemeSettings.accent-color;
-            border-radius: 3px;
+            border-radius: 4px;
         }
     }
 
     // 滑块 thumb
     Rectangle {
-        width: 18px;
-        height: 18px;
+        width: 20px;
+        height: 20px;
         x: (parent.width - self.width) * root.ratio;
         y: (parent.height - self.height) / 2;
         background: #ffffff;
         border-radius: self.width / 2;
         border-width: 2px;
         border-color: ThemeSettings.accent-color;
+        // 阴影效果
+        drop-shadow-blur: 3px;
+        drop-shadow-color: #00000033;
     }
 
     // 交互层：点击跳转 + 拖动
