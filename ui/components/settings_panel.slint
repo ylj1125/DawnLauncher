@@ -482,7 +482,7 @@ export component SettingsPanel inherits Rectangle {
                                 theme-btn { theme: "rose"; label: "玫红"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
                                 theme-btn { theme: "black-gold"; label: "黑金"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
                                 theme-btn { theme: "black-white"; label: "黑白"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
-                                Rectangle { horizontal-stretch: 1; background: transparent; }
+                                Rectangle { min-width: 110px; horizontal-stretch: 1; background: transparent; }
                             }
                         }
                     }
