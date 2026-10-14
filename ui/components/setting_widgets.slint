@@ -75,8 +75,9 @@ export component SettingSlider inherits Rectangle {
         background: ThemeSettings.border-c(root.theme-mode);
         border-radius: 4px;
 
-        // 填充进度
+        // 填充进度（以左端为起点）
         Rectangle {
+            x: 0;
             height: 100%;
             width: parent.width * root.ratio;
             background: ThemeSettings.accent-color;
