@@ -64,6 +64,9 @@ export component SettingSlider inherits Rectangle {
     // 进度百分比
     in property <float> ratio: max > min ? (value - min) / (max - min) : 0;
 
+    // 是否正在拖动（仅在按住滑点时进入）
+    in-out property <bool> dragging: false;
+
     // 轨道（背景）
     Rectangle {
         height: 8px;
@@ -96,21 +99,32 @@ export component SettingSlider inherits Rectangle {
         drop-shadow-color: #00000033;
     }
 
-    // 交互层：点击跳转 + 拖动
+    // 交互层：仅在按住滑点并拖动时改变数值
     TouchArea {
         width: 100%;
         height: 100%;
         mouse-cursor: pointer;
 
         pointer-event(e) => {
-            if (e.kind == PointerEventKind.down || e.kind == PointerEventKind.move) {
-                let r = self.mouse-x / self.width;
-                let clamped-r = clamp(r, 0.0, 1.0);
-                let range = max - min;
-                let raw = min + range * clamped-r;
-                let stepped = min + round((raw - min) / step) * step;
-                let clamped = clamp(stepped, min, max);
-                root.changed(clamped);
+            if (e.kind == PointerEventKind.down) {
+                // 仅当按下滑点附近时才进入拖动状态
+                let thumb-w = 20px;
+                let thumb-center = (self.width - thumb-w) * root.ratio + thumb-w / 2;
+                if (abs(self.mouse-x - thumb-center) <= thumb-w) {
+                    root.dragging = true;
+                }
+            } else if (e.kind == PointerEventKind.up) {
+                root.dragging = false;
+            } else if (e.kind == PointerEventKind.move) {
+                if (root.dragging) {
+                    let r = self.mouse-x / self.width;
+                    let clamped-r = clamp(r, 0.0, 1.0);
+                    let range = max - min;
+                    let raw = min + range * clamped-r;
+                    let stepped = min + round((raw - min) / step) * step;
+                    let clamped = clamp(stepped, min, max);
+                    root.changed(clamped);
+                }
             }
         }
     }

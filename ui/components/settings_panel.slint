@@ -457,7 +457,7 @@ export component SettingsPanel inherits Rectangle {
                             padding: ThemeSettings.spacing-normal;
                             spacing: ThemeSettings.spacing-normal;
 
-                            // 第一行: 5 个主题
+                            // 第一行: 6 个主题
                             HorizontalLayout {
                                 spacing: ThemeSettings.spacing-normal;
                                 theme-btn { theme: "light"; label: "浅色"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
@@ -465,12 +465,12 @@ export component SettingsPanel inherits Rectangle {
                                 theme-btn { theme: "classic-dark"; label: "经典深色"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
                                 theme-btn { theme: "blue"; label: "蓝色"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
                                 theme-btn { theme: "dark-green"; label: "墨绿"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
+                                theme-btn { theme: "indigo"; label: "靛蓝"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
                             }
 
-                            // 第二行: 6 个主题
+                            // 第二行: 5 个主题
                             HorizontalLayout {
                                 spacing: ThemeSettings.spacing-normal;
-                                theme-btn { theme: "indigo"; label: "靛蓝"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
                                 theme-btn { theme: "purple"; label: "紫色"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
                                 theme-btn { theme: "wine-red"; label: "酒红"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
                                 theme-btn { theme: "rose"; label: "玫红"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
