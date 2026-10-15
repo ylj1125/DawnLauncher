@@ -280,15 +280,52 @@ fn get_icons_batch(paths: &[String]) -> Vec<Option<String>> {
     let list_path = list_file.to_string_lossy().replace('\'', "''");
     // 输出为 Base64 (ASCII)，不涉及编码转换；不要设置 [Console]::OutputEncoding，
     // 否则在 CREATE_NO_WINDOW (无控制台) 下会抛错导致脚本中断
+    // 图标提取优先使用 SHGetFileInfo (对文件/文件夹均适用)，失败时回退 ExtractAssociatedIcon
     let script = format!(
         r#"
 Add-Type -AssemblyName System.Drawing
+$code = @'
+using System;
+using System.Drawing;
+using System.Runtime.InteropServices;
+public class DawnIconHelper {{
+    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+    public struct SHFILEINFO {{
+        public IntPtr hIcon;
+        public int iIcon;
+        public uint dwAttributes;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=260)] public string szDisplayName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=80)] public string szTypeName;
+    }}
+    [DllImport("shell32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    public static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes, ref SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
+    [DllImport("user32.dll", SetLastError=true)]
+    public static extern bool DestroyIcon(IntPtr hIcon);
+    public static Icon GetIcon(string path, bool isFolder) {{
+        SHFILEINFO info = new SHFILEINFO();
+        uint flags = 0x000000100; // SHGFI_ICON
+        IntPtr r = SHGetFileInfo(path, 0, ref info, (uint)Marshal.SizeOf(info), flags);
+        if (info.hIcon == IntPtr.Zero) return null;
+        try {{ return (Icon)Icon.FromHandle(info.hIcon).Clone(); }}
+        finally {{ DestroyIcon(info.hIcon); }}
+    }}
+}}
+'@
+Add-Type -TypeDefinition $code -ReferencedAssemblies System.Drawing
 $lines = Get-Content -LiteralPath '{list}' -Encoding UTF8
 foreach ($p in $lines) {{
     $b = '-'
-    if ($p -and (Test-Path -LiteralPath $p -PathType Leaf)) {{
+    if ($p) {{
         try {{
-            $i = [System.Drawing.Icon]::ExtractAssociatedIcon($p)
+            $isFolder = Test-Path -LiteralPath $p -PathType Container
+            $isFile = Test-Path -LiteralPath $p -PathType Leaf
+            $i = $null
+            if ($isFolder -or $isFile) {{
+                $i = [DawnIconHelper]::GetIcon($p, $isFolder)
+            }}
+            if (-not $i -and $isFile) {{
+                $i = [System.Drawing.Icon]::ExtractAssociatedIcon($p)
+            }}
             if ($i) {{
                 $ms = New-Object System.IO.MemoryStream
                 $i.ToBitmap().Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
@@ -529,6 +566,92 @@ if ($folder) {{
         });
     }
     result
+}
+
+/// 扫描一个文件夹下的直接子项 (文件 + 子文件夹)
+/// 用于「关联文件夹」分类：将其内容映射为可启动的项目。
+/// 跳过隐藏项，文件夹排前、其余按名称排序，并批量提取图标。
+pub fn scan_folder(path: &str) -> Vec<LauncherEntry> {
+    let mut result: Vec<LauncherEntry> = Vec::new();
+    let dir = match std::fs::read_dir(path) {
+        Ok(d) => d,
+        Err(_) => return result,
+    };
+
+    struct Raw {
+        name: String,
+        target: String,
+        kind: i64,
+        is_dir: bool,
+    }
+    let mut raws: Vec<Raw> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for entry in dir.flatten() {
+        let p = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let is_dir = meta.is_dir();
+        // 跳过隐藏项与点文件
+        if is_hidden_entry(&p, &meta) {
+            continue;
+        }
+        let target = p.to_string_lossy().to_string();
+        let key = target.to_lowercase();
+        if !seen.insert(key) {
+            continue;
+        }
+        raws.push(Raw {
+            name,
+            target,
+            kind: if is_dir { 1 } else { 0 },
+            is_dir,
+        });
+    }
+
+    // 文件夹在前，其余按名称不区分大小写排序
+    raws.sort_by(|a, b| {
+        if a.is_dir != b.is_dir {
+            return if a.is_dir {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            };
+        }
+        a.name.to_lowercase().cmp(&b.name.to_lowercase())
+    });
+
+    let icon_srcs: Vec<String> = raws.iter().map(|r| r.target.clone()).collect();
+    let icons = get_icons_batch(&icon_srcs);
+
+    for (i, r) in raws.into_iter().enumerate() {
+        result.push(LauncherEntry {
+            name: r.name,
+            target: r.target,
+            kind: r.kind,
+            params: None,
+            icon: icons.get(i).cloned().flatten(),
+        });
+    }
+    result
+}
+
+/// 判断目录项是否为隐藏项 (Windows 隐藏属性 或 名称以 '.' 开头)
+fn is_hidden_entry(path: &std::path::Path, meta: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+    if meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0 {
+        return true;
+    }
+    path.file_name()
+        .map(|n| n.to_string_lossy().starts_with('.'))
+        .unwrap_or(false)
 }
 
 /// 网页信息抓取结果

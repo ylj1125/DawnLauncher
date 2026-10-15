@@ -296,6 +296,67 @@ impl Database {
         Ok(conn.last_insert_rowid())
     }
 
+    /// 插入关联文件夹分类 (type=1)，返回新 id
+    /// parent_id 为 None 表示顶层分类
+    pub fn insert_associate_folder_classification(
+        &self,
+        parent_id: Option<i64>,
+        name: &str,
+        folder_path: &str,
+    ) -> Result<i64, rusqlite::Error> {
+        let order = match parent_id {
+            Some(pid) => self.max_child_classification_order(pid) + 1,
+            None => self.max_parent_classification_order() + 1,
+        };
+        let data = ClassificationData {
+            associate_folder_path: Some(folder_path.to_string()),
+            item_layout: "default".into(),
+            item_sort: "default".into(),
+            item_show_only: "default".into(),
+            ..Default::default()
+        };
+        let data_str = serde_json::to_string(&data).unwrap_or_default();
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO classification (parent_id, name, type, data, shortcut_key, global_shortcut_key, `order`) VALUES (?, ?, 1, ?, NULL, 0, ?)",
+            params![parent_id, name, data_str, order],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// 将分类设置为关联文件夹 (type=1)，并写入文件夹路径
+    pub fn set_classification_associate_folder(
+        &self,
+        classification_id: i64,
+        folder_path: &str,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let data_str: String = conn.query_row(
+            "SELECT data FROM classification WHERE id = ?",
+            params![classification_id],
+            |r| r.get(0),
+        )?;
+        let mut data: ClassificationData = serde_json::from_str(&data_str).unwrap_or_default();
+        data.associate_folder_path = Some(folder_path.to_string());
+        let new_data_str = serde_json::to_string(&data).unwrap_or(data_str);
+        conn.execute(
+            "UPDATE classification SET type = 1, data = ? WHERE id = ?",
+            params![new_data_str, classification_id],
+        )?;
+        Ok(())
+    }
+
+    /// 按 id 获取分类
+    pub fn get_classification(&self, classification_id: i64) -> Option<Classification> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, parent_id, name, type, data, shortcut_key, global_shortcut_key, `order` FROM classification WHERE id = ?",
+            params![classification_id],
+            row_to_classification,
+        )
+        .ok()
+    }
+
     /// 获取某父分类下子分类的最大 order
     pub fn max_child_classification_order(&self, parent_id: i64) -> i64 {
         let conn = self.conn.lock().unwrap();

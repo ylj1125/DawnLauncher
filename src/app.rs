@@ -88,25 +88,47 @@ impl App {
         let current_id = Arc::new(Mutex::new(first_id));
         let current_id_for_class = current_id.clone();
         main_window.on_classification_clicked(move |id| {
-            let items = db_for_class.list_items(id.into());
-            let item_model = to_item_model(&items, 0);
+            let class_id: i64 = id.into();
+            // 立即更新选中状态，保证界面响应
             if let Some(w) = window_for_class.upgrade() {
-                // 更新分类选中状态
-                let classes: Vec<ClassificationInfo> = w
-                    .get_classifications()
-                    .iter()
-                    .collect::<Vec<_>>();
+                let classes: Vec<ClassificationInfo> =
+                    w.get_classifications().iter().collect::<Vec<_>>();
                 let mut new_classes = classes;
                 for c in new_classes.iter_mut() {
                     c.selected = c.id == id;
                 }
                 let new_model = slint::VecModel::from(new_classes);
                 w.set_classifications(ModelRc::from(Rc::new(new_model)));
-                w.set_items(item_model);
                 w.set_search_text(SharedString::from(""));
-                w.set_status_text(SharedString::from(format!("{} 项", items.len())));
             }
-            *current_id_for_class.lock().unwrap() = id.into();
+            *current_id_for_class.lock().unwrap() = class_id;
+
+            // 关联文件夹分类切换前先与磁盘同步，避免列表过期
+            let is_folder_class = db_for_class
+                .get_classification(class_id)
+                .map(|c| c.kind == 1)
+                .unwrap_or(false);
+
+            if is_folder_class {
+                let db_bg = db_for_class.clone();
+                let win_bg = window_for_class.clone();
+                std::thread::spawn(move || {
+                    sync_associate_folder(&db_bg, class_id);
+                    let items = db_bg.list_items(class_id);
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = win_bg.upgrade() {
+                            w.set_items(to_item_model(&items, 0));
+                            w.set_status_text(SharedString::from(format!("{} 项", items.len())));
+                        }
+                    });
+                });
+            } else {
+                let items = db_for_class.list_items(class_id);
+                if let Some(w) = window_for_class.upgrade() {
+                    w.set_items(to_item_model(&items, 0));
+                    w.set_status_text(SharedString::from(format!("{} 项", items.len())));
+                }
+            }
         });
 
         // 7.1 分类展开/折叠切换

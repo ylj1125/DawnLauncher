@@ -48,6 +48,10 @@ pub fn open_appx(_aumid: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+pub fn scan_folder(_path: &str) -> Vec<LauncherEntry> {
+    Vec::new()
+}
+
 /// 网页信息抓取结果 (非 Windows 平台占位)
 #[derive(Debug, Clone, Default)]
 pub struct UrlInfo {
