@@ -975,6 +975,50 @@ impl App {
             });
         }
 
+        // 16.2.1 快速搜索窗口: 单击结果 -> 定位到主界面对应项目
+        {
+            let db_for_locate = db.clone();
+            let qs_weak_locate = quick_search_window.as_weak();
+            let main_weak_locate = main_window.as_weak();
+            let current_id_for_locate = current_id.clone();
+            let expanded_for_locate = expanded_classifications.clone();
+            quick_search_window.on_result_clicked(move |item_id| {
+                let id = item_id as i64;
+                let all_items = db_for_locate.list_all_items();
+                let Some(item) = all_items.iter().find(|i| i.id == id) else {
+                    return;
+                };
+                let class_id = item.classification_id;
+
+                let classifications = db_for_locate.list_all_classifications();
+                // 若目标为子分类，确保其父分类处于展开状态
+                if let Some(cl) = classifications.iter().find(|c| c.id == class_id) {
+                    if let Some(pid) = cl.parent_id {
+                        expanded_for_locate.lock().unwrap().insert(pid);
+                    }
+                }
+                let expanded = expanded_for_locate.lock().unwrap().clone();
+                let items = db_for_locate.list_items(class_id);
+
+                if let Some(w) = main_weak_locate.upgrade() {
+                    // 切回主界面并定位到该项目所在分类，高亮目标项目
+                    w.set_view_mode(SharedString::from("main"));
+                    w.set_classifications(to_classification_model(&classifications, class_id, &expanded));
+                    w.set_items(to_item_model(&items, id));
+                    w.set_search_text(SharedString::from(""));
+                    w.set_status_text(SharedString::from(format!("{} 项", items.len())));
+                    // 显示并激活主窗口
+                    w.window().show().ok();
+                    w.window().set_minimized(false);
+                }
+                *current_id_for_locate.lock().unwrap() = class_id;
+
+                if let Some(qs) = qs_weak_locate.upgrade() {
+                    qs.window().hide().ok();
+                }
+            });
+        }
+
         // 16.3 快速搜索窗口: 关闭请求 -> 隐藏窗口
         {
             let qs_weak_close = quick_search_window.as_weak();
@@ -1352,6 +1396,30 @@ impl App {
                         if let Some(w) = window_for_ctx.upgrade() {
                             w.set_items(ModelRc::from(Rc::new(new_model)));
                         }
+                    }
+                    ("batch", "batch-open") => {
+                        // 批量打开: 一次性启动所有选中的项目（多项目运行）
+                        let items = db_for_ctx.list_items(class_id);
+                        let selected_ids: Vec<i64> = get_selected_item_ids(&window_for_ctx, &items);
+                        if selected_ids.is_empty() {
+                            show_info_dialog("提示", "请先选择项目");
+                            return;
+                        }
+                        let all = db_for_ctx.list_all_items();
+                        let mut opened = 0;
+                        // 依次启动，间隔 150ms，避免同时启动过多进程导致卡顿
+                        for id in &selected_ids {
+                            if let Some(item) = all.iter().find(|i| i.id == *id) {
+                                open_item(item);
+                                opened += 1;
+                                std::thread::sleep(std::time::Duration::from_millis(150));
+                            }
+                        }
+                        if let Some(w) = window_for_ctx.upgrade() {
+                            w.set_batch_mode(false);
+                            w.set_items(to_item_model(&items, 0));
+                        }
+                        show_info_dialog("完成", &format!("已启动 {} 个项目", opened));
                     }
                     ("batch", "batch-delete") => {
                         drop(w);
@@ -1895,7 +1963,7 @@ fn to_classification_model(
 }
 
 /// 将项目列表转为 Slint 模型
-fn to_item_model(list: &[Item], _selected_id: i64) -> ModelRc<ItemInfo> {
+fn to_item_model(list: &[Item], selected_id: i64) -> ModelRc<ItemInfo> {
     let model = slint::VecModel::from(
         list.iter()
             .map(|item| {
@@ -1917,7 +1985,7 @@ fn to_item_model(list: &[Item], _selected_id: i64) -> ModelRc<ItemInfo> {
                     name: SharedString::from(item.name.as_str()),
                     icon,
                     invalid,
-                    selected: false,
+                    selected: selected_id != 0 && item.id == selected_id,
                 }
             })
             .collect::<Vec<_>>(),
@@ -2439,6 +2507,8 @@ fn show_item_area_menu(window: &MainWindow, x: i32, y: i32) {
 fn show_batch_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
         ("select-all", "全选", "☰", false, false),
+        ("", "", "", true, false),
+        ("batch-open", "批量打开", "▶", false, false),
         ("", "", "", true, false),
         ("batch-move", "批量移动到", "↪", false, true),
         ("batch-copy", "批量复制到", "📋", false, true),
