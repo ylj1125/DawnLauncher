@@ -920,17 +920,20 @@ impl App {
         }
 
         // 16.0 标题栏拖拽 (无边框窗口)
-        {
-            let main_weak = main_window.as_weak();
-            main_window.on_title_bar_drag(move || {
-                #[cfg(target_os = "windows")]
-                {
-                    if let Some(w) = main_weak.upgrade() {
-                        drag_window(&w);
-                    }
-                }
-            });
-        }
+        // 采用「手动拖动」：按下记录起始点，移动时用 SetWindowPos 跟随，
+        // 不进入系统模态移动循环，避免吞掉鼠标抬起事件导致关闭按钮失效。
+        main_window.on_title_bar_drag_start(move || {
+            #[cfg(target_os = "windows")]
+            title_drag::start();
+        });
+        main_window.on_title_bar_drag_move(move || {
+            #[cfg(target_os = "windows")]
+            title_drag::move_window();
+        });
+        main_window.on_title_bar_drag_end(move || {
+            #[cfg(target_os = "windows")]
+            title_drag::end();
+        });
 
         // 16.1 快速搜索窗口: 搜索文本变更 -> 实时过滤项目
         {
@@ -1603,33 +1606,87 @@ fn set_window_topmost(_window: &MainWindow, topmost: bool) {
 #[cfg(not(target_os = "windows"))]
 fn set_window_topmost(_window: &MainWindow, _topmost: bool) {}
 
-/// 拖拽无边框窗口 - 通过 ReleaseCapture + SendMessage(WM_NCLBUTTONDOWN) 实现
+/// 标题栏手动拖动（Windows）
+/// 按下时记录光标与窗口位置，移动时用 SetWindowPos 跟随光标，
+/// 不使用系统模态移动循环，保证 Slint 能正常收到鼠标抬起事件。
 #[cfg(target_os = "windows")]
-fn drag_window<C: ComponentHandle>(_window: &C) {
+mod title_drag {
+    use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+    use windows::Win32::Foundation::{HWND, POINT, RECT};
     use windows::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, SendMessageW, WM_NCLBUTTONDOWN, HTCAPTION,
+        FindWindowW, GetCursorPos, GetWindowRect, SetWindowPos,
+        SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
     };
-    use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
     use windows::core::{HSTRING, PCWSTR};
-    use windows::Win32::Foundation::{WPARAM, LPARAM};
 
-    let title = HSTRING::from("Dawn Launcher");
-    unsafe {
-        let hwnd = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr()));
+    static ACTIVE: AtomicBool = AtomicBool::new(false);
+    static START_CURSOR_X: AtomicI32 = AtomicI32::new(0);
+    static START_CURSOR_Y: AtomicI32 = AtomicI32::new(0);
+    static START_WIN_X: AtomicI32 = AtomicI32::new(0);
+    static START_WIN_Y: AtomicI32 = AtomicI32::new(0);
+
+    fn find_hwnd() -> Option<HWND> {
+        let title = HSTRING::from("Dawn Launcher");
+        let hwnd = unsafe { FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) };
         if hwnd.0 as usize != 0 {
-            let _ = ReleaseCapture();
-            let _ = SendMessageW(
+            Some(hwnd)
+        } else {
+            None
+        }
+    }
+
+    pub fn start() {
+        let Some(hwnd) = find_hwnd() else { return };
+        let mut pt = POINT { x: 0, y: 0 };
+        let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        unsafe {
+            let _ = GetCursorPos(&mut pt);
+            let _ = GetWindowRect(hwnd, &mut rect);
+        }
+        START_CURSOR_X.store(pt.x, Ordering::SeqCst);
+        START_CURSOR_Y.store(pt.y, Ordering::SeqCst);
+        START_WIN_X.store(rect.left, Ordering::SeqCst);
+        START_WIN_Y.store(rect.top, Ordering::SeqCst);
+        ACTIVE.store(true, Ordering::SeqCst);
+    }
+
+    pub fn move_window() {
+        if !ACTIVE.load(Ordering::SeqCst) {
+            return;
+        }
+        let Some(hwnd) = find_hwnd() else { return };
+        let mut pt = POINT { x: 0, y: 0 };
+        unsafe {
+            let _ = GetCursorPos(&mut pt);
+        }
+        let dx = pt.x - START_CURSOR_X.load(Ordering::SeqCst);
+        let dy = pt.y - START_CURSOR_Y.load(Ordering::SeqCst);
+        let nx = START_WIN_X.load(Ordering::SeqCst) + dx;
+        let ny = START_WIN_Y.load(Ordering::SeqCst) + dy;
+        unsafe {
+            let _ = SetWindowPos(
                 hwnd,
-                WM_NCLBUTTONDOWN,
-                WPARAM(HTCAPTION as usize),
-                LPARAM(0),
+                HWND(0),
+                nx,
+                ny,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
             );
         }
+    }
+
+    pub fn end() {
+        ACTIVE.store(false, Ordering::SeqCst);
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn drag_window<C: ComponentHandle>(_window: &C) {}
+mod title_drag {
+    pub fn start() {}
+    pub fn move_window() {}
+    pub fn end() {}
+}
 
 /// 为主窗口设置圆角和阴影 (Windows DWM API)
 #[cfg(target_os = "windows")]

@@ -111,7 +111,10 @@ export component MainWindow inherits Window {
     in-out property <bool> search-active: false;
     in-out property <bool> search-bar-visible: false;
     // 标题栏拖拽
-    callback title-bar-drag();
+    callback title-bar-drag-start();
+    callback title-bar-drag-move();
+    callback title-bar-drag-end();
+    in-out property <bool> title-dragging: false;
     // 三明治菜单动作
     callback menu-action(string); // "settings" / "tools" / "help" / "exit"
     // 工具操作回调
@@ -151,7 +154,13 @@ export component MainWindow inherits Window {
                         mouse-cursor: pointer;
                         pointer-event(e) => {
                             if (e.kind == PointerEventKind.down) {
-                                root.title-bar-drag();
+                                root.title-dragging = true;
+                                root.title-bar-drag-start();
+                            } else if (e.kind == PointerEventKind.move && root.title-dragging) {
+                                root.title-bar-drag-move();
+                            } else if (e.kind == PointerEventKind.up) {
+                                root.title-dragging = false;
+                                root.title-bar-drag-end();
                             }
                         }
                     }
