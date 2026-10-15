@@ -975,6 +975,60 @@ impl App {
             });
         }
 
+        // 15.40 「关联文件夹」实时同步: 后台轮询文件夹结构变化，自动增删项目并刷新界面
+        {
+            let db_watch = db.clone();
+            let win_watch = main_window.as_weak();
+            let cur_watch = current_id.clone();
+            std::thread::spawn(move || {
+                let mut sigs: std::collections::HashMap<i64, String> =
+                    std::collections::HashMap::new();
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                    let classes = db_watch.list_all_classifications();
+                    for c in classes.iter().filter(|c| c.kind == 1) {
+                        let path = match &c.data.associate_folder_path {
+                            Some(p) if !p.is_empty() => p.clone(),
+                            _ => continue,
+                        };
+                        let sig = match folder_signature(&path) {
+                            Some(s) => s,
+                            None => continue,
+                        };
+                        // 对比上一次的结构签名
+                        match sigs.insert(c.id, sig.clone()) {
+                            // 首次记录基线，不同步
+                            None => continue,
+                            Some(prev) if prev == sig => continue,
+                            Some(_) => {}
+                        }
+                        // 结构发生变化 → 同步数据库
+                        if !sync_associate_folder(&db_watch, c.id) {
+                            continue;
+                        }
+                        // 若正在显示该分类，刷新界面
+                        let is_current = *cur_watch.lock().unwrap() == c.id;
+                        if !is_current {
+                            continue;
+                        }
+                        let db_bg = db_watch.clone();
+                        let win_bg = win_watch.clone();
+                        let id = c.id;
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = win_bg.upgrade() {
+                                let items = db_bg.list_items(id);
+                                w.set_items(to_item_model(&items, 0));
+                                w.set_status_text(SharedString::from(format!(
+                                    "{} 项",
+                                    items.len()
+                                )));
+                            }
+                        });
+                    }
+                }
+            });
+        }
+
         // 16. 窗口关闭
         main_window.on_window_close(move || {
             std::process::exit(0);
@@ -1358,12 +1412,56 @@ impl App {
                         drop(w);
                         if let Some(name) = show_input_dialog("新建分类", "请输入分类名称") {
                             if let Ok(id) = db_for_ctx.insert_parent_classification(&name) {
+                                *current_id_for_ctx.lock().unwrap() = id;
                                 let classifications = db_for_ctx.list_all_classifications();
                                 expanded_for_ctx.lock().unwrap().insert(id);
                                 if let Some(w) = window_for_ctx.upgrade() {
                                     w.set_classifications(to_classification_model(&classifications, id, &expanded_for_ctx.lock().unwrap()));
                                     w.set_items(to_item_model(&[], 0));
                                     w.set_status_text(SharedString::from("0 个项目"));
+                                }
+                            }
+                        }
+                    }
+                    ("classification-area", "new-folder-classification") => {
+                        // 新建关联文件夹分类: 选择文件夹后自动同步其内容
+                        drop(w);
+                        if let Some(folder) = show_pick_folder_dialog() {
+                            let folder = folder.trim().to_string();
+                            if !folder.is_empty() {
+                                let name = std::path::Path::new(&folder)
+                                    .file_name()
+                                    .map(|s| s.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| "文件夹".to_string());
+                                if let Ok(id) = db_for_ctx
+                                    .insert_associate_folder_classification(None, &name, &folder)
+                                {
+                                    *current_id_for_ctx.lock().unwrap() = id;
+                                    let classifications = db_for_ctx.list_all_classifications();
+                                    expanded_for_ctx.lock().unwrap().insert(id);
+                                    if let Some(w) = window_for_ctx.upgrade() {
+                                        w.set_classifications(to_classification_model(
+                                            &classifications,
+                                            id,
+                                            &expanded_for_ctx.lock().unwrap(),
+                                        ));
+                                    }
+                                    // 后台同步文件夹内容 (含图标提取)
+                                    let db_bg = db_for_ctx.clone();
+                                    let win_bg = window_for_ctx.clone();
+                                    std::thread::spawn(move || {
+                                        sync_associate_folder(&db_bg, id);
+                                        let items = db_bg.list_items(id);
+                                        let _ = slint::invoke_from_event_loop(move || {
+                                            if let Some(w) = win_bg.upgrade() {
+                                                w.set_items(to_item_model(&items, 0));
+                                                w.set_status_text(SharedString::from(format!(
+                                                    "{} 项",
+                                                    items.len()
+                                                )));
+                                            }
+                                        });
+                                    });
                                 }
                             }
                         }
@@ -1397,6 +1495,50 @@ impl App {
                                     w.set_classifications(to_classification_model(&classifications, cid, &expanded_for_ctx.lock().unwrap()));
                                 }
                                 show_info_dialog("成功", "子分类已创建");
+                            }
+                        }
+                    }
+                    ("classification-item", "associate-folder") => {
+                        // 将分类关联到磁盘文件夹 (type=1)，随后同步内容
+                        let cid = *right_class_id.lock().unwrap();
+                        drop(w);
+                        if let Some(folder) = show_pick_folder_dialog() {
+                            let folder = folder.trim().to_string();
+                            if !folder.is_empty() {
+                                if let Err(e) =
+                                    db_for_ctx.set_classification_associate_folder(cid, &folder)
+                                {
+                                    show_error_dialog("错误", &format!("设置关联文件夹失败: {}", e));
+                                } else {
+                                    *current_id_for_ctx.lock().unwrap() = cid;
+                                    // 后台同步 (含图标提取，避免阻塞 UI)
+                                    let db_bg = db_for_ctx.clone();
+                                    let win_bg = window_for_ctx.clone();
+                                    let expanded_bg = expanded_for_ctx.clone();
+                                    std::thread::spawn(move || {
+                                        sync_associate_folder(&db_bg, cid);
+                                        let classes = db_bg.list_all_classifications();
+                                        let items = db_bg.list_items(cid);
+                                        let _ = slint::invoke_from_event_loop(move || {
+                                            if let Some(w) = win_bg.upgrade() {
+                                                w.set_classifications(to_classification_model(
+                                                    &classes,
+                                                    cid,
+                                                    &expanded_bg.lock().unwrap(),
+                                                ));
+                                                w.set_items(to_item_model(&items, 0));
+                                                w.set_status_text(SharedString::from(format!(
+                                                    "{} 项",
+                                                    items.len()
+                                                )));
+                                            }
+                                        });
+                                    });
+                                    show_info_dialog(
+                                        "完成",
+                                        "已关联文件夹，后续文件增删将自动同步",
+                                    );
+                                }
                             }
                         }
                     }
@@ -2385,6 +2527,101 @@ fn import_entries(
     (added, skipped)
 }
 
+/// 将「关联文件夹」分类与磁盘内容同步
+/// 删除磁盘上已不存在的项目，插入新出现的文件/子文件夹
+/// 返回是否发生了增删 (true=变化)
+fn sync_associate_folder(db: &Database, classification_id: i64) -> bool {
+    let path = match db.get_classification(classification_id) {
+        Some(c) if c.kind == 1 => match c.data.associate_folder_path {
+            Some(p) if !p.is_empty() => p,
+            _ => return false,
+        },
+        _ => return false,
+    };
+    if !std::path::Path::new(&path).is_dir() {
+        return false;
+    }
+
+    let entries = native::scan_folder(&path);
+    let existing = db.list_items(classification_id);
+
+    // 当前磁盘目标集合 (忽略大小写)
+    let current_targets: std::collections::HashSet<String> = entries
+        .iter()
+        .map(|e| e.target.to_lowercase())
+        .collect();
+    // 已有项目目标集合
+    let existing_targets: std::collections::HashSet<String> = existing
+        .iter()
+        .filter_map(|i| i.data.target.as_deref())
+        .map(|t| t.to_lowercase())
+        .collect();
+
+    let mut changed = false;
+
+    // 1. 删除磁盘上已不存在的项目
+    for item in &existing {
+        let t = match &item.data.target {
+            Some(t) => t.to_lowercase(),
+            None => continue,
+        };
+        if !current_targets.contains(&t) {
+            let _ = db.delete_item(item.id);
+            changed = true;
+        }
+    }
+
+    // 2. 插入新出现的项目
+    let mut order = db.max_item_order(classification_id);
+    for entry in entries {
+        let key = entry.target.to_lowercase();
+        if existing_targets.contains(&key) {
+            continue;
+        }
+        order += 1;
+        let item = Item {
+            id: 0,
+            classification_id,
+            name: entry.name,
+            kind: entry.kind,
+            data: crate::models::ItemData {
+                target: Some(entry.target),
+                params: entry.params,
+                icon: entry.icon,
+                ..Default::default()
+            },
+            shortcut_key: None,
+            global_shortcut_key: false,
+            order,
+        };
+        if db.insert_item(&item).is_ok() {
+            changed = true;
+        }
+    }
+
+    changed
+}
+
+/// 计算文件夹结构签名 (仅名称 + 是否目录)
+/// 用于检测文件增删与重命名；忽略点文件
+fn folder_signature(path: &str) -> Option<String> {
+    let mut items: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(path).ok()?.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+        let is_dir = entry.metadata().map(|m| m.is_dir()).unwrap_or(false);
+        items.push(format!(
+            "{}:{}",
+            name.to_lowercase(),
+            if is_dir { "d" } else { "f" }
+        ));
+    }
+    items.sort();
+    Some(items.join("\u{1}"))
+}
+
 /// 弹出文件选择对话框 (Windows)
 /// 返回选中的文件路径，用户取消时返回 None
 #[cfg(target_os = "windows")]
@@ -2421,6 +2658,44 @@ fn show_open_file_dialog() -> Option<String> {
 
 #[cfg(not(target_os = "windows"))]
 fn show_open_file_dialog() -> Option<String> {
+    None
+}
+
+/// 弹出文件夹选择对话框 (Windows)
+#[cfg(target_os = "windows")]
+fn show_pick_folder_dialog() -> Option<String> {
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Shell::{
+        FileOpenDialog, FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, IFileOpenDialog, SIGDN_FILESYSPATH,
+    };
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    }
+    let result = (|| -> Option<String> {
+        unsafe {
+            let dialog: IFileOpenDialog =
+                CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+            dialog.SetOptions(FOS_PICKFOLDERS | FOS_PATHMUSTEXIST).ok()?;
+            if dialog.Show(None).is_err() {
+                return None; // 用户取消
+            }
+            let result = dialog.GetResult().ok()?;
+            let display_name = result.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+            Some(display_name.to_string().ok()?)
+        }
+    })();
+    unsafe {
+        CoUninitialize();
+    }
+    result
+}
+
+#[cfg(not(target_os = "windows"))]
+fn show_pick_folder_dialog() -> Option<String> {
     None
 }
 
@@ -2684,6 +2959,7 @@ fn show_classification_item_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
         ("rename", "重命名", "✏", false, false),
         ("add-child", "新建子分类", "+", false, false),
+        ("associate-folder", "关联文件夹...", "📁", false, false),
         ("", "", "", true, false),
         ("delete", "删除", "🗑", false, false),
     ];
@@ -2695,6 +2971,7 @@ fn show_classification_item_menu(window: &MainWindow, x: i32, y: i32) {
 fn show_classification_area_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
         ("new-classification", "新建分类", "+", false, false),
+        ("new-folder-classification", "新建关联文件夹分类", "📁", false, false),
         ("", "", "", true, false),
         ("lock-order", "锁定分类顺序", "🔒", false, false),
     ];
