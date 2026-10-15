@@ -1057,6 +1057,9 @@ export component SettingsWindow inherits Window {
     in property <int> item-icon-size: 48;
     in property <bool> hide-name: false;
     in property <bool> hide-ellipsis: false;
+    // ===== 字体 =====
+    in property <[string]> font-list: [];
+    in property <int> font-selected-index: 0;
     in property <bool> hide-after-open: false;
     in property <bool> record-open-count: true;
     in property <bool> show-tooltip: true;
@@ -1095,6 +1098,7 @@ export component SettingsWindow inherits Window {
     callback always-center-changed(bool);
     callback item-columns-changed(float);
     callback item-icon-size-changed(float);
+    callback font-changed(string);
     callback hide-name-changed(bool);
     callback hide-ellipsis-changed(bool);
     callback hide-after-open-changed(bool);
@@ -1141,6 +1145,8 @@ export component SettingsWindow inherits Window {
         always-center: root.always-center;
         item-columns: root.item-columns;
         item-icon-size: root.item-icon-size;
+        font-list: root.font-list;
+        font-selected-index: root.font-selected-index;
         hide-name: root.hide-name;
         hide-ellipsis: root.hide-ellipsis;
         hide-after-open: root.hide-after-open;
@@ -1176,6 +1182,7 @@ export component SettingsWindow inherits Window {
         always-center-changed(v) => { root.always-center-changed(v); }
         item-columns-changed(v) => { root.item-columns-changed(v); }
         item-icon-size-changed(v) => { root.item-icon-size-changed(v); }
+        font-changed(f) => { root.font-changed(f); }
         hide-name-changed(v) => { root.hide-name-changed(v); }
         hide-ellipsis-changed(v) => { root.hide-ellipsis-changed(v); }
         hide-after-open-changed(v) => { root.hide-after-open-changed(v); }

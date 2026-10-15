@@ -568,6 +568,32 @@ if ($folder) {{
     result
 }
 
+/// 枚举系统已安装的字体族名称
+/// 通过 System.Drawing.FontFamily.Families 获取，结果经 UTF-8 临时文件回传
+pub fn get_installed_fonts() -> Vec<String> {
+    let out_file = std::env::temp_dir().join("dawn-launcher-fonts.txt");
+    let out_path = out_file.to_string_lossy().replace('\'', "''");
+    let script = format!(
+        r#"
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -AssemblyName System.Drawing
+$out = '{out}'
+$names = [System.Drawing.FontFamily]::Families | ForEach-Object {{ $_.Name }}
+[System.IO.File]::WriteAllLines($out, $names, (New-Object System.Text.UTF8Encoding($false)))
+"#,
+        out = out_path
+    );
+    let _ = run_hidden("powershell", &["-NoProfile", "-NonInteractive", "-Command", &script]);
+    let text = std::fs::read(&out_file)
+        .map(|b| String::from_utf8_lossy(&b).to_string())
+        .unwrap_or_default();
+    let _ = std::fs::remove_file(&out_file);
+    text.lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
 /// 扫描一个文件夹下的直接子项 (文件 + 子文件夹)
 /// 用于「关联文件夹」分类：将其内容映射为可启动的项目。
 /// 跳过隐藏项，文件夹排前、其余按名称排序，并批量提取图标。

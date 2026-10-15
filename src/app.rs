@@ -403,6 +403,36 @@ impl App {
                 sw.set_quick_search_match_remark(qs_match_remark);
                 sw.set_item_layout(SharedString::from(item_layout));
 
+                // 加载字体列表 (后台获取，避免阻塞 UI)
+                let saved_font =
+                    db_for_settings.get_setting("font_family", "Microsoft YaHei UI");
+                let sw_font = settings_weak.clone();
+                let db_font = db_for_settings.clone();
+                std::thread::spawn(move || {
+                    let fonts = native::get_installed_fonts();
+                    let fonts_shared: Vec<SharedString> = fonts
+                        .iter()
+                        .map(|f| SharedString::from(f.as_str()))
+                        .collect();
+                    let idx = fonts
+                        .iter()
+                        .position(|f| f == &saved_font)
+                        .unwrap_or(0) as i32;
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(sw) = sw_font.upgrade() {
+                            sw.set_font_list(ModelRc::from(Rc::new(slint::VecModel::from(
+                                fonts_shared,
+                            ))));
+                            sw.set_font_selected_index(idx);
+                        }
+                    });
+                });
+                // 让 settings window 的字体与主窗口一致
+                if let Some(mw) = main_weak_for_settings.upgrade() {
+                    let ff = mw.global::<crate::ThemeSettings>().get_font_family();
+                    apply_font_family(&sw, &ff.to_string());
+                }
+
                 // 同步主题到设置窗口
                 if let Some(mw) = main_weak_for_settings.upgrade() {
                     sw.set_theme_mode(mw.get_theme_mode());
@@ -587,6 +617,32 @@ impl App {
                 let size_i = size as i32;
                 let _ = db_clone.set_setting_i64("item_icon_size", size_i as i64);
                 if let Some(sw) = sw_weak.upgrade() { sw.set_item_icon_size(size_i); }
+            });
+        }
+
+        // 15.13.1 字体切换
+        {
+            let db_clone = db.clone();
+            let main_weak = main_window.as_weak();
+            let qs_weak = quick_search_window.as_weak();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_font_changed(move |family| {
+                let family_str = family.to_string();
+                log::info!("字体切换: {}", family_str);
+                let _ = db_clone.set_setting("font_family", &family_str);
+                let ss = SharedString::from(family_str.clone());
+                if let Some(w) = main_weak.upgrade() {
+                    apply_font_family(&w, &family_str);
+                }
+                if let Some(qs) = qs_weak.upgrade() {
+                    apply_font_family(&qs, &family_str);
+                }
+                if let Some(sw) = sw_weak.upgrade() {
+                    apply_font_family(&sw, &family_str);
+                    sw.set_font_selected_index(
+                        sw.get_font_list().iter().position(|f| f == ss).unwrap_or(0) as i32,
+                    );
+                }
             });
         }
 
@@ -1845,12 +1901,17 @@ impl App {
             let sidebar_w = db.get_setting_i64("sidebar_width", 140) as i32;
             let hide_name = db.get_setting_bool("hide_name", false);
             let hide_after_open = db.get_setting_bool("hide_after_open", false);
+            let font_family = db.get_setting("font_family", "Microsoft YaHei UI");
             main_window.set_theme_mode(SharedString::from(theme.clone()));
             main_window.set_window_topmost(topmost);
             main_window.set_item_icon_size(icon_size);
             main_window.set_sidebar_width(sidebar_w);
             main_window.set_hide_name(hide_name);
             main_window.set_hide_after_open(hide_after_open);
+            // 应用字体到所有窗口
+            apply_font_family(&main_window, &font_family);
+            apply_font_family(&quick_search_window, &font_family);
+            apply_font_family(&settings_window, &font_family);
             // 同步快速搜索窗口主题
             quick_search_window.set_theme_mode(SharedString::from(theme.clone()));
             apply_theme(&main_window);
@@ -1928,6 +1989,13 @@ fn apply_theme(window: &MainWindow) {
     log::info!("主题已设置: {}", mode);
     // 颜色绑定在 Slint 中通过 bg-color(root.theme-mode) 等函数实现
     // set_theme_mode 会自动触发所有依赖 root.theme-mode 的颜色重新计算
+}
+
+/// 应用字体族到指定窗口的 ThemeSettings 全局
+/// font-family 是 ThemeSettings 的 in-property，可通过 global 句柄设置
+fn apply_font_family<W: slint::ComponentHandle>(window: &W, family: &str) {
+    let global = window.global::<crate::ThemeSettings>();
+    global.set_font_family(SharedString::from(family));
 }
 
 /// 设置窗口置顶 (Windows)

@@ -181,6 +181,10 @@ export component SettingsPanel inherits Rectangle {
     in property <int> item-icon-size: 48;
     in property <bool> hide-name: false;
     in property <bool> hide-ellipsis: false;
+    // ===== 字体 =====
+    in property <[string]> font-list: [];
+    in property <int> font-selected-index: 0;
+    callback font-changed(string);
     in property <bool> hide-after-open: false;
     in property <bool> record-open-count: true;
     in property <bool> show-tooltip: true;
@@ -577,6 +581,58 @@ export component SettingsPanel inherits Rectangle {
                                 step: 8;
                                 theme-mode: root.theme-mode;
                                 changed(v) => { root.item-icon-size-changed(v); }
+                            }
+                        }
+                    }
+
+                    // 字体选择
+                    Rectangle {
+                        height: 180px;
+                        horizontal-stretch: 1;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        VerticalLayout {
+                            padding: ThemeSettings.spacing-normal;
+                            spacing: ThemeSettings.spacing-small;
+
+                            Text {
+                                text: "字体";
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                font-size: ThemeSettings.font-size-normal;
+                                font-weight: 700;
+                            }
+                            Text {
+                                text: "当前: " + (root.font-list[root.font-selected-index] ?? "默认");
+                                color: ThemeSettings.accent-color;
+                                font-size: ThemeSettings.font-size-small;
+                            }
+
+                            ListView {
+                                horizontal-stretch: 1;
+                                vertical-stretch: 1;
+                                for name in root.font-list: Rectangle {
+                                    height: 28px;
+                                    horizontal-stretch: 1;
+                                    background: (i == root.font-selected-index)
+                                        ? ThemeSettings.selected-c(root.theme-mode)
+                                        : (font-ta.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
+                                    border-radius: 4px;
+                                    TouchArea {
+                                        id: font-ta;
+                                        clicked => { root.font-changed(name); }
+                                    }
+                                    Text {
+                                        text: name;
+                                        color: ThemeSettings.text-c(root.theme-mode);
+                                        font-size: ThemeSettings.font-size-normal;
+                                        font-family: name;
+                                        vertical-alignment: center;
+                                        padding-left: 8px;
+                                    }
+                                }
                             }
                         }
                     }
