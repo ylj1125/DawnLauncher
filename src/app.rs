@@ -1220,6 +1220,66 @@ impl App {
                             }
                         }
                     }
+                    ("item-area", "new-url") => {
+                        // 新建网址: 输入地址后后台抓取标题与图标
+                        drop(w);
+                        if let Some(raw) =
+                            show_input_dialog("新建网址", "请输入网址（如 https://www.example.com）")
+                        {
+                            let mut url = raw.trim().to_string();
+                            if !url.is_empty() {
+                                // 自动补全协议
+                                if !url.starts_with("http://") && !url.starts_with("https://") {
+                                    url = format!("https://{}", url);
+                                }
+                                let order = db_for_ctx.max_item_order(class_id) + 1;
+                                let db_bg = db_for_ctx.clone();
+                                let win_bg = window_for_ctx.clone();
+                                // 抓取标题/图标涉及网络请求，放后台线程避免阻塞 UI
+                                std::thread::spawn(move || {
+                                    let (name, icon) = match native::fetch_url_info(&url) {
+                                        Some(u) => {
+                                            let n = if u.title.trim().is_empty() {
+                                                url.clone()
+                                            } else {
+                                                u.title
+                                            };
+                                            (n, u.icon)
+                                        }
+                                        None => (url.clone(), None),
+                                    };
+                                    let item = Item {
+                                        id: 0,
+                                        classification_id: class_id,
+                                        name,
+                                        kind: 2,
+                                        data: crate::models::ItemData {
+                                            target: Some(url.clone()),
+                                            params: None,
+                                            icon,
+                                            ..Default::default()
+                                        },
+                                        shortcut_key: None,
+                                        global_shortcut_key: false,
+                                        order,
+                                    };
+                                    let ok = db_bg.insert_item(&item).is_ok();
+                                    let _ = slint::invoke_from_event_loop(move || {
+                                        if let Some(w) = win_bg.upgrade() {
+                                            if ok {
+                                                let items = db_bg.list_items(class_id);
+                                                w.set_items(to_item_model(&items, 0));
+                                                w.set_status_text(SharedString::from(format!(
+                                                    "共 {} 个项目",
+                                                    items.len()
+                                                )));
+                                            }
+                                        }
+                                    });
+                                });
+                            }
+                        }
+                    }
                     ("item-area", "batch-mode") => {
                         w.set_batch_mode(true);
                         w.set_context_menu_visible(false);
@@ -2624,6 +2684,7 @@ fn show_classification_area_menu(window: &MainWindow, x: i32, y: i32) {
 fn show_item_area_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
         ("new-item", "新建项目", "+", false, false),
+        ("new-url", "新建网址", "🔗", false, false),
         ("item-settings", "项目设置", "⚙", false, false),
         ("", "", "", true, false),
         ("sort-default", "排序：默认", "≡", false, false),

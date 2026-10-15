@@ -531,6 +531,101 @@ if ($folder) {{
     result
 }
 
+/// 网页信息抓取结果
+#[derive(Debug, Clone, Default)]
+pub struct UrlInfo {
+    /// 网页标题 (<title>)
+    pub title: String,
+    /// 站点图标 (data:image/png;base64,...)
+    pub icon: Option<String>,
+}
+
+/// 抓取网址的标题与图标 (favicon)
+/// 通过 PowerShell 下载页面并解析 <title> 与 <link rel="icon">，
+/// 依次尝试声明的图标地址与 /favicon.ico，结果经 UTF-8 临时文件回传。
+/// 完全失败 (无标题且无图标) 返回 None。
+pub fn fetch_url_info(url: &str) -> Option<UrlInfo> {
+    let out_file = std::env::temp_dir().join("dawn-launcher-urlinfo.txt");
+    let out_path = out_file.to_string_lossy().replace('\'', "''");
+    let url_escaped = url.replace('\'', "''");
+    let script = format!(
+        r#"
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -AssemblyName System.Drawing
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$out = '{out}'
+$url = '{url}'
+$title = ''
+$icon = '-'
+try {{
+    $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 15 -MaximumRedirection 5
+    $html = $resp.Content
+    if ($html -is [byte[]]) {{ $html = [System.Text.Encoding]::UTF8.GetString($html) }}
+    $m = [regex]::Match($html, '(?is)<title[^>]*>(.*?)</title>')
+    if ($m.Success) {{ $title = ($m.Groups[1].Value -replace '\s+', ' ').Trim() }}
+    # 基准地址 (处理重定向)
+    $baseUri = New-Object System.Uri($url)
+    try {{ $baseUri = $resp.BaseResponse.ResponseUri }} catch {{}}
+    # 收集 <link rel=...icon...> 的 href 候选
+    $cands = New-Object System.Collections.ArrayList
+    foreach ($lt in [regex]::Matches($html, '(?is)<link\b[^>]*>')) {{
+        $tag = $lt.Value
+        if ($tag -notmatch '(?i)rel\s*=\s*["'']?([^"''>\s]+)') {{ continue }}
+        if ($Matches[1] -notmatch '(?i)icon') {{ continue }}
+        if ($tag -notmatch '(?i)href\s*=\s*["'']([^"'']+)') {{ continue }}
+        [void]$cands.Add($Matches[1])
+    }}
+    [void]$cands.Add('/favicon.ico')
+    foreach ($c in $cands) {{
+        try {{ $iu = (New-Object System.Uri($baseUri, $c)).AbsoluteUri }} catch {{ continue }}
+        try {{
+            $wc = New-Object System.Net.WebClient
+            $bytes = $wc.DownloadData($iu)
+            if (-not $bytes -or $bytes.Length -eq 0) {{ continue }}
+            $ms = New-Object System.IO.MemoryStream(,$bytes)
+            $bmp = $null
+            try {{ $ic = New-Object System.Drawing.Icon($ms); $bmp = $ic.ToBitmap() }} catch {{ $bmp = $null }}
+            if (-not $bmp) {{
+                try {{
+                    $ms.Position = 0
+                    $img = [System.Drawing.Image]::FromStream($ms)
+                    $bmp = New-Object System.Drawing.Bitmap($img, 32, 32)
+                }} catch {{ $bmp = $null }}
+            }}
+            if ($bmp) {{
+                $osm = New-Object System.IO.MemoryStream
+                $bmp.Save($osm, [System.Drawing.Imaging.ImageFormat]::Png)
+                $icon = 'data:image/png;base64,' + [Convert]::ToBase64String($osm.ToArray())
+                break
+            }}
+        }} catch {{}}
+    }}
+}} catch {{}}
+[System.IO.File]::WriteAllText($out, ($title + "`n" + $icon), (New-Object System.Text.UTF8Encoding($false)))
+"#,
+        out = out_path,
+        url = url_escaped
+    );
+    let _ = run_hidden("powershell", &["-NoProfile", "-NonInteractive", "-Command", &script]);
+    let text = std::fs::read(&out_file)
+        .map(|b| String::from_utf8_lossy(&b).to_string())
+        .unwrap_or_default();
+    let _ = std::fs::remove_file(&out_file);
+
+    let mut lines = text.splitn(2, '\n');
+    let title = lines.next().unwrap_or("").trim().to_string();
+    let icon_line = lines.next().unwrap_or("").trim();
+    let icon = if icon_line.is_empty() || icon_line == "-" {
+        None
+    } else {
+        Some(icon_line.to_string())
+    };
+    if title.is_empty() && icon.is_none() {
+        return None;
+    }
+    Some(UrlInfo { title, icon })
+}
+
 /// 启动 Appx/UWP 应用 (通过 AppUserModelID)
 /// 使用 explorer.exe 打开 shell:AppsFolder\<AUMID>
 pub fn open_appx(aumid: &str) -> std::io::Result<()> {

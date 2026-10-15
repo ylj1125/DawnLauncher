@@ -47,3 +47,14 @@ pub fn scan_appx() -> Vec<LauncherEntry> {
 pub fn open_appx(_aumid: &str) -> std::io::Result<()> {
     Ok(())
 }
+
+/// 网页信息抓取结果 (非 Windows 平台占位)
+#[derive(Debug, Clone, Default)]
+pub struct UrlInfo {
+    pub title: String,
+    pub icon: Option<String>,
+}
+
+pub fn fetch_url_info(_url: &str) -> Option<UrlInfo> {
+    None
+}
