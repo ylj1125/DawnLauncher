@@ -7,11 +7,13 @@
 // - open_file_location: 在资源管理器中定位文件
 // - search_path: 在 PATH 环境变量中搜索可执行文件
 // - open_path: 用系统默认程序打开文件/网址
+// - scan_start_menu: 扫描开始菜单快捷方式
+// - scan_appx: 扫描已安装的 Appx (商店) 应用
+// - open_appx: 通过 AppUserModelID 启动 Appx 应用
 //
 // 待迁移（后续迭代）：
 // - explorer_context_menu: 资源管理器右键菜单 (COM IContextMenu)
 // - create_mouse_hook / enable_mouse_hook: 全局鼠标 HOOK
-// - get_appx_list: Appx 应用列表
 // - is_fullscreen / switch_english: 全屏检测/输入法切换
 
 use std::collections::HashMap;
@@ -217,6 +219,345 @@ pub fn open_file_location(path: &str) {
 pub fn is_fullscreen() -> bool {
     // TODO: 完整实现需要枚举所有窗口并判断是否覆盖屏幕
     false
+}
+
+// ============================================================
+// 开始菜单 / Appx (商店应用) 扫描
+// ============================================================
+
+/// 扫描得到的启动项条目
+#[derive(Debug, Clone)]
+pub struct LauncherEntry {
+    /// 显示名称
+    pub name: String,
+    /// 启动目标：文件路径 或 Appx 的 AppUserModelID
+    pub target: String,
+    /// 项目类型: 0 文件 / 4 Appx
+    pub kind: i64,
+    /// 启动参数 (可为空)
+    pub params: Option<String>,
+    /// 图标 (data:image/png;base64,...)
+    pub icon: Option<String>,
+}
+
+/// 递归收集目录下的 .lnk 文件
+/// depth 用于限制目录深度，避免异常目录结构导致过深递归
+fn collect_lnk_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>, depth: usize) {
+    if depth > 8 || !dir.is_dir() {
+        return;
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_lnk_files(&path, out, depth + 1);
+        } else if path
+            .extension()
+            .map(|e| e.eq_ignore_ascii_case("lnk"))
+            .unwrap_or(false)
+        {
+            out.push(path);
+        }
+    }
+}
+
+/// 批量获取文件图标 (一次 PowerShell 调用)
+/// 路径列表写入临时文件后由 PowerShell 逐行读取，避免命令行长度与转义问题。
+/// 返回与输入等长的结果，按行与输入一一对应。
+fn get_icons_batch(paths: &[String]) -> Vec<Option<String>> {
+    if paths.is_empty() {
+        return Vec::new();
+    }
+    // 路径写入临时文件
+    let list_file = std::env::temp_dir().join("dawn-launcher-icon-list.txt");
+    let content = paths.join("\r\n");
+    if std::fs::write(&list_file, content.as_bytes()).is_err() {
+        return vec![None; paths.len()];
+    }
+    let list_path = list_file.to_string_lossy().replace('\'', "''");
+    // 输出为 Base64 (ASCII)，不涉及编码转换；不要设置 [Console]::OutputEncoding，
+    // 否则在 CREATE_NO_WINDOW (无控制台) 下会抛错导致脚本中断
+    let script = format!(
+        r#"
+Add-Type -AssemblyName System.Drawing
+$lines = Get-Content -LiteralPath '{list}' -Encoding UTF8
+foreach ($p in $lines) {{
+    $b = '-'
+    if ($p -and (Test-Path -LiteralPath $p -PathType Leaf)) {{
+        try {{
+            $i = [System.Drawing.Icon]::ExtractAssociatedIcon($p)
+            if ($i) {{
+                $ms = New-Object System.IO.MemoryStream
+                $i.ToBitmap().Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+                $b = [Convert]::ToBase64String($ms.ToArray())
+            }}
+        }} catch {{ $b = '-' }}
+    }}
+    Write-Output $b
+}}
+"#,
+        list = list_path
+    );
+    let output = run_hidden("powershell", &["-NoProfile", "-NonInteractive", "-Command", &script]);
+    let _ = std::fs::remove_file(&list_file);
+    let Some(stdout) = output else {
+        return vec![None; paths.len()];
+    };
+    let text = String::from_utf8_lossy(&stdout).to_string();
+    let mut result: Vec<Option<String>> = text
+        .lines()
+        .map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line == "-" {
+                None
+            } else {
+                Some(format!("data:image/png;base64,{}", line))
+            }
+        })
+        .collect();
+    // 对齐到输入长度（PowerShell 可能输出多余告警行）
+    result.resize(paths.len(), None);
+    result.truncate(paths.len());
+    result
+}
+
+/// 扫描开始菜单中的快捷方式 (用户 + 全局)，返回可导入的应用列表
+/// 会解析 .lnk 得到真实目标路径与启动参数，并批量提取图标
+pub fn scan_start_menu() -> Vec<LauncherEntry> {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        dirs.push(
+            std::path::Path::new(&appdata)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs"),
+        );
+    }
+    if let Ok(programdata) = std::env::var("PROGRAMDATA") {
+        dirs.push(
+            std::path::Path::new(&programdata)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs"),
+        );
+    }
+
+    let mut lnk_files: Vec<std::path::PathBuf> = Vec::new();
+    for d in &dirs {
+        collect_lnk_files(d, &mut lnk_files, 0);
+    }
+    lnk_files.sort();
+    lnk_files.dedup();
+
+    // 解析每个 .lnk（去重按目标路径）
+    struct Raw {
+        name: String,
+        target: String,
+        params: Option<String>,
+        icon_src: String,
+    }
+    let mut raws: Vec<Raw> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for path in &lnk_files {
+        let path_str = path.to_string_lossy().to_string();
+        let name = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if name.is_empty() {
+            continue;
+        }
+        let (target, params) = match get_shortcut_file_info(&path_str) {
+            Some(info) => (
+                info.get("target").cloned().unwrap_or_default(),
+                info.get("arguments").cloned(),
+            ),
+            None => (String::new(), None),
+        };
+        let target = target.trim().trim_matches('"').to_string();
+        // 解析失败时退化为直接用 .lnk 启动
+        let target = if target.is_empty() {
+            path_str.clone()
+        } else {
+            target
+        };
+        let key = target.to_lowercase();
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.insert(key);
+        let params = params.filter(|p| !p.trim().is_empty());
+        // 图标优先取目标文件；目标是文件夹/不存在时退化为 .lnk 自身
+        let icon_src = if std::path::Path::new(&target).is_file() {
+            target.clone()
+        } else {
+            path_str.clone()
+        };
+        raws.push(Raw {
+            name,
+            target,
+            params,
+            icon_src,
+        });
+    }
+
+    let icon_srcs: Vec<String> = raws.iter().map(|r| r.icon_src.clone()).collect();
+    let icons = get_icons_batch(&icon_srcs);
+
+    raws.into_iter()
+        .enumerate()
+        .map(|(i, r)| LauncherEntry {
+            name: r.name,
+            target: r.target,
+            kind: 0,
+            params: r.params,
+            icon: icons.get(i).cloned().flatten(),
+        })
+        .collect()
+}
+
+/// 扫描已安装的 Appx (Microsoft Store / UWP) 应用
+/// 通过 shell:AppsFolder 枚举得到显示名称与 AppUserModelID，
+/// 并从各包清单解析 Logo 作为图标（单次 PowerShell 调用完成）。
+pub fn scan_appx() -> Vec<LauncherEntry> {
+    // 结果写入临时文件（UTF-8 无 BOM），避免 CREATE_NO_WINDOW 下无控制台导致
+    // [Console]::OutputEncoding 报错以及中文名称乱码
+    let out_file = std::env::temp_dir().join("dawn-launcher-appx.txt");
+    let out_path = out_file.to_string_lossy().replace('\'', "''");
+    let script = format!(
+        r#"
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -AssemblyName System.Drawing
+$out = '{out}'
+$lines = @()
+# 建立 AUMID -> Logo 文件路径 的映射
+$map = @{{}}
+foreach ($pkg in Get-AppxPackage) {{
+    $loc = $pkg.InstallLocation
+    if (-not $loc) {{ continue }}
+    $mf = $null
+    try {{ $mf = Get-AppxPackageManifest $pkg }} catch {{ continue }}
+    if (-not $mf) {{ continue }}
+    $fam = $pkg.PackageFamilyName
+    try {{
+        foreach ($app in $mf.Package.Applications.Application) {{
+            $logo = $app.VisualElements.Square44x44Logo
+            if (-not $logo) {{ $logo = $app.VisualElements.Square150x150Logo }}
+            if (-not $logo) {{ $logo = $app.VisualElements.Logo }}
+            if (-not $logo) {{ continue }}
+            $full = Join-Path $loc ($logo -replace '/', '\')
+            $map[($fam + '!' + $app.Id)] = $full
+        }}
+    }} catch {{}}
+}}
+# 枚举 shell:AppsFolder 得到显示名称与 AUMID
+$shell = New-Object -ComObject Shell.Application
+$folder = $shell.NameSpace('shell:AppsFolder')
+if ($folder) {{
+    foreach ($item in $folder.Items()) {{
+        $aumid = $item.Path
+        if (-not ($aumid -and $aumid.Contains('!'))) {{ continue }}
+        $b = '-'
+        $lp = $map[$aumid]
+        if ($lp) {{
+            # Logo 基准文件可能不存在，按前缀匹配尺寸变体并取最大
+            if (-not (Test-Path -LiteralPath $lp -PathType Leaf)) {{
+                try {{
+                    $dir = Split-Path $lp
+                    $base = [System.IO.Path]::GetFileNameWithoutExtension($lp)
+                    $f = Get-ChildItem -LiteralPath $dir -Filter ($base + '*') -File |
+                         Sort-Object Length -Descending | Select-Object -First 1
+                    if ($f) {{ $lp = $f.FullName }}
+                }} catch {{}}
+            }}
+            try {{
+                if (Test-Path -LiteralPath $lp -PathType Leaf) {{
+                    $img = [System.Drawing.Image]::FromFile($lp)
+                    $bmp = New-Object System.Drawing.Bitmap($img, 48, 48)
+                    $ms = New-Object System.IO.MemoryStream
+                    $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+                    $b = [Convert]::ToBase64String($ms.ToArray())
+                    $bmp.Dispose()
+                    $img.Dispose()
+                }}
+            }} catch {{ $b = '-' }}
+        }}
+        $lines += ($aumid + "`t" + $item.Name + "`t" + $b)
+    }}
+}}
+[System.IO.File]::WriteAllText($out, ($lines -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
+"#,
+        out = out_path
+    );
+    let _ = run_hidden("powershell", &["-NoProfile", "-NonInteractive", "-Command", &script]);
+    let text = std::fs::read(&out_file)
+        .map(|b| String::from_utf8_lossy(&b).to_string())
+        .unwrap_or_default();
+    let _ = std::fs::remove_file(&out_file);
+    let mut result: Vec<LauncherEntry> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for line in text.lines() {
+        let mut parts = line.split('\t');
+        let aumid = parts.next().unwrap_or("").trim().to_string();
+        let name = parts.next().unwrap_or("").trim().to_string();
+        let icon_b64 = parts.next().unwrap_or("").trim().to_string();
+        if aumid.is_empty() || !aumid.contains('!') {
+            continue;
+        }
+        let key = aumid.to_lowercase();
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.insert(key);
+        let name = if name.is_empty() { aumid.clone() } else { name };
+        let icon = if icon_b64.is_empty() || icon_b64 == "-" {
+            None
+        } else {
+            Some(format!("data:image/png;base64,{}", icon_b64))
+        };
+        result.push(LauncherEntry {
+            name,
+            target: aumid,
+            kind: 4,
+            params: None,
+            icon,
+        });
+    }
+    result
+}
+
+/// 启动 Appx/UWP 应用 (通过 AppUserModelID)
+/// 使用 explorer.exe 打开 shell:AppsFolder\<AUMID>
+pub fn open_appx(aumid: &str) -> std::io::Result<()> {
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::PCWSTR;
+
+    let arg = format!("shell:AppsFolder\\{}", aumid);
+    let arg_h = HSTRING::from(arg);
+    let exe_h = HSTRING::from("explorer.exe");
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR::null(),
+            PCWSTR(exe_h.as_ptr()),
+            PCWSTR(arg_h.as_ptr()),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if result.0 as usize <= 32 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("启动应用失败 (AUMID): {}", aumid),
+        ));
+    }
+    Ok(())
 }
 
 // ============================================================

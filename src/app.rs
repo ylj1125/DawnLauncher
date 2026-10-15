@@ -890,6 +890,69 @@ impl App {
             });
         }
 
+        // 15.38 工具: 扫描开始菜单 (导入 .lnk 应用)
+        {
+            let db_for_scan_menu = db.clone();
+            let window_for_scan_menu = main_window.as_weak();
+            let current_id_for_scan_menu = current_id.clone();
+            main_window.on_scan_start_menu(move || {
+                let db = db_for_scan_menu.clone();
+                let win = window_for_scan_menu.clone();
+                let cid = current_id_for_scan_menu.clone();
+                // 扫描涉及磁盘遍历与 PowerShell，放到后台线程，避免阻塞 UI
+                std::thread::spawn(move || {
+                    let entries = native::scan_start_menu();
+                    let class_id: i64 = *cid.lock().unwrap();
+                    let (added, skipped) = import_entries(&db, class_id, entries);
+                    let msg = format!(
+                        "扫描开始菜单完成\n\n新增 {} 个应用\n跳过 {} 个（已存在）",
+                        added, skipped
+                    );
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = win.upgrade() {
+                            let items = db.list_items(class_id);
+                            w.set_items(to_item_model(&items, 0));
+                            w.set_status_text(SharedString::from(format!("{} 项", items.len())));
+                        }
+                        show_info_dialog("扫描完成", &msg);
+                    });
+                });
+            });
+        }
+
+        // 15.39 工具: 扫描商店应用 (Appx / UWP)
+        {
+            let db_for_scan_appx = db.clone();
+            let window_for_scan_appx = main_window.as_weak();
+            let current_id_for_scan_appx = current_id.clone();
+            main_window.on_scan_appx(move || {
+                let db = db_for_scan_appx.clone();
+                let win = window_for_scan_appx.clone();
+                let cid = current_id_for_scan_appx.clone();
+                std::thread::spawn(move || {
+                    let entries = native::scan_appx();
+                    let class_id: i64 = *cid.lock().unwrap();
+                    let (added, skipped) = import_entries(&db, class_id, entries);
+                    let msg = if added == 0 && skipped == 0 {
+                        "未扫描到商店应用（Appx）".to_string()
+                    } else {
+                        format!(
+                            "扫描商店应用完成\n\n新增 {} 个应用\n跳过 {} 个（已存在）",
+                            added, skipped
+                        )
+                    };
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = win.upgrade() {
+                            let items = db.list_items(class_id);
+                            w.set_items(to_item_model(&items, 0));
+                            w.set_status_text(SharedString::from(format!("{} 项", items.len())));
+                        }
+                        show_info_dialog("扫描完成", &msg);
+                    });
+                });
+            });
+        }
+
         // 16. 窗口关闭
         main_window.on_window_close(move || {
             std::process::exit(0);
@@ -2059,8 +2122,23 @@ fn open_item(item: &Item) {
 
     log::info!("准备打开项目: name={}, target={}, type={}", item.name, target, item.kind);
 
-    // 检查目标是否存在 (网址不检查)
-    if !item.is_url() && !std::path::Path::new(&target).exists() {
+    // Appx (商店应用) 以 AppUserModelID 启动，不走文件路径
+    if item.is_appx() {
+        match native::open_appx(&target) {
+            Ok(_) => log::info!("启动 Appx 成功: {}", target),
+            Err(e) => {
+                log::error!("启动 Appx 失败: {}, error: {}", target, e);
+                #[cfg(target_os = "windows")]
+                {
+                    show_error_dialog("打开失败", &format!("无法启动应用:\n{}\n\n错误: {}", target, e));
+                }
+            }
+        }
+        return;
+    }
+
+    // 检查目标是否存在 (网址/系统项不检查)
+    if !item.is_url() && !item.is_system() && !std::path::Path::new(&target).exists() {
         log::error!("目标路径不存在: {}", target);
         // 弹出错误提示
         #[cfg(target_os = "windows")]
@@ -2167,6 +2245,62 @@ fn build_item_from_path(path: &str, classification_id: i64, order: i64) -> Item 
         global_shortcut_key: false,
         order,
     }
+}
+
+/// 将扫描得到的启动项批量导入指定分类
+/// 按 target 去重（忽略大小写，并与该分类内已有项目比对）
+/// 返回 (新增数量, 跳过数量)
+fn import_entries(
+    db: &Database,
+    classification_id: i64,
+    entries: Vec<native::LauncherEntry>,
+) -> (usize, usize) {
+    if entries.is_empty() {
+        return (0, 0);
+    }
+    // 分类内已有项目的 target 集合
+    let existing = db.list_items(classification_id);
+    let mut seen: std::collections::HashSet<String> = existing
+        .iter()
+        .filter_map(|i| i.data.target.as_deref())
+        .map(|t| t.to_lowercase())
+        .collect();
+
+    let mut order = db.max_item_order(classification_id);
+    let mut added = 0usize;
+    let mut skipped = 0usize;
+    for entry in entries {
+        let key = entry.target.to_lowercase();
+        if key.is_empty() || seen.contains(&key) {
+            skipped += 1;
+            continue;
+        }
+        seen.insert(key);
+        order += 1;
+        let item = Item {
+            id: 0,
+            classification_id,
+            name: entry.name,
+            kind: entry.kind,
+            data: crate::models::ItemData {
+                target: Some(entry.target),
+                params: entry.params,
+                icon: entry.icon,
+                ..Default::default()
+            },
+            shortcut_key: None,
+            global_shortcut_key: false,
+            order,
+        };
+        match db.insert_item(&item) {
+            Ok(_) => added += 1,
+            Err(e) => {
+                log::error!("导入项目失败: {}", e);
+                skipped += 1;
+            }
+        }
+    }
+    (added, skipped)
 }
 
 /// 弹出文件选择对话框 (Windows)

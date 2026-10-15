@@ -121,6 +121,9 @@ export component MainWindow inherits Window {
     callback backup-data();
     callback restore-data();
     callback check-invalid-items();
+    // 扫描应用 (开始菜单 / 商店应用)
+    callback scan-start-menu();
+    callback scan-appx();
 
     // ===== 右键菜单回调 =====
     // 右键菜单项被选中，参数: source, item-id
@@ -686,7 +689,7 @@ export component MainWindow inherits Window {
             x: root.width - 160px;
             y: 32px;
             width: 150px;
-            height: 171px;
+            height: 260px;
             background: ThemeSettings.card-bg(root.theme-mode);
             border-radius: 8px;
             border-width: 1px;
@@ -819,6 +822,69 @@ export component MainWindow inherits Window {
                         clicked => {
                             root.tools-popup-visible = false;
                             root.check-invalid-items();
+                        }
+                    }
+                }
+
+                // 分隔线
+                VerticalLayout {
+                    height: 9px;
+                    padding: 4px;
+                    Rectangle { background: ThemeSettings.border-c(root.theme-mode); }
+                }
+
+                // 扫描开始菜单
+                Rectangle {
+                    height: 40px;
+                    border-radius: 4px;
+                    background: tp-scan-menu.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 10px;
+                        spacing: 10px;
+                        alignment: start;
+                        Text { text: "🖥"; font-size: 14px; vertical-alignment: center; horizontal-alignment: center; width: 16px; color: ThemeSettings.text-c(root.theme-mode); }
+                        Text {
+                            text: "扫描开始菜单";
+                            color: ThemeSettings.text-c(root.theme-mode);
+                            font-size: ThemeSettings.font-size-normal;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            horizontal-alignment: left;
+                        }
+                    }
+                    tp-scan-menu := TouchArea {
+                        clicked => {
+                            root.tools-popup-visible = false;
+                            root.scan-start-menu();
+                        }
+                    }
+                }
+
+                // 扫描商店应用
+                Rectangle {
+                    height: 40px;
+                    border-radius: 4px;
+                    background: tp-scan-appx.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 10px;
+                        spacing: 10px;
+                        alignment: start;
+                        Text { text: "🛍"; font-size: 14px; vertical-alignment: center; horizontal-alignment: center; width: 16px; color: ThemeSettings.text-c(root.theme-mode); }
+                        Text {
+                            text: "扫描商店应用";
+                            color: ThemeSettings.text-c(root.theme-mode);
+                            font-size: ThemeSettings.font-size-normal;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            horizontal-alignment: left;
+                        }
+                    }
+                    tp-scan-appx := TouchArea {
+                        clicked => {
+                            root.tools-popup-visible = false;
+                            root.scan-appx();
                         }
                     }
                 }
