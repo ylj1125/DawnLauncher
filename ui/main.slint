@@ -1041,6 +1041,12 @@ export component SettingsWindow inherits Window {
 
     // ===== 外观设置 =====
     in property <string> theme-mode: "light";
+    // ===== 自定义主题颜色 =====
+    in property <string> custom-bg: "#f5f6f7";
+    in property <string> custom-sidebar: "#ffffff";
+    in property <string> custom-text: "#2c2c2c";
+    in property <string> custom-border: "#e5e7eb";
+    in property <string> custom-card: "#ffffff";
     // ===== 常规设置 =====
     in property <bool> auto-start: false;
     in property <bool> window-topmost: false;
@@ -1086,6 +1092,7 @@ export component SettingsWindow inherits Window {
 
     // ===== 回调 =====
     callback theme-mode-changed(string);
+    callback custom-color-changed(string, string);
     callback auto-start-changed(bool);
     callback window-topmost-changed(bool);
     callback minimize-to-tray-changed(bool);
@@ -1133,6 +1140,11 @@ export component SettingsWindow inherits Window {
         active-section <=> root.active-section;
 
         theme-mode: root.theme-mode;
+        custom-bg: root.custom-bg;
+        custom-sidebar: root.custom-sidebar;
+        custom-text: root.custom-text;
+        custom-border: root.custom-border;
+        custom-card: root.custom-card;
         auto-start: root.auto-start;
         window-topmost: root.window-topmost;
         minimize-to-tray: root.minimize-to-tray;
@@ -1170,6 +1182,7 @@ export component SettingsWindow inherits Window {
 
         back-clicked => { root.close-requested(); }
         theme-mode-changed(mode) => { root.theme-mode-changed(mode); }
+        custom-color-changed(key, val) => { root.custom-color-changed(key, val); }
         auto-start-changed(v) => { root.auto-start-changed(v); }
         window-topmost-changed(v) => { root.window-topmost-changed(v); }
         minimize-to-tray-changed(v) => { root.minimize-to-tray-changed(v); }

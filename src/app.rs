@@ -336,6 +336,12 @@ impl App {
                 // 从数据库读取所有设置值
                 let raw_theme = db_for_settings.get_setting("theme_mode", "light");
                 let theme = if raw_theme == "dark" { "classic-dark".to_string() } else { raw_theme };
+                // 自定义主题颜色
+                let custom_bg = db_for_settings.get_setting("custom_bg", "#f5f6f7");
+                let custom_sidebar = db_for_settings.get_setting("custom_sidebar", "#ffffff");
+                let custom_text = db_for_settings.get_setting("custom_text", "#2c2c2c");
+                let custom_border = db_for_settings.get_setting("custom_border", "#e5e7eb");
+                let custom_card = db_for_settings.get_setting("custom_card", "#ffffff");
                 let auto_start = db_for_settings.get_setting_bool("auto_start", false);
                 let topmost = db_for_settings.get_setting_bool("window_topmost", false);
                 let min_to_tray = db_for_settings.get_setting_bool("minimize_to_tray", false);
@@ -438,6 +444,18 @@ impl App {
                     sw.set_theme_mode(mw.get_theme_mode());
                 }
 
+                // 设置自定义主题颜色 (输入框显示值 + ThemeSettings 全局)
+                sw.set_custom_bg(SharedString::from(custom_bg.clone()));
+                sw.set_custom_sidebar(SharedString::from(custom_sidebar.clone()));
+                sw.set_custom_text(SharedString::from(custom_text.clone()));
+                sw.set_custom_border(SharedString::from(custom_border.clone()));
+                sw.set_custom_card(SharedString::from(custom_card.clone()));
+                set_custom_theme_color(&sw, "bg", &custom_bg);
+                set_custom_theme_color(&sw, "sidebar", &custom_sidebar);
+                set_custom_theme_color(&sw, "text", &custom_text);
+                set_custom_theme_color(&sw, "border", &custom_border);
+                set_custom_theme_color(&sw, "card", &custom_card);
+
                 sw.window().show().ok();
                 // 定位到主窗口内部居中
                 if let Some(mw) = main_weak_for_settings.upgrade() {
@@ -471,6 +489,42 @@ impl App {
                 }
                 if let Some(sw) = sw_for_theme.upgrade() {
                     sw.set_theme_mode(mode.clone());
+                }
+            });
+        }
+
+        // 15.0.2 自定义主题颜色变更
+        {
+            let db_cc = db.clone();
+            let main_cc = main_window.as_weak();
+            let qs_cc = quick_search_window.as_weak();
+            let sw_cc = settings_window.as_weak();
+            settings_window.on_custom_color_changed(move |key, val| {
+                let key_str = key.to_string();
+                let val_str = val.to_string();
+                log::info!("自定义主题颜色变更: {}={}", key_str, val_str);
+                let setting_key = format!("custom_{}", key_str);
+                let _ = db_cc.set_setting(&setting_key, &val_str);
+                // 同步到各窗口的 ThemeSettings 全局
+                let key_clone = key_str.clone();
+                let val_clone = val_str.clone();
+                if let Some(w) = main_cc.upgrade() {
+                    set_custom_theme_color(&w, &key_clone, &val_clone);
+                }
+                if let Some(qs) = qs_cc.upgrade() {
+                    set_custom_theme_color(&qs, &key_clone, &val_clone);
+                }
+                if let Some(sw) = sw_cc.upgrade() {
+                    set_custom_theme_color(&sw, &key_clone, &val_clone);
+                    // 同步设置窗口自身的显示值
+                    match key_str.as_str() {
+                        "bg" => sw.set_custom_bg(SharedString::from(val_str.clone())),
+                        "sidebar" => sw.set_custom_sidebar(SharedString::from(val_str.clone())),
+                        "text" => sw.set_custom_text(SharedString::from(val_str.clone())),
+                        "border" => sw.set_custom_border(SharedString::from(val_str.clone())),
+                        "card" => sw.set_custom_card(SharedString::from(val_str.clone())),
+                        _ => {}
+                    }
                 }
             });
         }
@@ -1902,6 +1956,12 @@ impl App {
             let hide_name = db.get_setting_bool("hide_name", false);
             let hide_after_open = db.get_setting_bool("hide_after_open", false);
             let font_family = db.get_setting("font_family", "Microsoft YaHei UI");
+            // 自定义主题颜色
+            let custom_bg = db.get_setting("custom_bg", "#f5f6f7");
+            let custom_sidebar = db.get_setting("custom_sidebar", "#ffffff");
+            let custom_text = db.get_setting("custom_text", "#2c2c2c");
+            let custom_border = db.get_setting("custom_border", "#e5e7eb");
+            let custom_card = db.get_setting("custom_card", "#ffffff");
             main_window.set_theme_mode(SharedString::from(theme.clone()));
             main_window.set_window_topmost(topmost);
             main_window.set_item_icon_size(icon_size);
@@ -1912,6 +1972,18 @@ impl App {
             apply_font_family(&main_window, &font_family);
             apply_font_family(&quick_search_window, &font_family);
             apply_font_family(&settings_window, &font_family);
+            // 应用自定义主题颜色到所有窗口的 ThemeSettings 全局
+            for (k, v) in [
+                ("bg", &custom_bg),
+                ("sidebar", &custom_sidebar),
+                ("text", &custom_text),
+                ("border", &custom_border),
+                ("card", &custom_card),
+            ] {
+                set_custom_theme_color(&main_window, k, v);
+                set_custom_theme_color(&quick_search_window, k, v);
+                set_custom_theme_color(&settings_window, k, v);
+            }
             // 同步快速搜索窗口主题
             quick_search_window.set_theme_mode(SharedString::from(theme.clone()));
             apply_theme(&main_window);
@@ -1996,6 +2068,42 @@ fn apply_theme(window: &MainWindow) {
 fn apply_font_family<W: slint::ComponentHandle>(window: &W, family: &str) {
     let global = window.global::<crate::ThemeSettings>();
     global.set_font_family(SharedString::from(family));
+}
+
+/// 将自定义主题颜色应用到指定窗口的 ThemeSettings 全局
+/// key: bg / sidebar / text / border / card
+fn set_custom_theme_color<W: slint::ComponentHandle>(window: &W, key: &str, hex: &str) {
+    use slint::Color;
+    let global = window.global::<crate::ThemeSettings>();
+    let color = parse_hex_color(hex);
+    match key {
+        "bg" => global.set_custom_bg(color),
+        "sidebar" => global.set_custom_sidebar(color),
+        "text" => global.set_custom_text(color),
+        "border" => global.set_custom_border(color),
+        "card" => global.set_custom_card(color),
+        _ => {}
+    }
+}
+
+/// 解析十六进制颜色字符串 (#RRGGBB 或 #RGB) 为 Slint Color
+/// 解析失败时返回透明色
+fn parse_hex_color(hex: &str) -> slint::Color {
+    let hex = hex.trim().trim_start_matches('#');
+    let (r, g, b) = if hex.len() == 6 {
+        let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
+        let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
+        let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
+        (r, g, b)
+    } else if hex.len() == 3 {
+        let r = u8::from_str_radix(&hex[0..1].repeat(2), 16).unwrap_or(0);
+        let g = u8::from_str_radix(&hex[1..2].repeat(2), 16).unwrap_or(0);
+        let b = u8::from_str_radix(&hex[2..3].repeat(2), 16).unwrap_or(0);
+        (r, g, b)
+    } else {
+        (0, 0, 0)
+    };
+    slint::Color::from_argb_u8(255, r, g, b)
 }
 
 /// 设置窗口置顶 (Windows)

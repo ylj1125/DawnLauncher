@@ -2,7 +2,7 @@
 // 左侧导航: 常规/外观/分类/项目/快速搜索/工具/关于
 // 右侧显示对应设置项
 
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView, LineEdit } from "std-widgets.slint";
 import { ThemeSettings } from "../theme.slint";
 import { SettingSwitch, SettingGroupTitle, SettingSlider } from "./setting_widgets.slint";
 
@@ -165,6 +165,13 @@ export component SettingsPanel inherits Rectangle {
 
     // ===== 外观设置 =====
     in property <string> theme-mode: "light";
+    // ===== 自定义主题颜色 =====
+    in property <string> custom-bg: "#f5f6f7";
+    in property <string> custom-sidebar: "#ffffff";
+    in property <string> custom-text: "#2c2c2c";
+    in property <string> custom-border: "#e5e7eb";
+    in property <string> custom-card: "#ffffff";
+    callback custom-color-changed(string, string); // (key, hex-value)
     // ===== 常规设置 =====
     in property <bool> auto-start: false;
     in property <bool> window-topmost: false;
@@ -491,6 +498,121 @@ export component SettingsPanel inherits Rectangle {
                         }
                     }
 
+                    // 自定义主题颜色
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        VerticalLayout {
+                            padding: ThemeSettings.spacing-normal;
+                            spacing: ThemeSettings.spacing-normal;
+
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text {
+                                    text: "自定义主题";
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    font-size: ThemeSettings.font-size-normal;
+                                    font-weight: 700;
+                                    horizontal-stretch: 1;
+                                }
+                                Rectangle {
+                                    width: 80px;
+                                    height: 26px;
+                                    border-radius: 4px;
+                                    background: #3b82f6;
+                                    border-width: 1px;
+                                    border-color: #2563eb;
+                                    TouchArea {
+                                        clicked => { root.theme-mode-changed("custom"); }
+                                    }
+                                    Text {
+                                        text: "应用自定义";
+                                        color: white;
+                                        font-size: 11px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            // 颜色行: 标签 + 色块预览 + 十六进制输入框
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text { text: "背景"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: root.custom-bg; border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                LineEdit {
+                                    horizontal-stretch: 1;
+                                    text: root.custom-bg;
+                                    font-size: ThemeSettings.font-size-small;
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    background: ThemeSettings.bg-color(root.theme-mode);
+                                    border-color: ThemeSettings.border-c(root.theme-mode);
+                                    accepted(t) => { root.custom-color-changed("bg", t); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text { text: "侧栏"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: root.custom-sidebar; border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                LineEdit {
+                                    horizontal-stretch: 1;
+                                    text: root.custom-sidebar;
+                                    font-size: ThemeSettings.font-size-small;
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    background: ThemeSettings.bg-color(root.theme-mode);
+                                    border-color: ThemeSettings.border-c(root.theme-mode);
+                                    accepted(t) => { root.custom-color-changed("sidebar", t); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text { text: "文字"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: root.custom-text; border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                LineEdit {
+                                    horizontal-stretch: 1;
+                                    text: root.custom-text;
+                                    font-size: ThemeSettings.font-size-small;
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    background: ThemeSettings.bg-color(root.theme-mode);
+                                    border-color: ThemeSettings.border-c(root.theme-mode);
+                                    accepted(t) => { root.custom-color-changed("text", t); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text { text: "边框"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: root.custom-border; border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                LineEdit {
+                                    horizontal-stretch: 1;
+                                    text: root.custom-border;
+                                    font-size: ThemeSettings.font-size-small;
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    background: ThemeSettings.bg-color(root.theme-mode);
+                                    border-color: ThemeSettings.border-c(root.theme-mode);
+                                    accepted(t) => { root.custom-color-changed("border", t); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text { text: "卡片"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: root.custom-card; border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                LineEdit {
+                                    horizontal-stretch: 1;
+                                    text: root.custom-card;
+                                    font-size: ThemeSettings.font-size-small;
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    background: ThemeSettings.bg-color(root.theme-mode);
+                                    border-color: ThemeSettings.border-c(root.theme-mode);
+                                    accepted(t) => { root.custom-color-changed("card", t); }
+                                }
+                            }
+                        }
+                    }
+
                     SettingGroupTitle { text: "显示"; theme-mode: root.theme-mode; }
 
                     // 项目列数
@@ -605,7 +727,7 @@ export component SettingsPanel inherits Rectangle {
                                 font-weight: 700;
                             }
                             Text {
-                                text: "当前: " + (root.font-list[root.font-selected-index] ?? "默认");
+                                text: "当前: " + root.font-list[root.font-selected-index];
                                 color: ThemeSettings.accent-color;
                                 font-size: ThemeSettings.font-size-small;
                             }
