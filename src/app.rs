@@ -2065,15 +2065,20 @@ fn apply_theme(window: &MainWindow) {
 
 /// 应用字体族到指定窗口的 ThemeSettings 全局
 /// font-family 是 ThemeSettings 的 in-property，可通过 global 句柄设置
-fn apply_font_family<W: slint::ComponentHandle>(window: &W, family: &str) {
+fn apply_font_family<W: slint::ComponentHandle>(window: &W, family: &str)
+where
+    for<'a> crate::ThemeSettings<'a>: slint::Global<'a, W>,
+{
     let global = window.global::<crate::ThemeSettings>();
     global.set_font_family(SharedString::from(family));
 }
 
 /// 将自定义主题颜色应用到指定窗口的 ThemeSettings 全局
 /// key: bg / sidebar / text / border / card
-fn set_custom_theme_color<W: slint::ComponentHandle>(window: &W, key: &str, hex: &str) {
-    use slint::Color;
+fn set_custom_theme_color<W: slint::ComponentHandle>(window: &W, key: &str, hex: &str)
+where
+    for<'a> crate::ThemeSettings<'a>: slint::Global<'a, W>,
+{
     let global = window.global::<crate::ThemeSettings>();
     let color = parse_hex_color(hex);
     match key {

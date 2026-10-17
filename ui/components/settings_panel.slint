@@ -2,7 +2,7 @@
 // 左侧导航: 常规/外观/分类/项目/快速搜索/工具/关于
 // 右侧显示对应设置项
 
-import { ScrollView, LineEdit } from "std-widgets.slint";
+import { ScrollView, LineEdit, ListView } from "std-widgets.slint";
 import { ThemeSettings } from "../theme.slint";
 import { SettingSwitch, SettingGroupTitle, SettingSlider } from "./setting_widgets.slint";
 
@@ -543,70 +543,55 @@ export component SettingsPanel inherits Rectangle {
                             HorizontalLayout {
                                 spacing: ThemeSettings.spacing-normal;
                                 Text { text: "背景"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
-                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: root.custom-bg; border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: ThemeSettings.bg-color("custom"); border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
                                 LineEdit {
                                     horizontal-stretch: 1;
                                     text: root.custom-bg;
                                     font-size: ThemeSettings.font-size-small;
-                                    color: ThemeSettings.text-c(root.theme-mode);
-                                    background: ThemeSettings.bg-color(root.theme-mode);
-                                    border-color: ThemeSettings.border-c(root.theme-mode);
                                     accepted(t) => { root.custom-color-changed("bg", t); }
                                 }
                             }
                             HorizontalLayout {
                                 spacing: ThemeSettings.spacing-normal;
                                 Text { text: "侧栏"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
-                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: root.custom-sidebar; border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: ThemeSettings.sidebar-bg("custom"); border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
                                 LineEdit {
                                     horizontal-stretch: 1;
                                     text: root.custom-sidebar;
                                     font-size: ThemeSettings.font-size-small;
-                                    color: ThemeSettings.text-c(root.theme-mode);
-                                    background: ThemeSettings.bg-color(root.theme-mode);
-                                    border-color: ThemeSettings.border-c(root.theme-mode);
                                     accepted(t) => { root.custom-color-changed("sidebar", t); }
                                 }
                             }
                             HorizontalLayout {
                                 spacing: ThemeSettings.spacing-normal;
                                 Text { text: "文字"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
-                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: root.custom-text; border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: ThemeSettings.text-c("custom"); border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
                                 LineEdit {
                                     horizontal-stretch: 1;
                                     text: root.custom-text;
                                     font-size: ThemeSettings.font-size-small;
-                                    color: ThemeSettings.text-c(root.theme-mode);
-                                    background: ThemeSettings.bg-color(root.theme-mode);
-                                    border-color: ThemeSettings.border-c(root.theme-mode);
                                     accepted(t) => { root.custom-color-changed("text", t); }
                                 }
                             }
                             HorizontalLayout {
                                 spacing: ThemeSettings.spacing-normal;
                                 Text { text: "边框"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
-                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: root.custom-border; border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: ThemeSettings.border-c("custom"); border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
                                 LineEdit {
                                     horizontal-stretch: 1;
                                     text: root.custom-border;
                                     font-size: ThemeSettings.font-size-small;
-                                    color: ThemeSettings.text-c(root.theme-mode);
-                                    background: ThemeSettings.bg-color(root.theme-mode);
-                                    border-color: ThemeSettings.border-c(root.theme-mode);
                                     accepted(t) => { root.custom-color-changed("border", t); }
                                 }
                             }
                             HorizontalLayout {
                                 spacing: ThemeSettings.spacing-normal;
                                 Text { text: "卡片"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
-                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: root.custom-card; border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: ThemeSettings.card-bg("custom"); border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
                                 LineEdit {
                                     horizontal-stretch: 1;
                                     text: root.custom-card;
                                     font-size: ThemeSettings.font-size-small;
-                                    color: ThemeSettings.text-c(root.theme-mode);
-                                    background: ThemeSettings.bg-color(root.theme-mode);
-                                    border-color: ThemeSettings.border-c(root.theme-mode);
                                     accepted(t) => { root.custom-color-changed("card", t); }
                                 }
                             }
@@ -735,15 +720,14 @@ export component SettingsPanel inherits Rectangle {
                             ListView {
                                 horizontal-stretch: 1;
                                 vertical-stretch: 1;
-                                for name in root.font-list: Rectangle {
+                                for name[i] in root.font-list: Rectangle {
                                     height: 28px;
                                     horizontal-stretch: 1;
                                     background: (i == root.font-selected-index)
                                         ? ThemeSettings.selected-c(root.theme-mode)
                                         : (font-ta.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
                                     border-radius: 4px;
-                                    TouchArea {
-                                        id: font-ta;
+                                    font-ta := TouchArea {
                                         clicked => { root.font-changed(name); }
                                     }
                                     Text {
@@ -752,7 +736,7 @@ export component SettingsPanel inherits Rectangle {
                                         font-size: ThemeSettings.font-size-normal;
                                         font-family: name;
                                         vertical-alignment: center;
-                                        padding-left: 8px;
+                                        x: 8px;
                                     }
                                 }
                             }
