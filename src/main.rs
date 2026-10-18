@@ -20,6 +20,12 @@ fn main() {
 
     log::info!("Dawn Launcher 启动中...");
 
+    // 单实例检测：已有实例运行则退出
+    if !native::check_single_instance() {
+        log::warn!("已有实例运行，退出当前进程");
+        return;
+    }
+
     // 初始化应用
     let app = match App::new() {
         Ok(a) => a,

@@ -66,3 +66,18 @@ pub struct UrlInfo {
 pub fn fetch_url_info(_url: &str) -> Option<UrlInfo> {
     None
 }
+
+/// 单实例检测（非 Windows 平台始终返回 true）
+pub fn check_single_instance() -> bool {
+    true
+}
+
+pub fn release_single_instance() {}
+
+pub fn create_tray_icon(_window_title: &str) -> bool {
+    false
+}
+
+pub fn remove_tray_icon() {}
+
+pub fn show_main_window(_window_title: &str, _visible: bool) {}

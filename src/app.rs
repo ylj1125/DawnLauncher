@@ -20,6 +20,8 @@ pub struct App {
     current_classification_id: Arc<Mutex<i64>>,
     expanded_classifications: Arc<Mutex<std::collections::HashSet<i64>>>,
     hotkey_rx: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<()>>>,
+    tray_icon_enabled: Arc<Mutex<bool>>,
+    minimize_to_tray: Arc<Mutex<bool>>,
 }
 
 impl App {

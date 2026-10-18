@@ -872,3 +872,130 @@ pub fn register_global_hotkey(notify: Sender<()>) {
         log::info!("全局热键已注销");
     });
 }
+
+/// 单实例检测：创建命名互斥体，若已存在则说明已有实例在运行
+/// 返回 true 表示当前是首个实例，false 表示已有实例运行
+pub fn check_single_instance() -> bool {
+    use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex};
+    use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, HANDLE};
+    use windows::core::HSTRING;
+    use windows::Win32::System::Diagnostics::Debug::GetLastError;
+
+    let name = HSTRING::from("DawnLauncher_SingleInstance_Mutex");
+    unsafe {
+        let handle = CreateMutexW(std::ptr::null_mut(), true, PCWSTR(name.as_ptr()));
+        if handle.0 as usize != 0 {
+            let err = GetLastError();
+            if err == ERROR_ALREADY_EXISTS {
+                // 已有实例运行
+                ReleaseMutex(handle).ok();
+                CloseHandle(handle).ok();
+                return false;
+            }
+            // 故意不释放互斥体，保持句柄存活以维持单实例锁
+            // 进程退出时系统会自动释放
+            log::info!("单实例锁获取成功");
+            true
+        } else {
+            log::warn!("CreateMutexW 失败，单实例检测不可用");
+            true // 创建失败时允许启动，避免阻塞用户
+        }
+    }
+}
+
+/// 释放单实例互斥体（可选，进程退出时系统自动回收）
+pub fn release_single_instance() {}
+
+/// 保存的托盘图标数据
+static mut TRAY_HWND: windows::Win32::Foundation::HWND = windows::Win32::Foundation::HWND(0);
+static mut TRAY_ICON_HANDLE: windows::Win32::UI::WindowsAndMessaging::HICON =
+    windows::Win32::UI::WindowsAndMessaging::HICON(0);
+static mut TRAY_CREATED: bool = false;
+
+const WM_TRAYICON: u32 = 0x8000 + 1; // WM_APP + 1
+
+/// 创建系统托盘图标
+/// window_title: 用于通过 FindWindow 查找主窗口句柄
+/// 返回 true 表示成功
+pub fn create_tray_icon(window_title: &str) -> bool {
+    use windows::Win32::UI::Shell::{Shell_NotifyIconW, NIM_ADD, NOTIFYICONDATAW, NIF_ICON, NIF_MESSAGE, NIF_TIP};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, LoadIconW, IDI_APPLICATION,
+    };
+    use windows::core::HSTRING;
+
+    unsafe {
+        if TRAY_CREATED {
+            return true;
+        }
+        let title = HSTRING::from(window_title);
+        let hwnd = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr()));
+        if hwnd.0 as usize == 0 {
+            log::warn!("创建托盘图标失败：未找到主窗口");
+            return false;
+        }
+        TRAY_HWND = hwnd;
+
+        // 加载默认应用图标
+        let hicon = LoadIconW(None, IDI_APPLICATION);
+        TRAY_ICON_HANDLE = hicon;
+
+        let mut nid = NOTIFYICONDATAW::default();
+        nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+        nid.hWnd = hwnd;
+        nid.uID = 1;
+        nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+        nid.uCallbackMessage = WM_TRAYICON;
+        nid.hIcon = hicon;
+        let tip_text: Vec<u16> = HSTRING::from("Dawn Launcher").as_wide().to_vec();
+        let len = tip_text.len().min(127);
+        nid.szTip[..len].copy_from_slice(&tip_text[..len]);
+
+        let ok = Shell_NotifyIconW(NIM_ADD, &nid).is_ok();
+        if ok {
+            TRAY_CREATED = true;
+            log::info!("系统托盘图标已创建");
+        } else {
+            log::warn!("Shell_NotifyIconW(NIM_ADD) 失败");
+        }
+        ok
+    }
+}
+
+/// 删除系统托盘图标
+pub fn remove_tray_icon() {
+    use windows::Win32::UI::Shell::{Shell_NotifyIconW, NIM_DELETE, NOTIFYICONDATAW};
+    unsafe {
+        if !TRAY_CREATED {
+            return;
+        }
+        let mut nid = NOTIFYICONDATAW::default();
+        nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+        nid.hWnd = TRAY_HWND;
+        nid.uID = 1;
+        let _ = Shell_NotifyIconW(NIM_DELETE, &nid);
+        TRAY_CREATED = false;
+        log::info!("系统托盘图标已删除");
+    }
+}
+
+/// 显示/隐藏主窗口（通过托盘图标调用）
+/// visible: true=显示, false=隐藏
+pub fn show_main_window(window_title: &str, visible: bool) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, ShowWindow, SW_HIDE, SW_SHOW, SetForegroundWindow,
+    };
+    use windows::core::HSTRING;
+    unsafe {
+        let title = HSTRING::from(window_title);
+        let hwnd = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr()));
+        if hwnd.0 as usize != 0 {
+            if visible {
+                ShowWindow(hwnd, SW_SHOW);
+                SetForegroundWindow(hwnd);
+            } else {
+                ShowWindow(hwnd, SW_HIDE);
+            }
+        }
+    }
+}
