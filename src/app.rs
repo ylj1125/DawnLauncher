@@ -47,6 +47,10 @@ impl App {
         let settings_window = SettingsWindow::new()?;
         settings_window.window().hide().ok();
 
+        // 3.1.2 托盘状态（运行期可切换）
+        let tray_icon_enabled = Arc::new(Mutex::new(db.get_setting_bool("tray_icon", true)));
+        let minimize_to_tray = Arc::new(Mutex::new(db.get_setting_bool("minimize_to_tray", false)));
+
         // 3.2 注册全局热键 (Ctrl+Space) 唤起快速搜索
         let (hotkey_tx, hotkey_rx) = std::sync::mpsc::channel::<()>();
         crate::native::register_global_hotkey(hotkey_tx);
@@ -578,8 +582,10 @@ impl App {
         {
             let db_clone = db.clone();
             let sw_weak = settings_window.as_weak();
+            let min_to_tray_state = minimize_to_tray.clone();
             settings_window.on_minimize_to_tray_changed(move |v| {
                 let _ = db_clone.set_setting_bool("minimize_to_tray", v);
+                *min_to_tray_state.lock().unwrap() = v;
                 if let Some(sw) = sw_weak.upgrade() { sw.set_minimize_to_tray(v); }
             });
         }
@@ -588,9 +594,20 @@ impl App {
         {
             let db_clone = db.clone();
             let sw_weak = settings_window.as_weak();
+            let tray_state = tray_icon_enabled.clone();
             settings_window.on_tray_icon_changed(move |v| {
                 let _ = db_clone.set_setting_bool("tray_icon", v);
+                *tray_state.lock().unwrap() = v;
                 if let Some(sw) = sw_weak.upgrade() { sw.set_tray_icon(v); }
+                // 运行时创建/移除托盘图标
+                #[cfg(target_os = "windows")]
+                {
+                    if v {
+                        native::create_tray_icon("Dawn Launcher");
+                    } else {
+                        native::remove_tray_icon();
+                    }
+                }
             });
         }
 
@@ -1142,9 +1159,22 @@ impl App {
         }
 
         // 16. 窗口关闭
-        main_window.on_window_close(move || {
-            std::process::exit(0);
-        });
+        {
+            let tray_enabled = tray_icon_enabled.clone();
+            let min_to_tray = minimize_to_tray.clone();
+            main_window.on_window_close(move || {
+                let tray = *tray_enabled.lock().unwrap();
+                let min = *min_to_tray.lock().unwrap();
+                if tray && min {
+                    // 最小化到托盘：隐藏窗口而非退出
+                    #[cfg(target_os = "windows")]
+                    native::show_main_window("Dawn Launcher", false);
+                    log::info!("已最小化到托盘");
+                } else {
+                    std::process::exit(0);
+                }
+            });
+        }
 
         // 16.0.1 三明治菜单动作
         {
@@ -2010,6 +2040,8 @@ impl App {
             current_classification_id: current_id,
             expanded_classifications,
             hotkey_rx,
+            tray_icon_enabled,
+            minimize_to_tray,
         })
     }
 
