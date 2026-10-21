@@ -1,0 +1,132 @@
+// 设置项通用组件
+// 提供开关、设置行等可复用组件
+
+import { ThemeSettings } from "../theme.slint";
+
+// 开关组件
+export component SettingSwitch inherits Rectangle {
+    in property <bool> checked: false;
+    in property <string> theme-mode: "light";
+
+    callback toggled(bool);
+
+    width: 44px;
+    height: 24px;
+    border-radius: self.height / 2;
+    background: root.checked ? ThemeSettings.accent-color : ThemeSettings.border-c(root.theme-mode);
+
+    Rectangle {
+        width: 20px;
+        height: 20px;
+        y: (parent.height - self.height) / 2;
+        x: root.checked ? parent.width - self.width - 2px : 2px;
+        background: #ffffff;
+        border-radius: self.height / 2;
+        animate x { duration: 120ms; }
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.toggled(!root.checked); }
+    }
+}
+
+// 分组标题
+export component SettingGroupTitle inherits Rectangle {
+    in property <string> text: "";
+    in property <string> theme-mode: "light";
+
+    height: 28px;
+    horizontal-stretch: 1;
+
+    Text {
+        text: root.text;
+        color: ThemeSettings.text-c(root.theme-mode);
+        font-size: ThemeSettings.font-size-normal;
+        vertical-alignment: center;
+        horizontal-alignment: left;
+    }
+}
+
+// 可拖动滑块组件
+export component SettingSlider inherits Rectangle {
+    in property <float> value: 0;
+    in property <float> min: 0;
+    in property <float> max: 100;
+    in property <float> step: 1;
+    in property <string> theme-mode: "light";
+
+    callback changed(float);
+
+    height: 28px;
+
+    // 进度百分比
+    in property <float> ratio: max > min ? (value - min) / (max - min) : 0;
+
+    // 是否正在拖动（仅在按住滑点时进入）
+    in-out property <bool> dragging: false;
+
+    // 轨道（背景）
+    Rectangle {
+        height: 8px;
+        y: (parent.height - self.height) / 2;
+        width: 100%;
+        background: ThemeSettings.border-c(root.theme-mode);
+        border-radius: 4px;
+
+        // 填充进度（以左端为起点）
+        Rectangle {
+            x: 0;
+            height: 100%;
+            width: parent.width * root.ratio;
+            background: ThemeSettings.accent-color;
+            border-radius: 4px;
+        }
+    }
+
+    // 滑块 thumb
+    Rectangle {
+        width: 20px;
+        height: 20px;
+        x: (parent.width - self.width) * root.ratio;
+        y: (parent.height - self.height) / 2;
+        background: #ffffff;
+        border-radius: self.width / 2;
+        border-width: 2px;
+        border-color: ThemeSettings.accent-color;
+        // 阴影效果
+        drop-shadow-blur: 3px;
+        drop-shadow-color: #00000033;
+    }
+
+    // 交互层：仅在按住滑点并拖动时改变数值
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        mouse-cursor: pointer;
+
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                // 仅当按下滑点附近时才进入拖动状态
+                let thumb-w = 20px;
+                let thumb-center = (self.width - thumb-w) * root.ratio + thumb-w / 2;
+                if (abs(self.mouse-x - thumb-center) <= thumb-w) {
+                    root.dragging = true;
+                }
+            } else if (e.kind == PointerEventKind.up) {
+                root.dragging = false;
+            } else if (e.kind == PointerEventKind.move) {
+                if (root.dragging) {
+                    let r = self.mouse-x / self.width;
+                    let clamped-r = clamp(r, 0.0, 1.0);
+                    let range = max - min;
+                    let raw = min + range * clamped-r;
+                    let stepped = min + round((raw - min) / step) * step;
+                    let clamped = clamp(stepped, min, max);
+                    root.changed(clamped);
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,1093 @@
+// 设置面板
+// 左侧导航: 常规/外观/分类/项目/快速搜索/工具/关于
+// 右侧显示对应设置项
+
+import { ScrollView, LineEdit, ListView } from "std-widgets.slint";
+import { ThemeSettings } from "../theme.slint";
+import { SettingSwitch, SettingGroupTitle, SettingSlider } from "./setting_widgets.slint";
+
+// 主题预设按钮
+component theme-btn inherits Rectangle {
+    in property <string> theme: "";
+    in property <string> label: "";
+    in property <string> current-theme: "light";
+    in property <string> theme-mode: "light";
+    callback selected(string);
+
+    min-width: 110px;
+    height: 100px;
+    horizontal-stretch: 1;
+    border-radius: ThemeSettings.border-radius;
+    border-width: 1px;
+    border-color: root.current-theme == root.theme
+        ? ThemeSettings.accent-color
+        : ThemeSettings.border-c(root.theme-mode);
+    background: ThemeSettings.hover-c(root.theme-mode);
+
+    VerticalLayout {
+        padding: 6px;
+        spacing: 5px;
+        alignment: center;
+
+        // 主题颜色预览条
+        Rectangle {
+            height: 36px;
+            horizontal-stretch: 1;
+            border-radius: 6px;
+            background: ThemeSettings.bg-color(root.theme);
+
+            HorizontalLayout {
+                spacing: 0px;
+                Rectangle { width: 33%; background: ThemeSettings.sidebar-bg(root.theme); }
+                Rectangle { width: 33%; background: ThemeSettings.card-bg(root.theme); }
+                Rectangle { width: 34%; background: ThemeSettings.text-c(root.theme); }
+            }
+        }
+
+        Text {
+            text: root.label;
+            color: ThemeSettings.text-c(root.theme-mode);
+            font-size: 13px;
+            horizontal-alignment: center;
+        }
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.selected(root.theme); }
+    }
+}
+
+// 导航项组件
+component nav-item inherits Rectangle {
+    in property <string> section: "";
+    in property <string> label: "";
+    in property <string> icon: "";
+    in property <bool> active: false;
+    in property <string> theme-mode: "light";
+    callback clicked();
+
+    height: 40px;
+    horizontal-stretch: 1;
+    border-radius: ThemeSettings.border-radius;
+    background: root.active
+        ? ThemeSettings.selected-c(root.theme-mode)
+        : (nav-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        alignment: start;
+
+        Text {
+            text: root.icon;
+            font-size: 16px;
+            vertical-alignment: center;
+            width: 20px;
+        }
+
+        Text {
+            text: root.label;
+            color: root.active ? ThemeSettings.accent-color : ThemeSettings.text-c(root.theme-mode);
+            font-size: ThemeSettings.font-size-normal;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+    }
+
+    nav-touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+}
+
+// 设置行（标题+说明+开关）
+component setting-row inherits Rectangle {
+    in property <string> title: "";
+    in property <string> desc: "";
+    in property <bool> checked: false;
+    in property <string> theme-mode: "light";
+    callback toggled(bool);
+
+    height: 58px;
+    horizontal-stretch: 1;
+    background: row-hover.has-hover
+        ? ThemeSettings.hover-c(root.theme-mode)
+        : ThemeSettings.card-bg(root.theme-mode);
+    border-radius: ThemeSettings.border-radius;
+    border-width: 1px;
+    border-color: ThemeSettings.border-c(root.theme-mode);
+
+    row-hover := TouchArea {
+        width: 100%;
+        height: 100%;
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 20px;
+        padding-top: 11px;
+        padding-bottom: 11px;
+        spacing: ThemeSettings.spacing-normal;
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 3px;
+
+            Text {
+                text: root.title;
+                color: ThemeSettings.text-c(root.theme-mode);
+                font-size: ThemeSettings.font-size-normal;
+                horizontal-alignment: left;
+            }
+
+            Text {
+                text: root.desc;
+                color: ThemeSettings.text-sec(root.theme-mode);
+                font-size: ThemeSettings.font-size-small;
+                vertical-stretch: 1;
+                horizontal-alignment: left;
+            }
+        }
+
+        SettingSwitch {
+            checked: root.checked;
+            theme-mode: root.theme-mode;
+            toggled(v) => { root.toggled(v); }
+        }
+    }
+}
+
+// 设置面板
+export component SettingsPanel inherits Rectangle {
+    background: ThemeSettings.bg-color(root.theme-mode);
+
+    // ===== 外观设置 =====
+    in property <string> theme-mode: "light";
+    // ===== 自定义主题颜色 =====
+    in property <string> custom-bg: "#f5f6f7";
+    in property <string> custom-sidebar: "#ffffff";
+    in property <string> custom-text: "#2c2c2c";
+    in property <string> custom-border: "#e5e7eb";
+    in property <string> custom-card: "#ffffff";
+    callback custom-color-changed(string, string); // (key, hex-value)
+    // ===== 常规设置 =====
+    in property <bool> auto-start: false;
+    in property <bool> window-topmost: false;
+    in property <bool> minimize-to-tray: false;
+    in property <bool> tray-icon: true;
+    in property <bool> taskbar-show: true;
+    in property <bool> follow-mouse: false;
+    in property <bool> hide-on-lost-focus: false;
+    in property <bool> lock-size: false;
+    in property <bool> lock-position: false;
+    in property <bool> always-center: false;
+    // ===== 项目设置 =====
+    in property <int> item-columns: 8;
+    in property <int> item-icon-size: 48;
+    in property <bool> hide-name: false;
+    in property <bool> hide-ellipsis: false;
+    // ===== 字体 =====
+    in property <[string]> font-list: [];
+    in property <int> font-selected-index: 0;
+    callback font-changed(string);
+    in property <bool> hide-after-open: false;
+    in property <bool> record-open-count: true;
+    in property <bool> show-tooltip: true;
+    in property <bool> show-path: false;
+    // ===== 分类设置 =====
+    in property <int> sidebar-width: 140;
+    in property <string> sidebar-position: "left"; // left / right
+    in property <bool> hover-switch: false;
+    in property <bool> wheel-switch: true;
+    in property <bool> remember-selected: true;
+    // ===== 快速搜索 =====
+    in property <bool> quick-search-enabled: false;
+    in property <int> quick-search-width: 600;
+    in property <string> quick-search-position: "center"; // top / center / bottom
+    in property <bool> quick-search-hide-on-lost-focus: true;
+    in property <bool> quick-search-auto-open: true;
+    in property <bool> quick-search-hide-after-open: true;
+    in property <bool> quick-search-history: true;
+    in property <bool> quick-search-match-remark: false;
+    // ===== 项目布局 =====
+    in property <string> item-layout: "tile"; // tile / list
+    // ===== 窗口效果 =====
+    in property <int> window-opacity: 100;
+    in property <bool> has-bg-image: false;
+
+    // ===== 回调 =====
+    callback theme-mode-changed(string);
+    callback auto-start-changed(bool);
+    callback window-topmost-changed(bool);
+    callback minimize-to-tray-changed(bool);
+    callback tray-icon-changed(bool);
+    callback taskbar-show-changed(bool);
+    callback follow-mouse-changed(bool);
+    callback hide-on-lost-focus-changed(bool);
+    callback lock-size-changed(bool);
+    callback lock-position-changed(bool);
+    callback always-center-changed(bool);
+    callback item-columns-changed(float);
+    callback item-icon-size-changed(float);
+    callback hide-name-changed(bool);
+    callback hide-ellipsis-changed(bool);
+    callback hide-after-open-changed(bool);
+    callback record-open-count-changed(bool);
+    callback show-tooltip-changed(bool);
+    callback show-path-changed(bool);
+    callback sidebar-width-changed(float);
+    callback sidebar-position-changed(string);
+    callback hover-switch-changed(bool);
+    callback wheel-switch-changed(bool);
+    callback remember-selected-changed(bool);
+    callback quick-search-enabled-changed(bool);
+    callback quick-search-width-changed(float);
+    callback quick-search-position-changed(string);
+    callback quick-search-hide-on-lost-focus-changed(bool);
+    callback quick-search-auto-open-changed(bool);
+    callback quick-search-hide-after-open-changed(bool);
+    callback quick-search-history-changed(bool);
+    callback quick-search-match-remark-changed(bool);
+    callback item-layout-changed(string);
+    // 窗口效果
+    callback window-opacity-changed(float);
+    callback pick-bg-image();
+    callback clear-bg-image();
+    // 工具按钮
+    callback backup-data();
+    callback restore-data();
+    callback check-invalid-items();
+    // 返回
+    callback back-clicked();
+
+    // 当前选中的设置分类
+    in-out property <string> active-section: "general";
+
+    HorizontalLayout {
+        spacing: 0px;
+
+        // ===== 左侧导航栏 =====
+        Rectangle {
+            width: 160px;
+            background: ThemeSettings.sidebar-bg(root.theme-mode);
+
+            VerticalLayout {
+                padding-left: ThemeSettings.spacing-normal;
+                padding-right: ThemeSettings.spacing-normal;
+                padding-top: 12px;
+                padding-bottom: 12px;
+                spacing: 2px;
+                vertical-stretch: 1;
+                alignment: start;
+
+                // 导航项
+                nav-item {
+                    section: "general";
+                    label: "常规";
+                    icon: "⚙";
+                    active: root.active-section == "general";
+                    theme-mode: root.theme-mode;
+                    clicked => { root.active-section = "general"; }
+                }
+                nav-item {
+                    section: "appearance";
+                    label: "外观";
+                    icon: "🎨";
+                    active: root.active-section == "appearance";
+                    theme-mode: root.theme-mode;
+                    clicked => { root.active-section = "appearance"; }
+                }
+                nav-item {
+                    section: "classification";
+                    label: "分类";
+                    icon: "📂";
+                    active: root.active-section == "classification";
+                    theme-mode: root.theme-mode;
+                    clicked => { root.active-section = "classification"; }
+                }
+                nav-item {
+                    section: "item";
+                    label: "项目";
+                    icon: "📱";
+                    active: root.active-section == "item";
+                    theme-mode: root.theme-mode;
+                    clicked => { root.active-section = "item"; }
+                }
+                nav-item {
+                    section: "quicksearch";
+                    label: "快速搜索";
+                    icon: "🔍";
+                    active: root.active-section == "quicksearch";
+                    theme-mode: root.theme-mode;
+                    clicked => { root.active-section = "quicksearch"; }
+                }
+            }
+        }
+
+        // 分隔线
+        Rectangle {
+            width: 1px;
+            background: ThemeSettings.border-c(root.theme-mode);
+        }
+
+        // ===== 右侧内容区 =====
+        content-scroll := ScrollView {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+
+            VerticalLayout {
+                horizontal-stretch: 1;
+                padding: ThemeSettings.spacing-large;
+                spacing: ThemeSettings.spacing-normal;
+
+                // ========== 常规 ==========
+                if root.active-section == "general" : VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: ThemeSettings.spacing-normal;
+
+                    SettingGroupTitle { text: "系统"; theme-mode: root.theme-mode; }
+
+                    setting-row {
+                        title: "开机自启";
+                        desc: "系统登录时自动启动";
+                        checked: root.auto-start;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.auto-start-changed(v); }
+                    }
+                    setting-row {
+                        title: "启动后最小化到托盘";
+                        desc: "启动后不显示主窗口";
+                        checked: root.minimize-to-tray;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.minimize-to-tray-changed(v); }
+                    }
+                    setting-row {
+                        title: "托盘图标";
+                        desc: "在系统托盘显示图标";
+                        checked: root.tray-icon;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.tray-icon-changed(v); }
+                    }
+                    setting-row {
+                        title: "任务栏显示";
+                        desc: "在任务栏显示窗口";
+                        checked: root.taskbar-show;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.taskbar-show-changed(v); }
+                    }
+
+                    SettingGroupTitle { text: "窗口"; theme-mode: root.theme-mode; }
+
+                    setting-row {
+                        title: "永远置顶";
+                        desc: "主窗口始终显示在最前";
+                        checked: root.window-topmost;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.window-topmost-changed(v); }
+                    }
+                    setting-row {
+                        title: "锁定尺寸";
+                        desc: "禁止调整窗口大小";
+                        checked: root.lock-size;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.lock-size-changed(v); }
+                    }
+                    setting-row {
+                        title: "固定位置";
+                        desc: "禁止移动窗口位置";
+                        checked: root.lock-position;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.lock-position-changed(v); }
+                    }
+                    setting-row {
+                        title: "永远居中";
+                        desc: "窗口始终居中显示";
+                        checked: root.always-center;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.always-center-changed(v); }
+                    }
+                    setting-row {
+                        title: "显示时跟随鼠标位置";
+                        desc: "窗口出现在鼠标附近";
+                        checked: root.follow-mouse;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.follow-mouse-changed(v); }
+                    }
+                    setting-row {
+                        title: "失去焦点隐藏";
+                        desc: "点击其他窗口时自动隐藏";
+                        checked: root.hide-on-lost-focus;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.hide-on-lost-focus-changed(v); }
+                    }
+
+                    // 版本信息
+                    Rectangle {
+                        height: 60px;
+                        horizontal-stretch: 1;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        VerticalLayout {
+                            padding-left: 16px;
+                            padding-right: 16px;
+                            padding-top: 10px;
+                            padding-bottom: 10px;
+                            spacing: 4px;
+
+                            Text {
+                                text: "版本";
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                font-size: ThemeSettings.font-size-normal;
+                                horizontal-alignment: left;
+                            }
+
+                            Text {
+                                text: "v0.10-20261021 (2026-10-21 构建)";
+                                color: ThemeSettings.text-sec(root.theme-mode);
+                                font-size: ThemeSettings.font-size-small;
+                                horizontal-alignment: left;
+                            }
+                        }
+                    }
+                }
+
+                // ========== 外观 ==========
+                if root.active-section == "appearance" : VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: ThemeSettings.spacing-normal;
+
+                    SettingGroupTitle { text: "主题预设"; theme-mode: root.theme-mode; }
+
+                    // 11 个主题预设按钮网格
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        VerticalLayout {
+                            padding: ThemeSettings.spacing-normal;
+                            spacing: ThemeSettings.spacing-normal;
+
+                            // 第一行: 4 个主题
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                theme-btn { theme: "light"; label: "浅色"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
+                                theme-btn { theme: "dark-gray"; label: "深灰"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
+                                theme-btn { theme: "classic-dark"; label: "经典深色"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
+                                theme-btn { theme: "blue"; label: "蓝色"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
+                            }
+
+                            // 第二行: 4 个主题
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                theme-btn { theme: "dark-green"; label: "墨绿"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
+                                theme-btn { theme: "indigo"; label: "靛蓝"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
+                                theme-btn { theme: "purple"; label: "紫色"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
+                                theme-btn { theme: "wine-red"; label: "酒红"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
+                            }
+
+                            // 第三行: 3 个主题 + 1 个占位
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                theme-btn { theme: "rose"; label: "玫红"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
+                                theme-btn { theme: "black-gold"; label: "黑金"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
+                                theme-btn { theme: "black-white"; label: "黑白"; current-theme: root.theme-mode; theme-mode: root.theme-mode; selected(t) => { root.theme-mode-changed(t); } }
+                                Rectangle { min-width: 110px; horizontal-stretch: 1; background: transparent; }
+                            }
+                        }
+                    }
+
+                    // 自定义主题颜色
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        VerticalLayout {
+                            padding: ThemeSettings.spacing-normal;
+                            spacing: ThemeSettings.spacing-normal;
+
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text {
+                                    text: "自定义主题";
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    font-size: ThemeSettings.font-size-normal;
+                                    font-weight: 700;
+                                    horizontal-stretch: 1;
+                                }
+                                Rectangle {
+                                    width: 80px;
+                                    height: 26px;
+                                    border-radius: 4px;
+                                    background: #3b82f6;
+                                    border-width: 1px;
+                                    border-color: #2563eb;
+                                    TouchArea {
+                                        clicked => { root.theme-mode-changed("custom"); }
+                                    }
+                                    Text {
+                                        text: "应用自定义";
+                                        color: white;
+                                        font-size: 11px;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            // 颜色行: 标签 + 色块预览 + 十六进制输入框
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text { text: "背景"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: ThemeSettings.bg-color("custom"); border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                LineEdit {
+                                    horizontal-stretch: 1;
+                                    text: root.custom-bg;
+                                    font-size: ThemeSettings.font-size-small;
+                                    accepted(t) => { root.custom-color-changed("bg", t); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text { text: "侧栏"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: ThemeSettings.sidebar-bg("custom"); border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                LineEdit {
+                                    horizontal-stretch: 1;
+                                    text: root.custom-sidebar;
+                                    font-size: ThemeSettings.font-size-small;
+                                    accepted(t) => { root.custom-color-changed("sidebar", t); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text { text: "文字"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: ThemeSettings.text-c("custom"); border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                LineEdit {
+                                    horizontal-stretch: 1;
+                                    text: root.custom-text;
+                                    font-size: ThemeSettings.font-size-small;
+                                    accepted(t) => { root.custom-color-changed("text", t); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text { text: "边框"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: ThemeSettings.border-c("custom"); border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                LineEdit {
+                                    horizontal-stretch: 1;
+                                    text: root.custom-border;
+                                    font-size: ThemeSettings.font-size-small;
+                                    accepted(t) => { root.custom-color-changed("border", t); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text { text: "卡片"; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-small; width: 56px; }
+                                Rectangle { width: 22px; height: 22px; border-radius: 4px; background: ThemeSettings.card-bg("custom"); border-width: 1px; border-color: ThemeSettings.border-c(root.theme-mode); }
+                                LineEdit {
+                                    horizontal-stretch: 1;
+                                    text: root.custom-card;
+                                    font-size: ThemeSettings.font-size-small;
+                                    accepted(t) => { root.custom-color-changed("card", t); }
+                                }
+                            }
+                        }
+                    }
+
+                    SettingGroupTitle { text: "窗口效果"; theme-mode: root.theme-mode; }
+
+                    // 窗口不透明度 + 背景图
+                    Rectangle {
+                        height: 140px;
+                        horizontal-stretch: 1;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        VerticalLayout {
+                            padding: ThemeSettings.spacing-normal;
+                            spacing: ThemeSettings.spacing-normal;
+
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text {
+                                    text: "窗口不透明度";
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    font-size: ThemeSettings.font-size-normal;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    text: root.window-opacity + "%";
+                                    color: ThemeSettings.accent-color;
+                                    font-size: ThemeSettings.font-size-normal;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                    width: 50px;
+                                    horizontal-alignment: right;
+                                }
+                            }
+
+                            SettingSlider {
+                                horizontal-stretch: 1;
+                                value: root.window-opacity;
+                                min: 30;
+                                max: 100;
+                                step: 5;
+                                theme-mode: root.theme-mode;
+                                changed(v) => { root.window-opacity-changed(v); }
+                            }
+
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                alignment: start;
+
+                                // 选择背景图
+                                Rectangle {
+                                    width: 100px;
+                                    height: 28px;
+                                    border-radius: 4px;
+                                    background: ThemeSettings.accent-color;
+                                    TouchArea {
+                                        clicked => { root.pick-bg-image(); }
+                                    }
+                                    Text {
+                                        text: "选择背景图";
+                                        color: white;
+                                        font-size: ThemeSettings.font-size-small;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                // 清除背景图
+                                Rectangle {
+                                    width: 88px;
+                                    height: 28px;
+                                    border-radius: 4px;
+                                    background: ThemeSettings.card-bg(root.theme-mode);
+                                    border-width: 1px;
+                                    border-color: ThemeSettings.border-c(root.theme-mode);
+                                    opacity: root.has-bg-image ? 1.0 : 0.5;
+                                    TouchArea {
+                                        enabled: root.has-bg-image;
+                                        clicked => { root.clear-bg-image(); }
+                                    }
+                                    Text {
+                                        text: "清除背景图";
+                                        color: ThemeSettings.text-c(root.theme-mode);
+                                        font-size: ThemeSettings.font-size-small;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                Text {
+                                    text: root.has-bg-image ? "已设置" : "未设置";
+                                    color: ThemeSettings.text-sec(root.theme-mode);
+                                    font-size: ThemeSettings.font-size-small;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+
+                    SettingGroupTitle { text: "显示"; theme-mode: root.theme-mode; }
+
+                    // 项目列数
+                    Rectangle {
+                        height: 80px;
+                        horizontal-stretch: 1;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        VerticalLayout {
+                            padding: ThemeSettings.spacing-normal;
+                            spacing: ThemeSettings.spacing-normal;
+
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text {
+                                    text: "项目列数";
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    font-size: ThemeSettings.font-size-normal;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    text: root.item-columns;
+                                    color: ThemeSettings.accent-color;
+                                    font-size: ThemeSettings.font-size-normal;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                    width: 30px;
+                                    horizontal-alignment: right;
+                                }
+                            }
+
+                            // 可拖动滑块
+                            SettingSlider {
+                                horizontal-stretch: 1;
+                                value: root.item-columns;
+                                min: 2;
+                                max: 16;
+                                step: 1;
+                                theme-mode: root.theme-mode;
+                                changed(v) => { root.item-columns-changed(v); }
+                            }
+                        }
+                    }
+
+                    // 图标大小
+                    Rectangle {
+                        height: 80px;
+                        horizontal-stretch: 1;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        VerticalLayout {
+                            padding: ThemeSettings.spacing-normal;
+                            spacing: ThemeSettings.spacing-normal;
+
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text {
+                                    text: "图标大小";
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    font-size: ThemeSettings.font-size-normal;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    text: root.item-icon-size + "px";
+                                    color: ThemeSettings.accent-color;
+                                    font-size: ThemeSettings.font-size-normal;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                    width: 50px;
+                                    horizontal-alignment: right;
+                                }
+                            }
+
+                            // 可拖动滑块
+                            SettingSlider {
+                                horizontal-stretch: 1;
+                                value: root.item-icon-size;
+                                min: 16;
+                                max: 96;
+                                step: 8;
+                                theme-mode: root.theme-mode;
+                                changed(v) => { root.item-icon-size-changed(v); }
+                            }
+                        }
+                    }
+
+                    // 字体选择
+                    Rectangle {
+                        height: 180px;
+                        horizontal-stretch: 1;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        VerticalLayout {
+                            padding: ThemeSettings.spacing-normal;
+                            spacing: ThemeSettings.spacing-small;
+
+                            Text {
+                                text: "字体";
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                font-size: ThemeSettings.font-size-normal;
+                                font-weight: 700;
+                            }
+                            Text {
+                                text: "当前: " + root.font-list[root.font-selected-index];
+                                color: ThemeSettings.accent-color;
+                                font-size: ThemeSettings.font-size-small;
+                            }
+
+                            ListView {
+                                horizontal-stretch: 1;
+                                vertical-stretch: 1;
+                                for name[i] in root.font-list: Rectangle {
+                                    height: 28px;
+                                    horizontal-stretch: 1;
+                                    background: (i == root.font-selected-index)
+                                        ? ThemeSettings.selected-c(root.theme-mode)
+                                        : (font-ta.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
+                                    border-radius: 4px;
+                                    font-ta := TouchArea {
+                                        clicked => { root.font-changed(name); }
+                                    }
+                                    Text {
+                                        text: name;
+                                        color: ThemeSettings.text-c(root.theme-mode);
+                                        font-size: ThemeSettings.font-size-normal;
+                                        font-family: name;
+                                        vertical-alignment: center;
+                                        x: 8px;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ========== 分类 ==========
+                if root.active-section == "classification" : VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: ThemeSettings.spacing-normal;
+
+                    SettingGroupTitle { text: "布局"; theme-mode: root.theme-mode; }
+
+                    // 分类栏宽度
+                    Rectangle {
+                        height: 80px;
+                        horizontal-stretch: 1;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        VerticalLayout {
+                            padding: ThemeSettings.spacing-normal;
+                            spacing: ThemeSettings.spacing-normal;
+
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text {
+                                    text: "分类栏宽度";
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    font-size: ThemeSettings.font-size-normal;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    text: root.sidebar-width + "px";
+                                    color: ThemeSettings.accent-color;
+                                    font-size: ThemeSettings.font-size-normal;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                    width: 50px;
+                                    horizontal-alignment: right;
+                                }
+                            }
+
+                            // 可拖动滑块
+                            SettingSlider {
+                                horizontal-stretch: 1;
+                                value: root.sidebar-width;
+                                min: 80;
+                                max: 240;
+                                step: 10;
+                                theme-mode: root.theme-mode;
+                                changed(v) => { root.sidebar-width-changed(v); }
+                            }
+                        }
+                    }
+
+                    SettingGroupTitle { text: "行为"; theme-mode: root.theme-mode; }
+
+                    setting-row {
+                        title: "鼠标悬停切换";
+                        desc: "鼠标移到分类上自动切换";
+                        checked: root.hover-switch;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.hover-switch-changed(v); }
+                    }
+                    setting-row {
+                        title: "鼠标滚轮切换";
+                        desc: "滚轮切换分类";
+                        checked: root.wheel-switch;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.wheel-switch-changed(v); }
+                    }
+                    setting-row {
+                        title: "记住选择状态";
+                        desc: "记住上次选中的分类";
+                        checked: root.remember-selected;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.remember-selected-changed(v); }
+                    }
+                }
+
+                // ========== 项目 ==========
+                if root.active-section == "item" : VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: ThemeSettings.spacing-normal;
+
+                    SettingGroupTitle { text: "布局"; theme-mode: root.theme-mode; }
+
+                    setting-row {
+                        title: "隐藏名称";
+                        desc: "只显示图标不显示名称";
+                        checked: root.hide-name;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.hide-name-changed(v); }
+                    }
+                    setting-row {
+                        title: "隐藏省略号";
+                        desc: "名称过长时不显示省略号";
+                        checked: root.hide-ellipsis;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.hide-ellipsis-changed(v); }
+                    }
+
+                    SettingGroupTitle { text: "打开行为"; theme-mode: root.theme-mode; }
+
+                    setting-row {
+                        title: "打开后隐藏主窗口";
+                        desc: "打开项目后自动隐藏窗口";
+                        checked: root.hide-after-open;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.hide-after-open-changed(v); }
+                    }
+                    setting-row {
+                        title: "记录打开次数";
+                        desc: "统计项目打开次数";
+                        checked: root.record-open-count;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.record-open-count-changed(v); }
+                    }
+
+                    SettingGroupTitle { text: "提示"; theme-mode: root.theme-mode; }
+
+                    setting-row {
+                        title: "显示项目信息提示";
+                        desc: "鼠标悬停显示提示";
+                        checked: root.show-tooltip;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.show-tooltip-changed(v); }
+                    }
+                    setting-row {
+                        title: "显示路径";
+                        desc: "提示中显示目标路径";
+                        checked: root.show-path;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.show-path-changed(v); }
+                    }
+                }
+
+                // ========== 快速搜索 ==========
+                if root.active-section == "quicksearch" : VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: ThemeSettings.spacing-normal;
+
+                    setting-row {
+                        title: "启用快速搜索";
+                        desc: "独立的快速搜索窗口";
+                        checked: root.quick-search-enabled;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.quick-search-enabled-changed(v); }
+                    }
+
+                    if root.quick-search-enabled : VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: ThemeSettings.spacing-normal;
+
+                        SettingGroupTitle { text: "行为"; theme-mode: root.theme-mode; }
+
+                        setting-row {
+                            title: "失去焦点隐藏";
+                            desc: "点击其他窗口时隐藏搜索";
+                            checked: root.quick-search-hide-on-lost-focus;
+                            theme-mode: root.theme-mode;
+                            toggled(v) => { root.quick-search-hide-on-lost-focus-changed(v); }
+                        }
+                        setting-row {
+                            title: "单结果自动打开";
+                            desc: "仅一个结果时自动打开";
+                            checked: root.quick-search-auto-open;
+                            theme-mode: root.theme-mode;
+                            toggled(v) => { root.quick-search-auto-open-changed(v); }
+                        }
+                        setting-row {
+                            title: "打开后隐藏窗口";
+                            desc: "打开项目后隐藏搜索窗口";
+                            checked: root.quick-search-hide-after-open;
+                            theme-mode: root.theme-mode;
+                            toggled(v) => { root.quick-search-hide-after-open-changed(v); }
+                        }
+                        setting-row {
+                            title: "历史记录";
+                            desc: "保存搜索历史";
+                            checked: root.quick-search-history;
+                            theme-mode: root.theme-mode;
+                            toggled(v) => { root.quick-search-history-changed(v); }
+                        }
+                        setting-row {
+                            title: "匹配备注字段";
+                            desc: "搜索时同时匹配备注";
+                            checked: root.quick-search-match-remark;
+                            theme-mode: root.theme-mode;
+                            toggled(v) => { root.quick-search-match-remark-changed(v); }
+                        }
+
+                        SettingGroupTitle { text: "窗口"; theme-mode: root.theme-mode; }
+
+                        // 搜索窗口宽度
+                        Rectangle {
+                            height: 80px;
+                            horizontal-stretch: 1;
+                            background: ThemeSettings.card-bg(root.theme-mode);
+                            border-radius: ThemeSettings.border-radius;
+
+                            VerticalLayout {
+                                padding: ThemeSettings.spacing-normal;
+                                spacing: ThemeSettings.spacing-normal;
+
+                                HorizontalLayout {
+                                    spacing: ThemeSettings.spacing-normal;
+                                    Text {
+                                        text: "搜索窗口宽度";
+                                        color: ThemeSettings.text-c(root.theme-mode);
+                                        font-size: ThemeSettings.font-size-normal;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                    }
+                                    Text {
+                                        text: root.quick-search-width + "px";
+                                        color: ThemeSettings.accent-color;
+                                        font-size: ThemeSettings.font-size-normal;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                        width: 60px;
+                                        horizontal-alignment: right;
+                                    }
+                                }
+
+                                // 可拖动滑块
+                                SettingSlider {
+                                    horizontal-stretch: 1;
+                                    value: root.quick-search-width;
+                                    min: 300;
+                                    max: 1000;
+                                    step: 50;
+                                    theme-mode: root.theme-mode;
+                                    changed(v) => { root.quick-search-width-changed(v); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

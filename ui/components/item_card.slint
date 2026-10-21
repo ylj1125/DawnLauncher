@@ -1,0 +1,126 @@
+// 项目卡片组件
+import { ThemeSettings } from "../theme.slint";
+import { DragHelper } from "./drag_helper.slint";
+
+// 项目数据模型 (Slint 全局使用)
+export struct ItemInfo {
+    id: int,
+    name: string,
+    icon: image,
+    invalid: bool,
+    selected: bool,
+}
+
+// 项目卡片
+export component ItemCard inherits Rectangle {
+    in property <int> item-id;
+    in property <string> name;
+    in property <image> icon;
+    in property <bool> invalid;
+    in property <bool> selected;
+    in property <string> theme-mode: "light";  // 接收主题模式
+    in property <bool> batch-mode: false;  // 是否批量模式（批量模式下选中态用蓝色边框）
+    in property <length> icon-size: ThemeSettings.item-icon-size;  // 动态图标大小
+    in property <bool> hide-name: false;  // 是否隐藏名称
+
+    callback clicked;
+    callback double-clicked;
+    callback right-clicked;
+
+    width: ThemeSettings.item-card-width;
+    height: root.hide-name ? ThemeSettings.item-card-width : ThemeSettings.item-card-height;
+    border-radius: ThemeSettings.border-radius;
+    background: selected ? ThemeSettings.selected-c(root.theme-mode) : (touch-area.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
+    // 批量模式下选中态用蓝色边框
+    border-width: (root.batch-mode && root.selected) ? 2px : 0px;
+    border-color: ThemeSettings.accent-color;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: ThemeSettings.spacing-small;
+        padding: ThemeSettings.spacing-small;
+
+        Image {
+            source: root.icon;
+            width: root.icon-size;
+            height: root.icon-size;
+            opacity: root.invalid ? 0.3 : 1.0;
+            horizontal-alignment: center;
+            image-fit: contain;
+        }
+
+        if !root.hide-name : Text {
+            text: root.name;
+            color: ThemeSettings.text-c(root.theme-mode);
+            font-size: ThemeSettings.font-size-small;
+            horizontal-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+            width: 76px;
+        }
+    }
+
+    // ===== 拖拽排序 =====
+    // 左上角拖拽手柄（避免与单击/双击冲突）
+    Rectangle {
+        x: 2px;
+        y: 2px;
+        width: 16px;
+        height: 16px;
+        background: transparent;
+
+        Text {
+            text: "⋮";
+            color: ThemeSettings.text-sec(root.theme-mode);
+            opacity: 0.5;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        DragArea {
+            width: 100%;
+            height: 100%;
+            allow-move: true;
+            data: DragHelper.make-item(root.item-id);
+            drag-image: root.icon;
+            drag-image-offset-x: 24;
+            drag-image-offset-y: 24;
+        }
+    }
+
+    // 放置区域（覆盖整张卡片）
+    DropArea {
+        width: 100%;
+        height: 100%;
+
+        can-drop(event) => {
+            (DragHelper.kind-of(event.data) == "item"
+                && DragHelper.id-of(event.data) != root.item-id)
+                ? DragAction.move
+                : DragAction.none
+        }
+
+        dropped(event) => {
+            if (DragHelper.kind-of(event.data) == "item") {
+                DragHelper.drop-on("item", DragHelper.id-of(event.data), root.item-id);
+            }
+            return DragAction.move;
+        }
+    }
+
+    touch-area := TouchArea {
+        // clicked 用于选中（单次点击）
+        clicked => { root.clicked(); }
+        // double-clicked 用于打开，Slint 内部独立触发，不被 clicked 拦截
+        double-clicked => { root.double-clicked(); }
+        // 右键
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                root.right-clicked();
+            }
+        }
+    }
+
+    animate background { duration: 120ms; }
+}

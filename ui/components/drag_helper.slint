@@ -1,0 +1,15 @@
+// 拖拽辅助全局
+// data-transfer 在 Slint 中是不透明类型，需由宿主语言(Rust)构造与解析。
+
+export global DragHelper {
+    // 构造项目拖拽数据
+    pure callback make-item(int) -> data-transfer;
+    // 构造分类拖拽数据
+    pure callback make-class(int) -> data-transfer;
+    // 解析拖拽数据类型: "item" / "class"
+    pure callback kind-of(data-transfer) -> string;
+    // 解析拖拽数据 id
+    pure callback id-of(data-transfer) -> int;
+    // 拖放完成: kind, 源 id, 目标 id
+    callback drop-on(string, int, int);
+}
