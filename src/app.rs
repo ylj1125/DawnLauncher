@@ -2071,13 +2071,27 @@ impl App {
         // 保持 timer 不被 drop（Slint 事件循环会持有引用）
         std::mem::forget(timer);
 
-        // 窗口创建后应用圆角和阴影效果
+        // 窗口创建后应用圆角和阴影效果，并按设置初始化托盘
+        let tray_enabled_run = self.tray_icon_enabled.clone();
+        let min_to_tray_run = self.minimize_to_tray.clone();
         let frame_timer = slint::Timer::default();
         frame_timer.start(
             slint::TimerMode::SingleShot,
             std::time::Duration::from_millis(50),
             move || {
                 apply_window_frame_effects();
+                // 启动后最小化到托盘
+                let min = *min_to_tray_run.lock().unwrap();
+                if min {
+                    #[cfg(target_os = "windows")]
+                    native::show_main_window("Dawn Launcher", false);
+                }
+                // 创建托盘图标
+                let tray = *tray_enabled_run.lock().unwrap();
+                if tray {
+                    #[cfg(target_os = "windows")]
+                    native::create_tray_icon("Dawn Launcher");
+                }
             },
         );
         std::mem::forget(frame_timer);
