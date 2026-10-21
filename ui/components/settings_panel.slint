@@ -213,6 +213,9 @@ export component SettingsPanel inherits Rectangle {
     in property <bool> quick-search-match-remark: false;
     // ===== 项目布局 =====
     in property <string> item-layout: "tile"; // tile / list
+    // ===== 窗口效果 =====
+    in property <int> window-opacity: 100;
+    in property <bool> has-bg-image: false;
 
     // ===== 回调 =====
     callback theme-mode-changed(string);
@@ -248,6 +251,10 @@ export component SettingsPanel inherits Rectangle {
     callback quick-search-history-changed(bool);
     callback quick-search-match-remark-changed(bool);
     callback item-layout-changed(string);
+    // 窗口效果
+    callback window-opacity-changed(float);
+    callback pick-bg-image();
+    callback clear-bg-image();
     // 工具按钮
     callback backup-data();
     callback restore-data();
@@ -441,7 +448,7 @@ export component SettingsPanel inherits Rectangle {
                             }
 
                             Text {
-                                text: "v0.7.2-20261008 (2026-10-08 构建)";
+                                text: "v0.10-20261021 (2026-10-21 构建)";
                                 color: ThemeSettings.text-sec(root.theme-mode);
                                 font-size: ThemeSettings.font-size-small;
                                 horizontal-alignment: left;
@@ -593,6 +600,105 @@ export component SettingsPanel inherits Rectangle {
                                     text: root.custom-card;
                                     font-size: ThemeSettings.font-size-small;
                                     accepted(t) => { root.custom-color-changed("card", t); }
+                                }
+                            }
+                        }
+                    }
+
+                    SettingGroupTitle { text: "窗口效果"; theme-mode: root.theme-mode; }
+
+                    // 窗口不透明度 + 背景图
+                    Rectangle {
+                        height: 140px;
+                        horizontal-stretch: 1;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        VerticalLayout {
+                            padding: ThemeSettings.spacing-normal;
+                            spacing: ThemeSettings.spacing-normal;
+
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                Text {
+                                    text: "窗口不透明度";
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    font-size: ThemeSettings.font-size-normal;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                Text {
+                                    text: root.window-opacity + "%";
+                                    color: ThemeSettings.accent-color;
+                                    font-size: ThemeSettings.font-size-normal;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                    width: 50px;
+                                    horizontal-alignment: right;
+                                }
+                            }
+
+                            SettingSlider {
+                                horizontal-stretch: 1;
+                                value: root.window-opacity;
+                                min: 30;
+                                max: 100;
+                                step: 5;
+                                theme-mode: root.theme-mode;
+                                changed(v) => { root.window-opacity-changed(v); }
+                            }
+
+                            HorizontalLayout {
+                                spacing: ThemeSettings.spacing-normal;
+                                alignment: start;
+
+                                // 选择背景图
+                                Rectangle {
+                                    width: 100px;
+                                    height: 28px;
+                                    border-radius: 4px;
+                                    background: ThemeSettings.accent-color;
+                                    TouchArea {
+                                        clicked => { root.pick-bg-image(); }
+                                    }
+                                    Text {
+                                        text: "选择背景图";
+                                        color: white;
+                                        font-size: ThemeSettings.font-size-small;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                // 清除背景图
+                                Rectangle {
+                                    width: 88px;
+                                    height: 28px;
+                                    border-radius: 4px;
+                                    background: ThemeSettings.card-bg(root.theme-mode);
+                                    border-width: 1px;
+                                    border-color: ThemeSettings.border-c(root.theme-mode);
+                                    opacity: root.has-bg-image ? 1.0 : 0.5;
+                                    TouchArea {
+                                        enabled: root.has-bg-image;
+                                        clicked => { root.clear-bg-image(); }
+                                    }
+                                    Text {
+                                        text: "清除背景图";
+                                        color: ThemeSettings.text-c(root.theme-mode);
+                                        font-size: ThemeSettings.font-size-small;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                Text {
+                                    text: root.has-bg-image ? "已设置" : "未设置";
+                                    color: ThemeSettings.text-sec(root.theme-mode);
+                                    font-size: ThemeSettings.font-size-small;
+                                    vertical-alignment: center;
                                 }
                             }
                         }

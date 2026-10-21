@@ -10,7 +10,7 @@ use crate::db::Database;
 use crate::models::{Classification, Item};
 use crate::native;
 // MainWindow, ClassificationInfo, ItemInfo, MenuItem 由 slint::include_modules!() 生成在 crate 根
-use crate::{ClassificationInfo, ItemEditWindow, ItemInfo, MenuItem, MainWindow, QuickSearchWindow, SettingsWindow};
+use crate::{ClassificationInfo, DragHelper, ItemEditWindow, ItemInfo, MenuItem, MainWindow, QuickSearchWindow, SettingsWindow};
 
 pub struct App {
     main_window: MainWindow,
@@ -51,6 +51,18 @@ impl App {
         // 3.1.2 创建项目编辑窗口（初始隐藏）
         let item_edit_window = ItemEditWindow::new()?;
         item_edit_window.window().hide().ok();
+        // 应用窗口背景图与不透明度设置
+        let bg_path = db.get_setting("window_bg_image", "");
+        if !bg_path.is_empty() {
+            match slint::Image::load_from_path(std::path::Path::new(&bg_path)) {
+                Ok(img) => {
+                    main_window.set_window_bg_image(img);
+                    main_window.set_window_bg_visible(true);
+                }
+                Err(e) => log::warn!("加载窗口背景图失败: {}", e),
+            }
+        }
+        main_window.set_window_opacity(db.get_setting_i64("window_opacity", 100) as i32);
         // 编辑窗口当前编辑的项目 id 与待保存图标
         let editing_item_id = Arc::new(Mutex::new(0i64));
         let editing_icon: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -222,6 +234,77 @@ impl App {
             }
         });
 
+        // 10.1 拖拽排序: 构造/解析拖拽数据并处理放置
+        {
+            let db_for_drag = db.clone();
+            let main_weak_drag = main_window.as_weak();
+            let current_id_for_drag = current_id.clone();
+            let expanded_for_drag = expanded_classifications.clone();
+            let drag_global = main_window.global::<DragHelper>();
+            drag_global.on_make_item(|id| {
+                slint::DataTransfer::from(SharedString::from(format!("item:{}", id)))
+            });
+            drag_global.on_make_class(|id| {
+                slint::DataTransfer::from(SharedString::from(format!("class:{}", id)))
+            });
+            drag_global.on_kind_of(|data| {
+                data.plain_text()
+                    .ok()
+                    .and_then(|text| text.split(':').next().map(|s| s.to_string()))
+                    .map(SharedString::from)
+                    .unwrap_or_default()
+            });
+            drag_global.on_id_of(|data| {
+                data.plain_text()
+                    .ok()
+                    .and_then(|text| {
+                        text.rsplit(':').next().and_then(|n| n.parse::<i32>().ok())
+                    })
+                    .unwrap_or(0)
+            });
+            drag_global.on_drop_on(move |kind, from_id, to_id| {
+                if from_id <= 0 || to_id <= 0 || from_id == to_id {
+                    return;
+                }
+                if kind.as_str() == "class" {
+                    match db_for_drag.move_classification_before(from_id as i64, to_id as i64) {
+                        Ok(_) => {
+                            let classes = db_for_drag.list_all_classifications();
+                            let cur = *current_id_for_drag.lock().unwrap();
+                            if let Some(mw) = main_weak_drag.upgrade() {
+                                mw.set_classifications(to_classification_model(
+                                    &classes,
+                                    cur,
+                                    &expanded_for_drag.lock().unwrap(),
+                                ));
+                            }
+                            log::info!("分类拖拽排序: {} -> {}", from_id, to_id);
+                        }
+                        Err(e) => log::warn!("分类拖拽排序失败: {}", e),
+                    }
+                    return;
+                }
+                if kind.as_str() != "item" {
+                    return;
+                }
+                match db_for_drag.move_item_before(from_id as i64, to_id as i64) {
+                    Ok(_) => {
+                        let class_id = *current_id_for_drag.lock().unwrap();
+                        let items = db_for_drag.list_items(class_id);
+                        if let Some(mw) = main_weak_drag.upgrade() {
+                            mw.set_items(to_item_model(&items, 0));
+                            mw.set_status_text(SharedString::from(format!(
+                                "共 {} 个项目",
+                                items.len()
+                            )));
+                        }
+                        log::info!("项目拖拽排序: {} -> {}", from_id, to_id);
+                    }
+                    Err(e) => log::warn!("项目拖拽排序失败: {}", e),
+                }
+            });
+        }
+
         // 10. 项目右键菜单: 弹出 Slint 右键菜单
         // 注意: 右键坐标从 UI 事件获取，这里 item_id 用于记录当前右键的项目
         let _window_for_item_menu = main_window.as_weak();
@@ -388,6 +471,9 @@ impl App {
                 let qs_history = db_for_settings.get_setting_bool("quick_search_history", true);
                 let qs_match_remark = db_for_settings.get_setting_bool("quick_search_match_remark", false);
                 let item_layout = db_for_settings.get_setting("item_layout", "tile");
+                let win_opacity = db_for_settings.get_setting_i64("window_opacity", 100) as i32;
+                let has_bg =
+                    !db_for_settings.get_setting("window_bg_image", "").is_empty();
 
                 sw.set_theme_mode(SharedString::from(theme));
                 sw.set_auto_start(auto_start);
@@ -422,6 +508,8 @@ impl App {
                 sw.set_quick_search_history(qs_history);
                 sw.set_quick_search_match_remark(qs_match_remark);
                 sw.set_item_layout(SharedString::from(item_layout));
+                sw.set_window_opacity(win_opacity);
+                sw.set_has_bg_image(has_bg);
 
                 // 加载字体列表 (后台获取，避免阻塞 UI)
                 let saved_font =
@@ -615,6 +703,62 @@ impl App {
                     } else {
                         native::remove_tray_icon();
                     }
+                }
+            });
+        }
+
+        // 15.5.1 窗口不透明度
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_window_opacity_changed(move |v| {
+                let val = (v as i32).clamp(30, 100);
+                let _ = db_clone.set_setting_i64("window_opacity", val as i64);
+                set_window_opacity(val);
+                if let Some(sw) = sw_weak.upgrade() {
+                    sw.set_window_opacity(val);
+                }
+            });
+        }
+
+        // 15.5.2 选择窗口背景图
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            let mw_weak = main_window.as_weak();
+            settings_window.on_pick_bg_image(move || {
+                let Some(path) = show_open_file_dialog() else {
+                    return;
+                };
+                match slint::Image::load_from_path(std::path::Path::new(&path)) {
+                    Ok(img) => {
+                        let _ = db_clone.set_setting("window_bg_image", &path);
+                        if let Some(w) = mw_weak.upgrade() {
+                            w.set_window_bg_image(img);
+                            w.set_window_bg_visible(true);
+                        }
+                        if let Some(sw) = sw_weak.upgrade() {
+                            sw.set_has_bg_image(true);
+                        }
+                        log::info!("窗口背景图已设置: {}", path);
+                    }
+                    Err(e) => show_error_dialog("背景图", &format!("无法加载图片: {}", e)),
+                }
+            });
+        }
+
+        // 15.5.3 清除窗口背景图
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            let mw_weak = main_window.as_weak();
+            settings_window.on_clear_bg_image(move || {
+                let _ = db_clone.set_setting("window_bg_image", "");
+                if let Some(w) = mw_weak.upgrade() {
+                    w.set_window_bg_visible(false);
+                }
+                if let Some(sw) = sw_weak.upgrade() {
+                    sw.set_has_bg_image(false);
                 }
             });
         }
@@ -1695,6 +1839,54 @@ impl App {
                             }
                         }
                     }
+                    ("classification-item", "aggregate") => {
+                        // 聚合分类: 聚合所有分类下的项目，可设置排序与显示数量
+                        let cid = *right_class_id.lock().unwrap();
+                        drop(w);
+                        if db_for_ctx.has_child_classification(cid) {
+                            show_error_dialog("聚合分类", "当前分类是父级分类，不能设置为聚合分类。");
+                        } else if let Some(choice) = show_action_dialog(
+                            "聚合分类 - 排序方式",
+                            &["按名称", "按打开次数", "按最近打开"],
+                        ) {
+                            let sort_mode = match choice.as_str() {
+                                "按名称" => "initial",
+                                "按打开次数" => "openNumber",
+                                "按最近打开" => "lastOpen",
+                                _ => "default",
+                            };
+                            let count_text = show_input_dialog(
+                                "聚合分类",
+                                "设置显示项目数量（默认 50）",
+                            )
+                            .unwrap_or_else(|| "50".to_string());
+                            let count = count_text.trim().parse::<i64>().unwrap_or(50).max(1);
+                            match db_for_ctx.set_classification_aggregate(cid, sort_mode, count) {
+                                Ok(_) => {
+                                    *current_id_for_ctx.lock().unwrap() = cid;
+                                    let classes = db_for_ctx.list_all_classifications();
+                                    let items = db_for_ctx.list_items(cid);
+                                    if let Some(w) = window_for_ctx.upgrade() {
+                                        w.set_classifications(to_classification_model(
+                                            &classes,
+                                            cid,
+                                            &expanded_for_ctx.lock().unwrap(),
+                                        ));
+                                        w.set_items(to_item_model(&items, 0));
+                                        w.set_status_text(SharedString::from(format!(
+                                            "聚合 {} 个项目",
+                                            items.len()
+                                        )));
+                                        w.set_context_menu_visible(false);
+                                    }
+                                }
+                                Err(e) => show_error_dialog(
+                                    "聚合分类",
+                                    &format!("设置失败: {}", e),
+                                ),
+                            }
+                        }
+                    }
                     ("classification-item", "delete") => {
                         let cid = *right_class_id.lock().unwrap();
                         drop(w);
@@ -2219,12 +2411,18 @@ impl App {
         // 窗口创建后应用圆角和阴影效果，并按设置初始化托盘
         let tray_enabled_run = self.tray_icon_enabled.clone();
         let min_to_tray_run = self.minimize_to_tray.clone();
+        let db_run = self.db.clone();
         let frame_timer = slint::Timer::default();
         frame_timer.start(
             slint::TimerMode::SingleShot,
             std::time::Duration::from_millis(50),
             move || {
                 apply_window_frame_effects();
+                // 应用窗口不透明度
+                let opacity = db_run.get_setting_i64("window_opacity", 100) as i32;
+                if opacity < 100 {
+                    set_window_opacity(opacity);
+                }
                 // 启动后最小化到托盘
                 let min = *min_to_tray_run.lock().unwrap();
                 if min {
@@ -2406,6 +2604,46 @@ fn set_window_topmost(_window: &MainWindow, topmost: bool) {
 
 #[cfg(not(target_os = "windows"))]
 fn set_window_topmost(_window: &MainWindow, _topmost: bool) {}
+
+/// 设置主窗口不透明度 (30~100)
+/// 使用 Win32 分层窗口实现整窗半透明
+#[cfg(target_os = "windows")]
+fn set_window_opacity(percent: i32) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, GWL_EXSTYLE, LWA_ALPHA, SetLayeredWindowAttributes, SetWindowLongW,
+        WS_EX_LAYERED,
+    };
+    use windows::core::{HSTRING, PCWSTR};
+
+    let title = HSTRING::from("Dawn Launcher");
+    unsafe {
+        let hwnd = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr()));
+        if hwnd.0 as usize == 0 {
+            log::warn!("未找到 Dawn Launcher 窗口，无法设置不透明度");
+            return;
+        }
+        let percent = percent.clamp(30, 100);
+        if percent >= 100 {
+            // 恢复不透明: 移除分层窗口样式
+            let style = windows::Win32::UI::WindowsAndMessaging::GetWindowLongW(hwnd, GWL_EXSTYLE);
+            let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, style & !(WS_EX_LAYERED.0 as i32));
+        } else {
+            let style = windows::Win32::UI::WindowsAndMessaging::GetWindowLongW(hwnd, GWL_EXSTYLE);
+            let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, style | (WS_EX_LAYERED.0 as i32));
+            let alpha = (percent as u32 * 255 / 100) as u8;
+            let _ = SetLayeredWindowAttributes(
+                hwnd,
+                windows::Win32::Foundation::COLORREF(0),
+                alpha,
+                LWA_ALPHA,
+            );
+        }
+        log::info!("窗口不透明度: {}%", percent);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_window_opacity(_percent: i32) {}
 
 /// 标题栏手动拖动（Windows）
 /// 按下时记录光标与窗口位置，移动时用 SetWindowPos 跟随光标，
@@ -3456,6 +3694,7 @@ fn show_classification_item_menu(window: &MainWindow, x: i32, y: i32) {
         ("rename", "重命名", "✏", false, false),
         ("add-child", "新建子分类", "+", false, false),
         ("associate-folder", "关联文件夹...", "📁", false, false),
+        ("aggregate", "聚合分类...", "∑", false, false),
         ("", "", "", true, false),
         ("delete", "删除", "🗑", false, false),
     ];

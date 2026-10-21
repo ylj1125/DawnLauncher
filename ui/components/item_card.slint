@@ -1,5 +1,6 @@
 // 项目卡片组件
 import { ThemeSettings } from "../theme.slint";
+import { DragHelper } from "./drag_helper.slint";
 
 // 项目数据模型 (Slint 全局使用)
 export struct ItemInfo {
@@ -56,6 +57,55 @@ export component ItemCard inherits Rectangle {
             overflow: elide;
             horizontal-stretch: 1;
             width: 76px;
+        }
+    }
+
+    // ===== 拖拽排序 =====
+    // 左上角拖拽手柄（避免与单击/双击冲突）
+    Rectangle {
+        x: 2px;
+        y: 2px;
+        width: 16px;
+        height: 16px;
+        background: transparent;
+
+        Text {
+            text: "⋮";
+            color: ThemeSettings.text-sec(root.theme-mode);
+            opacity: 0.5;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        DragArea {
+            width: 100%;
+            height: 100%;
+            allow-move: true;
+            data: DragHelper.make-item(root.item-id);
+            drag-image: root.icon;
+            drag-image-offset-x: 24;
+            drag-image-offset-y: 24;
+        }
+    }
+
+    // 放置区域（覆盖整张卡片）
+    DropArea {
+        width: 100%;
+        height: 100%;
+
+        can-drop(event) => {
+            (DragHelper.kind-of(event.data) == "item"
+                && DragHelper.id-of(event.data) != root.item-id)
+                ? DragAction.move
+                : DragAction.none
+        }
+
+        dropped(event) => {
+            if (DragHelper.kind-of(event.data) == "item") {
+                DragHelper.drop-on("item", DragHelper.id-of(event.data), root.item-id);
+            }
+            return DragAction.move;
         }
     }
 

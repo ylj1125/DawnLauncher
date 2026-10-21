@@ -3,6 +3,8 @@ import { ScrollView, ListView, StandardListView, LineEdit, CheckBox } from "std-
 import { ThemeSettings } from "theme.slint";
 export { ThemeSettings } from "theme.slint";
 import { ItemCard, ItemInfo } from "components/item_card.slint";
+import { DragHelper } from "components/drag_helper.slint";
+export { DragHelper } from "components/drag_helper.slint";
 import { ClassificationTab } from "components/classification_tab.slint";
 import { SettingsPanel } from "components/settings_panel.slint";
 import { ContextMenu, MenuItem } from "components/context_menu.slint";
@@ -47,6 +49,10 @@ export component MainWindow inherits Window {
     in property <bool> hide-after-open: false;
     in property <bool> quick-search-enabled: false;
     in property <int> quick-search-width: 600;
+    // ===== 窗口背景图 / 不透明度 =====
+    in property <image> window-bg-image;
+    in-out property <bool> window-bg-visible: false;
+    in property <int> window-opacity: 100;
 
     // ===== 右键菜单状态 =====
     // 菜单是否可见
@@ -138,6 +144,16 @@ export component MainWindow inherits Window {
     // 进入/退出批量模式
     callback batch-mode-toggled(bool);
 
+    // 窗口背景图（位于所有内容之下）
+    Image {
+        visible: root.window-bg-visible;
+        width: 100%;
+        height: 100%;
+        source: root.window-bg-image;
+        image-fit: cover;
+        opacity: 0.85;
+    }
+
     // 用 VerticalLayout 包裹所有内容，确保布局跟随窗口大小
     VerticalLayout {
         spacing: 0px;
@@ -145,7 +161,9 @@ export component MainWindow inherits Window {
         // 标题栏 (拖拽区域)
         title-bar := Rectangle {
             height: 32px;
-            background: ThemeSettings.sidebar-bg(root.theme-mode);
+            background: root.window-bg-visible
+                ? ThemeSettings.sidebar-bg(root.theme-mode).transparentize(0.45)
+                : ThemeSettings.sidebar-bg(root.theme-mode);
 
             HorizontalLayout {
                 // 标题 + 拖拽区域
@@ -176,7 +194,7 @@ export component MainWindow inherits Window {
                         alignment: start;
 
                         Text {
-                            text: "Dawn Launcher v0.7.2";
+                            text: "Dawn Launcher v0.10";
                             color: ThemeSettings.text-c(root.theme-mode);
                             font-size: ThemeSettings.font-size-normal;
                             font-weight: 700;
@@ -277,7 +295,9 @@ export component MainWindow inherits Window {
             // 左侧分类栏
             Rectangle {
                 width: root.sidebar-width * 1px;
-                background: ThemeSettings.sidebar-bg(root.theme-mode);
+                background: root.window-bg-visible
+                    ? ThemeSettings.sidebar-bg(root.theme-mode).transparentize(0.35)
+                    : ThemeSettings.sidebar-bg(root.theme-mode);
 
                 // 分类区空白右键
                 TouchArea {
@@ -1088,6 +1108,9 @@ export component SettingsWindow inherits Window {
     in property <bool> quick-search-match-remark: false;
     // ===== 项目布局 =====
     in property <string> item-layout: "tile";
+    // ===== 窗口效果 =====
+    in property <int> window-opacity: 100;
+    in property <bool> has-bg-image: false;
     // 当前设置页
     in-out property <string> active-section: "general";
 
@@ -1127,6 +1150,10 @@ export component SettingsWindow inherits Window {
     callback quick-search-history-changed(bool);
     callback quick-search-match-remark-changed(bool);
     callback item-layout-changed(string);
+    // 窗口效果
+    callback window-opacity-changed(float);
+    callback pick-bg-image();
+    callback clear-bg-image();
     // 工具按钮
     callback backup-data();
     callback restore-data();
@@ -1180,6 +1207,8 @@ export component SettingsWindow inherits Window {
         quick-search-history: root.quick-search-history;
         quick-search-match-remark: root.quick-search-match-remark;
         item-layout: root.item-layout;
+        window-opacity: root.window-opacity;
+        has-bg-image: root.has-bg-image;
 
         back-clicked => { root.close-requested(); }
         theme-mode-changed(mode) => { root.theme-mode-changed(mode); }
@@ -1217,6 +1246,9 @@ export component SettingsWindow inherits Window {
         quick-search-history-changed(v) => { root.quick-search-history-changed(v); }
         quick-search-match-remark-changed(v) => { root.quick-search-match-remark-changed(v); }
         item-layout-changed(v) => { root.item-layout-changed(v); }
+        window-opacity-changed(v) => { root.window-opacity-changed(v); }
+        pick-bg-image => { root.pick-bg-image(); }
+        clear-bg-image => { root.clear-bg-image(); }
         backup-data => { root.backup-data(); }
         restore-data => { root.restore-data(); }
         check-invalid-items => { root.check-invalid-items(); }

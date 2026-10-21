@@ -115,16 +115,20 @@ impl Database {
     }
 
     /// 查询某分类下的项目，按 order 升序
+    /// 聚合分类 (type=2) 会聚合所有非聚合分类下的项目，并按数量截断
     pub fn list_items(&self, classification_id: i64) -> Vec<Item> {
         let conn = self.conn.lock().unwrap();
-        // 读取分类的 item_sort 设置（默认按 order 排序）
-        let sort_mode: String = conn
+        // 读取分类类型、item_sort 与聚合数量（默认按 order 排序）
+        let (class_type, sort_mode, aggregate_count): (i64, String, i64) = conn
             .query_row(
-                "SELECT COALESCE(json_extract(data, '$.itemSort'), 'default') FROM classification WHERE id = ?",
+                "SELECT type, \
+                        COALESCE(json_extract(data, '$.itemSort'), 'default'), \
+                        COALESCE(json_extract(data, '$.aggregateItemCount'), 50) \
+                 FROM classification WHERE id = ?",
                 params![classification_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
-            .unwrap_or_else(|_| "default".to_string());
+            .unwrap_or((0, "default".to_string(), 50));
 
         let order_by = match sort_mode.as_str() {
             "initial" => "name ASC",
@@ -133,18 +137,42 @@ impl Database {
             _ => "`order` ASC",
         };
 
-        let sql = format!(
-            "SELECT id, classification_id, name, type, data, shortcut_key, global_shortcut_key, `order` FROM item WHERE classification_id = ? ORDER BY {}",
-            order_by
-        );
+        // 聚合分类聚合所有非聚合分类的项目
+        let (sql, params_vec): (String, Vec<i64>) = if class_type == 2 {
+            (
+                format!(
+                    "SELECT id, classification_id, name, type, data, shortcut_key, global_shortcut_key, `order` \
+                     FROM item WHERE classification_id NOT IN (SELECT id FROM classification WHERE type = 2) \
+                     ORDER BY {} LIMIT ?",
+                    order_by
+                ),
+                vec![aggregate_count.max(1)],
+            )
+        } else {
+            (
+                format!(
+                    "SELECT id, classification_id, name, type, data, shortcut_key, global_shortcut_key, `order` \
+                     FROM item WHERE classification_id = ? ORDER BY {}",
+                    order_by
+                ),
+                vec![classification_id],
+            )
+        };
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
             Err(_) => return vec![],
         };
-        stmt.query_map(params![classification_id], row_to_item)
-            .ok()
-            .map(|r| r.filter_map(|x| x.ok()).collect())
-            .unwrap_or_default()
+        let mut rows = match stmt.query(rusqlite::params_from_iter(params_vec.iter())) {
+            Ok(r) => r,
+            Err(_) => return vec![],
+        };
+        let mut result = Vec::new();
+        while let Ok(Some(row)) = rows.next() {
+            if let Ok(item) = row_to_item(row) {
+                result.push(item);
+            }
+        }
+        result
     }
 
     /// 快速搜索：按名称模糊匹配所有分类下的项目
@@ -288,6 +316,131 @@ impl Database {
             ],
         )?;
         Ok(())
+    }
+
+    /// 将项目移动到目标项目之前（支持跨分类）
+    /// 用于拖拽排序
+    pub fn move_item_before(&self, from_id: i64, to_id: i64) -> Result<(), rusqlite::Error> {
+        if from_id == to_id {
+            return Ok(());
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let (from_class, _): (i64, i64) = tx.query_row(
+            "SELECT classification_id, `order` FROM item WHERE id = ?",
+            params![from_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let (to_class, _): (i64, i64) = tx.query_row(
+            "SELECT classification_id, `order` FROM item WHERE id = ?",
+            params![to_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+
+        // 目标分类中除源项目外的顺序列表，将源项目插入目标位置
+        let mut target_ids: Vec<i64> = {
+            let mut stmt = tx.prepare(
+                "SELECT id FROM item WHERE classification_id = ? AND id <> ? ORDER BY `order` ASC, id ASC",
+            )?;
+            let rows = stmt.query_map(params![to_class, from_id], |row| row.get::<_, i64>(0))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        let pos = target_ids
+            .iter()
+            .position(|id| *id == to_id)
+            .unwrap_or(target_ids.len());
+        target_ids.insert(pos, from_id);
+        for (i, id) in target_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE item SET classification_id = ?, `order` = ? WHERE id = ?",
+                params![to_class, (i + 1) as i64, id],
+            )?;
+        }
+
+        // 跨分类拖拽时，重新编号源分类剩余项目
+        if from_class != to_class {
+            let source_ids: Vec<i64> = {
+                let mut stmt = tx.prepare(
+                    "SELECT id FROM item WHERE classification_id = ? AND id <> ? ORDER BY `order` ASC, id ASC",
+                )?;
+                let rows =
+                    stmt.query_map(params![from_class, from_id], |row| row.get::<_, i64>(0))?;
+                rows.filter_map(|r| r.ok()).collect()
+            };
+            for (i, id) in source_ids.iter().enumerate() {
+                tx.execute(
+                    "UPDATE item SET `order` = ? WHERE id = ?",
+                    params![(i + 1) as i64, id],
+                )?;
+            }
+        }
+
+        tx.commit()
+    }
+
+    /// 将分类移动到目标分类之前（同级排序；跨父级时移动到目标父级下）
+    /// 用于分类拖拽排序
+    pub fn move_classification_before(
+        &self,
+        from_id: i64,
+        to_id: i64,
+    ) -> Result<(), rusqlite::Error> {
+        if from_id == to_id {
+            return Ok(());
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let from_parent: Option<i64> = tx.query_row(
+            "SELECT parent_id FROM classification WHERE id = ?",
+            params![from_id],
+            |row| row.get(0),
+        )?;
+        let to_parent: Option<i64> = tx.query_row(
+            "SELECT parent_id FROM classification WHERE id = ?",
+            params![to_id],
+            |row| row.get(0),
+        )?;
+
+        // 目标父级下除源分类外的顺序列表，将源分类插入目标位置
+        let mut target_ids: Vec<i64> = {
+            let mut stmt = tx.prepare(
+                "SELECT id FROM classification WHERE parent_id IS ? AND id <> ? ORDER BY `order` ASC, id ASC",
+            )?;
+            let rows =
+                stmt.query_map(params![to_parent, from_id], |row| row.get::<_, i64>(0))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        let pos = target_ids
+            .iter()
+            .position(|id| *id == to_id)
+            .unwrap_or(target_ids.len());
+        target_ids.insert(pos, from_id);
+        for (i, id) in target_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE classification SET parent_id = ?, `order` = ? WHERE id = ?",
+                params![to_parent, (i + 1) as i64, id],
+            )?;
+        }
+
+        // 跨父级拖拽时，重新编号源父级剩余分类
+        if from_parent != to_parent {
+            let source_ids: Vec<i64> = {
+                let mut stmt = tx.prepare(
+                    "SELECT id FROM classification WHERE parent_id IS ? AND id <> ? ORDER BY `order` ASC, id ASC",
+                )?;
+                let rows =
+                    stmt.query_map(params![from_parent, from_id], |row| row.get::<_, i64>(0))?;
+                rows.filter_map(|r| r.ok()).collect()
+            };
+            for (i, id) in source_ids.iter().enumerate() {
+                tx.execute(
+                    "UPDATE classification SET `order` = ? WHERE id = ?",
+                    params![(i + 1) as i64, id],
+                )?;
+            }
+        }
+
+        tx.commit()
     }
 
     /// 删除分类 (同时删除其下所有项目)
@@ -612,6 +765,59 @@ impl Database {
             )?;
         }
         Ok(())
+    }
+
+    /// 设置为聚合分类 (type=2)
+    /// 会清空该分类下原有项目，聚合数量与排序写入 data
+    pub fn set_classification_aggregate(
+        &self,
+        class_id: i64,
+        sort_mode: &str,
+        item_count: i64,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let data_str: String = conn.query_row(
+            "SELECT data FROM classification WHERE id = ?",
+            params![class_id],
+            |r| r.get(0),
+        )?;
+        let mut data: ClassificationData = serde_json::from_str(&data_str).unwrap_or_default();
+        data.item_sort = sort_mode.to_string();
+        data.aggregate_item_count = item_count.max(1);
+        let new_data_str = serde_json::to_string(&data).unwrap_or(data_str);
+        conn.execute(
+            "UPDATE classification SET type = 2, data = ? WHERE id = ?",
+            params![new_data_str, class_id],
+        )?;
+        conn.execute(
+            "DELETE FROM item WHERE classification_id = ?",
+            params![class_id],
+        )?;
+        Ok(())
+    }
+
+    /// 判断分类是否为聚合分类
+    pub fn is_aggregate_classification(&self, class_id: i64) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT type = 2 FROM classification WHERE id = ?",
+            params![class_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|v| v != 0)
+        .unwrap_or(false)
+    }
+
+    /// 判断分类是否有子分类
+    pub fn has_child_classification(&self, class_id: i64) -> bool {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM classification WHERE parent_id = ?",
+            params![class_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|v| v > 0)
+        .unwrap_or(false)
     }
 
     /// 重命名项目

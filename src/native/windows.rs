@@ -1046,9 +1046,9 @@ pub fn create_tray_icon(window_title: &str) -> bool {
             Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NOTIFYICONDATAW,
         };
         use windows::Win32::UI::WindowsAndMessaging::{
-            CreateWindowExW, DispatchMessageW, GetMessageW, LoadIconW, RegisterClassW,
-            TranslateMessage, WINDOW_EX_STYLE, WS_OVERLAPPED, HMENU, IDI_APPLICATION, MSG,
-            WNDCLASSW,
+            CreateWindowExW, DispatchMessageW, GetMessageW, LoadIconW, LoadImageW, RegisterClassW,
+            TranslateMessage, HICON, IMAGE_ICON, LR_LOADFROMFILE, WINDOW_EX_STYLE, WS_OVERLAPPED,
+            HMENU, IDI_APPLICATION, MSG, WNDCLASSW,
         };
         use windows::Win32::Foundation::{HWND, HINSTANCE};
 
@@ -1091,7 +1091,30 @@ pub fn create_tray_icon(window_title: &str) -> bool {
         }
         *TRAY_SINK_HWND.lock().unwrap() = sink.0;
 
-        let hicon = LoadIconW(HINSTANCE(0), IDI_APPLICATION).unwrap_or_default();
+        // 优先使用 data/tray.ico 自定义托盘图标，不存在时回退到系统默认图标
+        let custom_icon = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("data").join("tray.ico")))
+            .filter(|p| p.exists());
+        let hicon = custom_icon
+            .and_then(|p| {
+                let wide: Vec<u16> = p
+                    .to_string_lossy()
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect();
+                LoadImageW(
+                    HINSTANCE(0),
+                    PCWSTR(wide.as_ptr()),
+                    IMAGE_ICON,
+                    16,
+                    16,
+                    LR_LOADFROMFILE,
+                )
+                .ok()
+                .map(|h| HICON(h.0))
+            })
+            .unwrap_or_else(|| LoadIconW(HINSTANCE(0), IDI_APPLICATION).unwrap_or_default());
 
         let mut nid = NOTIFYICONDATAW::default();
         nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;

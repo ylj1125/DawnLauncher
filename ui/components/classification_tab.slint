@@ -1,5 +1,6 @@
 // 分类标签组件
 import { ThemeSettings } from "../theme.slint";
+import { DragHelper } from "./drag_helper.slint";
 
 export component ClassificationTab inherits Rectangle {
     in property <int> tab-id;
@@ -63,6 +64,52 @@ export component ClassificationTab inherits Rectangle {
             if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
                 root.right-clicked();
             }
+        }
+    }
+
+    // ===== 拖拽排序 =====
+    // 右侧拖拽手柄（避免与单击选择冲突）
+    Rectangle {
+        x: root.width - 18px;
+        y: (root.height - 16px) / 2;
+        width: 14px;
+        height: 16px;
+        background: transparent;
+
+        Text {
+            text: "⋮";
+            color: ThemeSettings.text-sec(root.theme-mode);
+            opacity: 0.5;
+            font-size: 12px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        DragArea {
+            width: 100%;
+            height: 100%;
+            allow-move: true;
+            data: DragHelper.make-class(root.tab-id);
+        }
+    }
+
+    // 放置区域（覆盖整个分类项）
+    DropArea {
+        width: 100%;
+        height: 100%;
+
+        can-drop(event) => {
+            (DragHelper.kind-of(event.data) == "class"
+                && DragHelper.id-of(event.data) != root.tab-id)
+                ? DragAction.move
+                : DragAction.none
+        }
+
+        dropped(event) => {
+            if (DragHelper.kind-of(event.data) == "class") {
+                DragHelper.drop-on("class", DragHelper.id-of(event.data), root.tab-id);
+            }
+            return DragAction.move;
         }
     }
 
