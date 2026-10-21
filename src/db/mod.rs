@@ -260,6 +260,36 @@ impl Database {
         Ok(())
     }
 
+    /// 按 id 查询单个项目
+    pub fn get_item(&self, item_id: i64) -> Option<Item> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, classification_id, name, type, data, shortcut_key, global_shortcut_key, `order` FROM item WHERE id = ?",
+            params![item_id],
+            row_to_item,
+        )
+        .ok()
+    }
+
+    /// 更新项目基本字段与 data JSON
+    pub fn update_item(&self, item: &Item) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let data_str = serde_json::to_string(&item.data).unwrap_or_default();
+        conn.execute(
+            "UPDATE item SET classification_id = ?, name = ?, type = ?, data = ?, shortcut_key = ?, global_shortcut_key = ? WHERE id = ?",
+            params![
+                item.classification_id,
+                item.name,
+                item.kind,
+                data_str,
+                item.shortcut_key,
+                item.global_shortcut_key as i64,
+                item.id,
+            ],
+        )?;
+        Ok(())
+    }
+
     /// 删除分类 (同时删除其下所有项目)
     pub fn delete_classification(&self, classification_id: i64) -> Result<(), rusqlite::Error> {
         let conn = self.conn.lock().unwrap();

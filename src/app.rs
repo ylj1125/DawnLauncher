@@ -10,12 +10,13 @@ use crate::db::Database;
 use crate::models::{Classification, Item};
 use crate::native;
 // MainWindow, ClassificationInfo, ItemInfo, MenuItem 由 slint::include_modules!() 生成在 crate 根
-use crate::{ClassificationInfo, ItemInfo, MenuItem, MainWindow, QuickSearchWindow, SettingsWindow};
+use crate::{ClassificationInfo, ItemEditWindow, ItemInfo, MenuItem, MainWindow, QuickSearchWindow, SettingsWindow};
 
 pub struct App {
     main_window: MainWindow,
     quick_search_window: QuickSearchWindow,
     settings_window: SettingsWindow,
+    item_edit_window: ItemEditWindow,
     db: Arc<Database>,
     current_classification_id: Arc<Mutex<i64>>,
     expanded_classifications: Arc<Mutex<std::collections::HashSet<i64>>>,
@@ -46,6 +47,13 @@ impl App {
         // 3.1.1 创建设置窗口（初始隐藏）
         let settings_window = SettingsWindow::new()?;
         settings_window.window().hide().ok();
+
+        // 3.1.2 创建项目编辑窗口（初始隐藏）
+        let item_edit_window = ItemEditWindow::new()?;
+        item_edit_window.window().hide().ok();
+        // 编辑窗口当前编辑的项目 id 与待保存图标
+        let editing_item_id = Arc::new(Mutex::new(0i64));
+        let editing_icon: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
         // 3.1.2 托盘状态（运行期可切换）
         let tray_icon_enabled = Arc::new(Mutex::new(db.get_setting_bool("tray_icon", true)));
@@ -1407,6 +1415,9 @@ impl App {
             let right_item_id = right_clicked_item_id.clone();
             let right_class_id = right_clicked_class_id.clone();
             let expanded_for_ctx = expanded_classifications.clone();
+            let edit_weak_for_ctx = item_edit_window.as_weak();
+            let editing_item_id_for_ctx = editing_item_id.clone();
+            let editing_icon_for_ctx = editing_icon.clone();
             main_window.on_context_menu_item_selected(move |source, action| {
                 let source_str = source.to_string();
                 let action_str = action.to_string();
@@ -1513,7 +1524,7 @@ impl App {
                         );
                     }
                     ("item-area", "item-settings") => {
-                        show_info_dialog("项目设置", "项目设置弹窗（待实现）");
+                        // 已改为在项目右键菜单中「编辑项目」
                     }
                     // ===== 项目排序 =====
                     ("item-area", "sort-default") => {
@@ -1734,6 +1745,18 @@ impl App {
                                 w.set_items(to_item_model(&items, 0));
                             }
                         }
+                    }
+                    ("item", "edit") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        *editing_item_id_for_ctx.lock().unwrap() = item_id;
+                        drop(w);
+                        open_item_editor(
+                            &db_for_ctx,
+                            &edit_weak_for_ctx,
+                            &window_for_ctx,
+                            item_id,
+                            &editing_icon_for_ctx,
+                        );
                     }
                     ("item", "copy-path") => {
                         let item_id = *right_item_id.lock().unwrap();
@@ -1974,6 +1997,127 @@ impl App {
             });
         }
 
+        // 18.1 项目编辑窗口: 保存
+        {
+            let db_for_edit = db.clone();
+            let edit_weak_save = item_edit_window.as_weak();
+            let main_weak_save = main_window.as_weak();
+            let editing_id_save = editing_item_id.clone();
+            let editing_icon_save = editing_icon.clone();
+            item_edit_window.on_save_requested(move |name, target, params, remark, admin| {
+                let item_id = *editing_id_save.lock().unwrap();
+                if item_id == 0 {
+                    return;
+                }
+                let Some(mut item) = db_for_edit.get_item(item_id) else {
+                    return;
+                };
+                let trimmed = name.trim();
+                if !trimmed.is_empty() {
+                    item.name = trimmed.to_string();
+                }
+                let t = target.trim().to_string();
+                item.data.target = if t.is_empty() { None } else { Some(t) };
+                let p = params.trim().to_string();
+                item.data.params = if p.is_empty() { None } else { Some(p) };
+                let r = remark.trim().to_string();
+                item.data.remark = if r.is_empty() { None } else { Some(r) };
+                item.data.run_as_admin = admin;
+                item.data.icon = editing_icon_save.lock().unwrap().clone();
+
+                match db_for_edit.update_item(&item) {
+                    Ok(_) => {
+                        let items = db_for_edit.list_items(item.classification_id);
+                        if let Some(mw) = main_weak_save.upgrade() {
+                            mw.set_items(to_item_model(&items, 0));
+                            mw.set_status_text(SharedString::from(format!(
+                                "共 {} 个项目",
+                                items.len()
+                            )));
+                        }
+                        if let Some(ew) = edit_weak_save.upgrade() {
+                            ew.window().hide().ok();
+                        }
+                        log::info!("项目已更新: id={}, name={}", item_id, item.name);
+                    }
+                    Err(e) => {
+                        show_error_dialog("保存失败", &format!("更新项目失败: {}", e));
+                    }
+                }
+            });
+        }
+
+        // 18.2 项目编辑窗口: 选择自定义图标
+        {
+            let edit_weak_pick = item_edit_window.as_weak();
+            let editing_icon_pick = editing_icon.clone();
+            item_edit_window.on_pick_icon_requested(move || {
+                if let Some(path) = show_open_file_dialog() {
+                    match image_file_to_data_url(&path) {
+                        Some(url) => {
+                            *editing_icon_pick.lock().unwrap() = Some(url.clone());
+                            if let Some(ew) = edit_weak_pick.upgrade() {
+                                ew.set_icon_preview(
+                                    parse_icon_data_url(&url).unwrap_or_default(),
+                                );
+                            }
+                        }
+                        None => show_info_dialog(
+                            "图标",
+                            "无法读取该图片，请选择 PNG/JPG/BMP 格式的图标文件",
+                        ),
+                    }
+                }
+            });
+        }
+
+        // 18.3 项目编辑窗口: 恢复默认图标（按目标重新提取）
+        {
+            let edit_weak_refresh = item_edit_window.as_weak();
+            let editing_icon_refresh = editing_icon.clone();
+            item_edit_window.on_refresh_icon_requested(move || {
+                let Some(ew) = edit_weak_refresh.upgrade() else {
+                    return;
+                };
+                let target = ew.get_item_target().trim().to_string();
+                if target.is_empty() {
+                    show_info_dialog("提示", "请先填写目标路径或网址");
+                    return;
+                }
+                let weak = edit_weak_refresh.clone();
+                let icon_state = editing_icon_refresh.clone();
+                std::thread::spawn(move || {
+                    let icon = if target.starts_with("http://") || target.starts_with("https://") {
+                        native::fetch_url_info(&target).and_then(|u| u.icon)
+                    } else {
+                        native::get_file_icon(&target)
+                    };
+                    if let Some(icon) = icon {
+                        if let Ok(mut state) = icon_state.lock() {
+                            *state = Some(icon.clone());
+                        }
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ew) = weak.upgrade() {
+                                ew.set_icon_preview(
+                                    parse_icon_data_url(&icon).unwrap_or_default(),
+                                );
+                            }
+                        });
+                    }
+                });
+            });
+        }
+
+        // 18.4 项目编辑窗口: 取消
+        {
+            let edit_weak_cancel = item_edit_window.as_weak();
+            item_edit_window.on_cancel_requested(move || {
+                if let Some(ew) = edit_weak_cancel.upgrade() {
+                    ew.window().hide().ok();
+                }
+            });
+        }
+
         // 17. 应用启动时加载已保存的设置
         {
             let raw_theme = db.get_setting("theme_mode", "light");
@@ -2036,6 +2180,7 @@ impl App {
             main_window,
             quick_search_window,
             settings_window,
+            item_edit_window,
             db,
             current_classification_id: current_id,
             expanded_classifications,
@@ -2099,6 +2244,78 @@ impl App {
         self.main_window.run()
     }
 }
+
+/// 打开项目编辑窗口并载入项目数据
+fn open_item_editor(
+    db: &Database,
+    edit_window: &slint::Weak<ItemEditWindow>,
+    main_window: &slint::Weak<MainWindow>,
+    item_id: i64,
+    editing_icon: &Arc<Mutex<Option<String>>>,
+) {
+    let Some(mw) = main_window.upgrade() else {
+        return;
+    };
+    let Some(item) = db.get_item(item_id) else {
+        log::warn!("编辑项目失败：未找到 id={}", item_id);
+        return;
+    };
+    let Some(ew) = edit_window.upgrade() else {
+        return;
+    };
+
+    *editing_icon.lock().unwrap() = item.data.icon.clone();
+
+    ew.set_theme_mode(mw.get_theme_mode());
+    // 同步字体与自定义主题颜色
+    {
+        let mg = mw.global::<crate::ThemeSettings>();
+        let eg = ew.global::<crate::ThemeSettings>();
+        eg.set_font_family(mg.get_font_family());
+        eg.set_custom_bg(mg.get_custom_bg());
+        eg.set_custom_sidebar(mg.get_custom_sidebar());
+        eg.set_custom_text(mg.get_custom_text());
+        eg.set_custom_border(mg.get_custom_border());
+        eg.set_custom_card(mg.get_custom_card());
+    }
+
+    ew.set_kind_label(SharedString::from(item_kind_label(item.kind)));
+    ew.set_item_name(SharedString::from(item.name.as_str()));
+    ew.set_item_target(SharedString::from(
+        item.data.target.clone().unwrap_or_default(),
+    ));
+    ew.set_item_params(SharedString::from(
+        item.data.params.clone().unwrap_or_default(),
+    ));
+    ew.set_item_remark(SharedString::from(
+        item.data.remark.clone().unwrap_or_default(),
+    ));
+    ew.set_run_as_admin(item.data.run_as_admin);
+    ew.set_icon_preview(
+        item.data
+            .icon
+            .as_deref()
+            .and_then(parse_icon_data_url)
+            .unwrap_or_default(),
+    );
+
+    ew.window().show().ok();
+    center_window_on_screen(&ew);
+}
+
+/// 项目类型的中文名称
+fn item_kind_label(kind: i64) -> &'static str {
+    match kind {
+        0 => "文件",
+        1 => "文件夹",
+        2 => "网址",
+        3 => "系统",
+        4 => "应用商店应用",
+        5 => "多项目",
+        _ => "项目",
+    }
+}
+
 
 /// 应用主题
 /// Slint 1.5 的 global in-property 无法从 Rust 端直接 set
@@ -2516,6 +2733,55 @@ fn parse_icon_data_url(data_url: &str) -> Option<slint::Image> {
     // Slint 1.18 (compat-1-18 模式): load_from_data(bytes, format)
     // format 设为 None 让 Slint 自动识别
     slint::Image::load_from_data(&bytes, None).ok()
+}
+
+/// 将本地图片文件转换为 data URL 图标
+/// 仅支持 Slint 可直接渲染的位图格式
+fn image_file_to_data_url(path: &str) -> Option<String> {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "bmp" => "image/bmp",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        _ => return None,
+    };
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.is_empty() {
+        return None;
+    }
+    Some(format!("data:{};base64,{}", mime, base64_encode(&bytes)))
+}
+
+/// 简易 Base64 编码（标准字母表 + 填充）
+fn base64_encode(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((n >> 18) & 0x3F) as usize] as char);
+        out.push(TABLE[((n >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[((n >> 6) & 0x3F) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[(n & 0x3F) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
 }
 
 /// 从 data URL 中提取格式和 Base64 内容
@@ -3171,6 +3437,7 @@ fn show_item_context_menu(window: &MainWindow, x: i32, y: i32) {
         ("open-location", "打开文件位置", "📁", false, false),
         ("", "", "", true, false), // 分隔线
         ("rename", "重命名", "✏", false, false),
+        ("edit", "编辑项目", "⚙", false, false),
         ("copy-path", "复制路径", "📋", false, false),
         ("refresh-icon", "刷新图标", "🔄", false, false),
         ("", "", "", true, false),
@@ -3213,7 +3480,6 @@ fn show_item_area_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
         ("new-item", "新建项目", "+", false, false),
         ("new-url", "新建网址", "🔗", false, false),
-        ("item-settings", "项目设置", "⚙", false, false),
         ("", "", "", true, false),
         ("sort-default", "排序：默认", "≡", false, false),
         ("sort-initial", "排序：按名称", "A", false, false),

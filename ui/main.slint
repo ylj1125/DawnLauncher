@@ -1,5 +1,5 @@
 // 主界面
-import { ScrollView, ListView, StandardListView, LineEdit } from "std-widgets.slint";
+import { ScrollView, ListView, StandardListView, LineEdit, CheckBox } from "std-widgets.slint";
 import { ThemeSettings } from "theme.slint";
 export { ThemeSettings } from "theme.slint";
 import { ItemCard, ItemInfo } from "components/item_card.slint";
@@ -1220,5 +1220,212 @@ export component SettingsWindow inherits Window {
         backup-data => { root.backup-data(); }
         restore-data => { root.restore-data(); }
         check-invalid-items => { root.check-invalid-items(); }
+    }
+}
+
+// ===== 项目编辑窗口 =====
+
+// 编辑器按钮
+component editor-btn inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> primary: false;
+    in property <string> theme-mode: "light";
+    callback clicked();
+
+    min-width: 88px;
+    height: 32px;
+    border-radius: ThemeSettings.border-radius;
+    background: root.primary ? ThemeSettings.accent-color : ThemeSettings.sidebar-bg(root.theme-mode);
+    border-width: root.primary ? 0px : 1px;
+    border-color: ThemeSettings.border-c(root.theme-mode);
+
+    Text {
+        text: root.label;
+        color: root.primary ? #ffffff : ThemeSettings.text-c(root.theme-mode);
+        font-size: ThemeSettings.font-size-normal;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.clicked(); }
+    }
+}
+
+// 编辑字段行: 标签 + 输入框
+component editor-field inherits HorizontalLayout {
+    in property <string> label: "";
+    in-out property <string> value: "";
+    in property <string> theme-mode: "light";
+
+    spacing: ThemeSettings.spacing-normal;
+
+    Text {
+        text: root.label;
+        width: 74px;
+        color: ThemeSettings.text-c(root.theme-mode);
+        font-size: ThemeSettings.font-size-normal;
+        vertical-alignment: center;
+    }
+
+    LineEdit {
+        text <=> root.value;
+        horizontal-stretch: 1;
+        height: 32px;
+        font-size: ThemeSettings.font-size-normal;
+    }
+}
+
+export component ItemEditWindow inherits Window {
+    title: "编辑项目";
+    background: ThemeSettings.bg-color(root.theme-mode);
+    default-font-family: ThemeSettings.font-family;
+    preferred-width: 560px;
+    preferred-height: 500px;
+    min-width: 480px;
+    min-height: 440px;
+
+    in property <string> theme-mode: "light";
+    in property <string> kind-label: "";
+    in property <image> icon-preview;
+
+    in-out property <string> item-name: "";
+    in-out property <string> item-target: "";
+    in-out property <string> item-params: "";
+    in-out property <string> item-remark: "";
+    in-out property <bool> run-as-admin: false;
+
+    callback save-requested(string, string, string, string, bool);
+    callback cancel-requested();
+    callback pick-icon-requested();
+    callback refresh-icon-requested();
+
+    VerticalLayout {
+        // 标题栏
+        Rectangle {
+            height: 46px;
+            background: ThemeSettings.sidebar-bg(root.theme-mode);
+
+            Text {
+                text: "编辑项目";
+                x: 18px;
+                color: ThemeSettings.text-c(root.theme-mode);
+                font-size: ThemeSettings.font-size-large;
+                vertical-alignment: center;
+            }
+        }
+
+        // 表单
+        VerticalLayout {
+            padding: 18px;
+            spacing: ThemeSettings.spacing-large;
+
+            HorizontalLayout {
+                spacing: 14px;
+                alignment: start;
+
+                // 图标预览
+                Rectangle {
+                    width: 64px;
+                    height: 64px;
+                    border-radius: ThemeSettings.border-radius;
+                    background: ThemeSettings.card-bg(root.theme-mode);
+                    border-width: 1px;
+                    border-color: ThemeSettings.border-c(root.theme-mode);
+
+                    Image {
+                        source: root.icon-preview;
+                        width: 48px;
+                        height: 48px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        image-fit: contain;
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: ThemeSettings.spacing-small;
+
+                    Text {
+                        text: "类型: " + root.kind-label;
+                        color: ThemeSettings.text-c(root.theme-mode);
+                        font-size: ThemeSettings.font-size-small;
+                    }
+
+                    HorizontalLayout {
+                        spacing: ThemeSettings.spacing-small;
+
+                        editor-btn {
+                            label: "选择图标";
+                            theme-mode: root.theme-mode;
+                            clicked => { root.pick-icon-requested(); }
+                        }
+                        editor-btn {
+                            label: "恢复默认图标";
+                            theme-mode: root.theme-mode;
+                            clicked => { root.refresh-icon-requested(); }
+                        }
+                    }
+                }
+            }
+
+            editor-field {
+                label: "名称";
+                value <=> root.item-name;
+                theme-mode: root.theme-mode;
+            }
+
+            editor-field {
+                label: "目标";
+                value <=> root.item-target;
+                theme-mode: root.theme-mode;
+            }
+
+            editor-field {
+                label: "启动参数";
+                value <=> root.item-params;
+                theme-mode: root.theme-mode;
+            }
+
+            editor-field {
+                label: "备注";
+                value <=> root.item-remark;
+                theme-mode: root.theme-mode;
+            }
+
+            CheckBox {
+                text: "以管理员身份运行";
+                checked <=> root.run-as-admin;
+                font-size: ThemeSettings.font-size-normal;
+            }
+
+            // 底部按钮
+            HorizontalLayout {
+                spacing: ThemeSettings.spacing-normal;
+                alignment: end;
+
+                editor-btn {
+                    label: "取消";
+                    theme-mode: root.theme-mode;
+                    clicked => { root.cancel-requested(); }
+                }
+                editor-btn {
+                    label: "保存";
+                    primary: true;
+                    theme-mode: root.theme-mode;
+                    clicked => {
+                        root.save-requested(
+                            root.item-name,
+                            root.item-target,
+                            root.item-params,
+                            root.item-remark,
+                            root.run-as-admin
+                        );
+                    }
+                }
+            }
+        }
     }
 }
