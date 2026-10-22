@@ -65,6 +65,7 @@ impl App {
         main_window.set_window_opacity(db.get_setting_i64("window_opacity", 100) as i32);
         // 初始化边缘吸附状态
         title_drag::set_edge_dock(db.get_setting_bool("edge_dock", false));
+        title_drag::set_auto_hide(db.get_setting_bool("edge_auto_hide", false));
         // 编辑窗口当前编辑的项目 id 与待保存图标
         let editing_item_id = Arc::new(Mutex::new(0i64));
         let editing_icon: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -451,6 +452,8 @@ impl App {
                 let lock_size = db_for_settings.get_setting_bool("lock_size", false);
                 let lock_pos = db_for_settings.get_setting_bool("lock_position", false);
                 let edge_dock = db_for_settings.get_setting_bool("edge_dock", false);
+                let edge_auto_hide =
+                    db_for_settings.get_setting_bool("edge_auto_hide", false);
                 let always_center = db_for_settings.get_setting_bool("always_center", false);
                 let columns = db_for_settings.get_setting_i64("item_columns", 8) as i32;
                 let icon_size = db_for_settings.get_setting_i64("item_icon_size", 48) as i32;
@@ -489,6 +492,7 @@ impl App {
                 sw.set_lock_size(lock_size);
                 sw.set_lock_position(lock_pos);
                 sw.set_edge_dock(edge_dock);
+                sw.set_edge_auto_hide(edge_auto_hide);
                 sw.set_always_center(always_center);
                 sw.set_item_columns(columns);
                 sw.set_item_icon_size(icon_size);
@@ -825,6 +829,17 @@ impl App {
                 let _ = db_clone.set_setting_bool("edge_dock", v);
                 title_drag::set_edge_dock(v);
                 if let Some(sw) = sw_weak.upgrade() { sw.set_edge_dock(v); }
+            });
+        }
+
+        // 15.10.2 边缘自动隐藏
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_edge_auto_hide_changed(move |v| {
+                let _ = db_clone.set_setting_bool("edge_auto_hide", v);
+                title_drag::set_auto_hide(v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_edge_auto_hide(v); }
             });
         }
 
@@ -2423,6 +2438,18 @@ impl App {
         // 保持 timer 不被 drop（Slint 事件循环会持有引用）
         std::mem::forget(timer);
 
+        // 边缘自动隐藏轮询
+        let auto_hide_timer = slint::Timer::default();
+        auto_hide_timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(150),
+            move || {
+                #[cfg(target_os = "windows")]
+                title_drag::poll_auto_hide();
+            },
+        );
+        std::mem::forget(auto_hide_timer);
+
         // 窗口创建后应用圆角和阴影效果，并按设置初始化托盘
         let tray_enabled_run = self.tray_icon_enabled.clone();
         let min_to_tray_run = self.minimize_to_tray.clone();
@@ -2671,21 +2698,40 @@ mod title_drag {
         GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, GetCursorPos, GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOSIZE,
-        SWP_NOZORDER,
+        FindWindowW, GetCursorPos, GetForegroundWindow, GetWindowRect, SetWindowPos,
+        SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
     };
     use windows::core::{HSTRING, PCWSTR};
 
     static ACTIVE: AtomicBool = AtomicBool::new(false);
     static EDGE_DOCK: AtomicBool = AtomicBool::new(false);
+    static AUTO_HIDE: AtomicBool = AtomicBool::new(false);
+    static HIDDEN: AtomicBool = AtomicBool::new(false);
+    static DOCK_EDGE: AtomicI32 = AtomicI32::new(0); // 0=未吸附 1=左 2=右 3=上 4=下
+    static DOCK_X: AtomicI32 = AtomicI32::new(0);
+    static DOCK_Y: AtomicI32 = AtomicI32::new(0);
     static START_CURSOR_X: AtomicI32 = AtomicI32::new(0);
     static START_CURSOR_Y: AtomicI32 = AtomicI32::new(0);
     static START_WIN_X: AtomicI32 = AtomicI32::new(0);
     static START_WIN_Y: AtomicI32 = AtomicI32::new(0);
 
+    const VISIBLE_PX: i32 = 4;
+
     /// 设置是否启用边缘吸附
     pub fn set_edge_dock(enabled: bool) {
         EDGE_DOCK.store(enabled, Ordering::SeqCst);
+        if !enabled {
+            DOCK_EDGE.store(0, Ordering::SeqCst);
+        }
+    }
+
+    /// 设置是否启用边缘自动隐藏
+    pub fn set_auto_hide(enabled: bool) {
+        AUTO_HIDE.store(enabled, Ordering::SeqCst);
+        DOCK_EDGE.store(0, Ordering::SeqCst);
+        if !enabled && HIDDEN.load(Ordering::SeqCst) {
+            restore_window();
+        }
     }
 
     fn find_hwnd() -> Option<HWND> {
@@ -2794,6 +2840,127 @@ mod title_drag {
             }
             log::info!("窗口边缘吸附: ({}, {})", nx, ny);
         }
+
+        // 记录吸附边缘，供边缘自动隐藏使用
+        if AUTO_HIDE.load(Ordering::SeqCst) {
+            let edge = if nx == work.left {
+                1
+            } else if nx == work.right - width {
+                2
+            } else if ny == work.top {
+                3
+            } else if ny == work.bottom - height {
+                4
+            } else {
+                0
+            };
+            DOCK_EDGE.store(edge, Ordering::SeqCst);
+            DOCK_X.store(nx, Ordering::SeqCst);
+            DOCK_Y.store(ny, Ordering::SeqCst);
+            HIDDEN.store(false, Ordering::SeqCst);
+        }
+    }
+
+    /// 将窗口移回吸附位置
+    fn restore_window() {
+        let Some(hwnd) = find_hwnd() else { return };
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd,
+                HWND(0),
+                DOCK_X.load(Ordering::SeqCst),
+                DOCK_Y.load(Ordering::SeqCst),
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+        HIDDEN.store(false, Ordering::SeqCst);
+    }
+
+    /// 将窗口移出屏幕，仅保留一条窄边
+    fn hide_window(width: i32, height: i32) {
+        let Some(hwnd) = find_hwnd() else { return };
+        let edge = DOCK_EDGE.load(Ordering::SeqCst);
+        let (x, y) = match edge {
+            1 => (DOCK_X.load(Ordering::SeqCst) - width + VISIBLE_PX, DOCK_Y.load(Ordering::SeqCst)),
+            2 => (DOCK_X.load(Ordering::SeqCst) + width - VISIBLE_PX, DOCK_Y.load(Ordering::SeqCst)),
+            3 => (DOCK_X.load(Ordering::SeqCst), DOCK_Y.load(Ordering::SeqCst) - height + VISIBLE_PX),
+            4 => (DOCK_X.load(Ordering::SeqCst), DOCK_Y.load(Ordering::SeqCst) + height - VISIBLE_PX),
+            _ => return,
+        };
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd,
+                HWND(0),
+                x,
+                y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+        HIDDEN.store(true, Ordering::SeqCst);
+        log::info!("窗口自动隐藏: edge={}", edge);
+    }
+
+    /// 轮询鼠标位置，实现吸附后的自动隐藏/唤出
+    pub fn poll_auto_hide() {
+        if !AUTO_HIDE.load(Ordering::SeqCst) {
+            return;
+        }
+        let edge = DOCK_EDGE.load(Ordering::SeqCst);
+        if edge == 0 {
+            return;
+        }
+        let Some(hwnd) = find_hwnd() else { return };
+        let mut pt = POINT { x: 0, y: 0 };
+        let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        unsafe {
+            let _ = GetCursorPos(&mut pt);
+            if GetWindowRect(hwnd, &mut rect).is_err() {
+                return;
+            }
+        }
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+
+        if HIDDEN.load(Ordering::SeqCst) {
+            // 窗口被热键或托盘重新激活时恢复位置
+            if unsafe { GetForegroundWindow() } == hwnd {
+                restore_window();
+                return;
+            }
+            // 鼠标进入屏幕边缘窄条时唤出
+            let in_strip = match edge {
+                1 => pt.x >= DOCK_X.load(Ordering::SeqCst)
+                    && pt.x <= DOCK_X.load(Ordering::SeqCst) + VISIBLE_PX
+                    && pt.y >= DOCK_Y.load(Ordering::SeqCst)
+                    && pt.y <= DOCK_Y.load(Ordering::SeqCst) + height,
+                2 => pt.x >= DOCK_X.load(Ordering::SeqCst) + width - VISIBLE_PX
+                    && pt.x <= DOCK_X.load(Ordering::SeqCst) + width
+                    && pt.y >= DOCK_Y.load(Ordering::SeqCst)
+                    && pt.y <= DOCK_Y.load(Ordering::SeqCst) + height,
+                3 => pt.y >= DOCK_Y.load(Ordering::SeqCst)
+                    && pt.y <= DOCK_Y.load(Ordering::SeqCst) + VISIBLE_PX
+                    && pt.x >= DOCK_X.load(Ordering::SeqCst)
+                    && pt.x <= DOCK_X.load(Ordering::SeqCst) + width,
+                4 => pt.y >= DOCK_Y.load(Ordering::SeqCst) + height - VISIBLE_PX
+                    && pt.y <= DOCK_Y.load(Ordering::SeqCst) + height
+                    && pt.x >= DOCK_X.load(Ordering::SeqCst)
+                    && pt.x <= DOCK_X.load(Ordering::SeqCst) + width,
+                _ => false,
+            };
+            if in_strip {
+                restore_window();
+            }
+        } else {
+            // 鼠标离开窗口后隐藏
+            let inside = pt.x >= rect.left && pt.x <= rect.right && pt.y >= rect.top && pt.y <= rect.bottom;
+            if !inside {
+                hide_window(width, height);
+            }
+        }
     }
 }
 
@@ -2803,6 +2970,8 @@ mod title_drag {
     pub fn move_window() {}
     pub fn end() {}
     pub fn set_edge_dock(_enabled: bool) {}
+    pub fn set_auto_hide(_enabled: bool) {}
+    pub fn poll_auto_hide() {}
 }
 
 /// 为主窗口设置圆角和阴影 (Windows DWM API)

@@ -1079,6 +1079,7 @@ export component SettingsWindow inherits Window {
     in property <bool> lock-size: false;
     in property <bool> lock-position: false;
     in property <bool> edge-dock: false;
+    in property <bool> edge-auto-hide: false;
     in property <bool> always-center: false;
     // ===== 项目设置 =====
     in property <int> item-columns: 8;
@@ -1128,6 +1129,7 @@ export component SettingsWindow inherits Window {
     callback lock-size-changed(bool);
     callback lock-position-changed(bool);
     callback edge-dock-changed(bool);
+    callback edge-auto-hide-changed(bool);
     callback always-center-changed(bool);
     callback item-columns-changed(float);
     callback item-icon-size-changed(float);
@@ -1185,6 +1187,7 @@ export component SettingsWindow inherits Window {
         lock-size: root.lock-size;
         lock-position: root.lock-position;
         edge-dock: root.edge-dock;
+        edge-auto-hide: root.edge-auto-hide;
         always-center: root.always-center;
         item-columns: root.item-columns;
         item-icon-size: root.item-icon-size;
@@ -1226,6 +1229,7 @@ export component SettingsWindow inherits Window {
         lock-size-changed(v) => { root.lock-size-changed(v); }
         lock-position-changed(v) => { root.lock-position-changed(v); }
         edge-dock-changed(v) => { root.edge-dock-changed(v); }
+        edge-auto-hide-changed(v) => { root.edge-auto-hide-changed(v); }
         always-center-changed(v) => { root.always-center-changed(v); }
         item-columns-changed(v) => { root.item-columns-changed(v); }
         item-icon-size-changed(v) => { root.item-icon-size-changed(v); }
