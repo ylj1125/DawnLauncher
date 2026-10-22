@@ -184,6 +184,7 @@ export component SettingsPanel inherits Rectangle {
     in property <bool> lock-position: false;
     in property <bool> edge-dock: false;
     in property <bool> edge-auto-hide: false;
+    in property <bool> mouse-wheel-click: false;
     in property <bool> always-center: false;
     // ===== 项目设置 =====
     in property <int> item-columns: 8;
@@ -232,6 +233,7 @@ export component SettingsPanel inherits Rectangle {
     callback lock-position-changed(bool);
     callback edge-dock-changed(bool);
     callback edge-auto-hide-changed(bool);
+    callback mouse-wheel-click-changed(bool);
     callback always-center-changed(bool);
     callback item-columns-changed(float);
     callback item-icon-size-changed(float);
@@ -419,6 +421,13 @@ export component SettingsPanel inherits Rectangle {
                         checked: root.edge-auto-hide;
                         theme-mode: root.theme-mode;
                         toggled(v) => { root.edge-auto-hide-changed(v); }
+                    }
+                    setting-row {
+                        title: "鼠标中键单击";
+                        desc: "单击鼠标中键显示/隐藏主窗口";
+                        checked: root.mouse-wheel-click;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.mouse-wheel-click-changed(v); }
                     }
                     setting-row {
                         title: "永远居中";
