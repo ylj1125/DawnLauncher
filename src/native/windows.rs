@@ -1200,3 +1200,91 @@ pub fn show_main_window(window_title: &str, visible: bool) {
         }
     }
 }
+
+// ===== 鼠标钩子 (鼠标中键显示/隐藏主窗口) =====
+
+static MOUSE_HOOK_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static MOUSE_HOOK_STARTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// 切换主窗口显示/隐藏
+fn toggle_main_window() {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, IsWindowVisible, SetForegroundWindow, ShowWindow, SW_HIDE, SW_SHOW,
+    };
+    use windows::core::{HSTRING, PCWSTR};
+
+    let cached = *TRAY_MAIN_HWND.lock().unwrap();
+    let hwnd = if cached != 0 {
+        HWND(cached)
+    } else {
+        let title = HSTRING::from("Dawn Launcher");
+        unsafe { FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) }
+    };
+    if hwnd.0 == 0 {
+        return;
+    }
+    let visible = unsafe { IsWindowVisible(hwnd) }.as_bool();
+    unsafe {
+        if visible {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        } else {
+            // 清除可能存在的托盘缓存隐藏标记
+            let _ = ShowWindow(hwnd, SW_SHOW);
+            let _ = SetForegroundWindow(hwnd);
+        }
+    }
+}
+
+unsafe extern "system" fn mouse_proc(
+    code: i32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, WM_MBUTTONUP};
+    if code >= 0
+        && MOUSE_HOOK_ENABLED.load(std::sync::atomic::Ordering::SeqCst)
+        && wparam.0 as u32 == WM_MBUTTONUP
+    {
+        toggle_main_window();
+    }
+    CallNextHookEx(
+        windows::Win32::UI::WindowsAndMessaging::HHOOK(0),
+        code,
+        wparam,
+        lparam,
+    )
+}
+
+/// 启用/禁用鼠标中键显示隐藏主窗口
+pub fn set_mouse_hook_enabled(enabled: bool) {
+    MOUSE_HOOK_ENABLED.store(enabled, std::sync::atomic::Ordering::SeqCst);
+    if !enabled {
+        return;
+    }
+    // 钩子已安装则无需重复创建
+    if MOUSE_HOOK_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(|| unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage, MSG, WH_MOUSE_LL,
+        };
+        use windows::Win32::Foundation::HINSTANCE;
+
+        let hook = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_proc), HINSTANCE(0), 0);
+        if hook.is_err() {
+            log::warn!("安装鼠标钩子失败");
+            MOUSE_HOOK_STARTED.store(false, std::sync::atomic::Ordering::SeqCst);
+            return;
+        }
+        log::info!("鼠标钩子已启动");
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, windows::Win32::Foundation::HWND(0), 0, 0).as_bool() {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    });
+}

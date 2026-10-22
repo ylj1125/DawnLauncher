@@ -81,3 +81,5 @@ pub fn create_tray_icon(_window_title: &str) -> bool {
 pub fn remove_tray_icon() {}
 
 pub fn show_main_window(_window_title: &str, _visible: bool) {}
+
+pub fn set_mouse_hook_enabled(_enabled: bool) {}

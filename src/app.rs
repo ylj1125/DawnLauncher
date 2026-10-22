@@ -66,6 +66,8 @@ impl App {
         // 初始化边缘吸附状态
         title_drag::set_edge_dock(db.get_setting_bool("edge_dock", false));
         title_drag::set_auto_hide(db.get_setting_bool("edge_auto_hide", false));
+        // 初始化鼠标钩子
+        native::set_mouse_hook_enabled(db.get_setting_bool("mouse_wheel_click", false));
         // 编辑窗口当前编辑的项目 id 与待保存图标
         let editing_item_id = Arc::new(Mutex::new(0i64));
         let editing_icon: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -454,6 +456,8 @@ impl App {
                 let edge_dock = db_for_settings.get_setting_bool("edge_dock", false);
                 let edge_auto_hide =
                     db_for_settings.get_setting_bool("edge_auto_hide", false);
+                let mouse_wheel_click =
+                    db_for_settings.get_setting_bool("mouse_wheel_click", false);
                 let always_center = db_for_settings.get_setting_bool("always_center", false);
                 let columns = db_for_settings.get_setting_i64("item_columns", 8) as i32;
                 let icon_size = db_for_settings.get_setting_i64("item_icon_size", 48) as i32;
@@ -493,6 +497,7 @@ impl App {
                 sw.set_lock_position(lock_pos);
                 sw.set_edge_dock(edge_dock);
                 sw.set_edge_auto_hide(edge_auto_hide);
+                sw.set_mouse_wheel_click(mouse_wheel_click);
                 sw.set_always_center(always_center);
                 sw.set_item_columns(columns);
                 sw.set_item_icon_size(icon_size);
@@ -840,6 +845,17 @@ impl App {
                 let _ = db_clone.set_setting_bool("edge_auto_hide", v);
                 title_drag::set_auto_hide(v);
                 if let Some(sw) = sw_weak.upgrade() { sw.set_edge_auto_hide(v); }
+            });
+        }
+
+        // 15.10.3 鼠标中键单击显示/隐藏
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_mouse_wheel_click_changed(move |v| {
+                let _ = db_clone.set_setting_bool("mouse_wheel_click", v);
+                native::set_mouse_hook_enabled(v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_mouse_wheel_click(v); }
             });
         }
 
