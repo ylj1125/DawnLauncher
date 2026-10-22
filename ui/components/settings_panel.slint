@@ -183,6 +183,7 @@ export component SettingsPanel inherits Rectangle {
     in property <bool> lock-size: false;
     in property <bool> lock-position: false;
     in property <bool> edge-dock: false;
+    in property <bool> edge-auto-hide: false;
     in property <bool> always-center: false;
     // ===== 项目设置 =====
     in property <int> item-columns: 8;
@@ -230,6 +231,7 @@ export component SettingsPanel inherits Rectangle {
     callback lock-size-changed(bool);
     callback lock-position-changed(bool);
     callback edge-dock-changed(bool);
+    callback edge-auto-hide-changed(bool);
     callback always-center-changed(bool);
     callback item-columns-changed(float);
     callback item-icon-size-changed(float);
@@ -410,6 +412,13 @@ export component SettingsPanel inherits Rectangle {
                         checked: root.edge-dock;
                         theme-mode: root.theme-mode;
                         toggled(v) => { root.edge-dock-changed(v); }
+                    }
+                    setting-row {
+                        title: "边缘自动隐藏";
+                        desc: "吸附后移开鼠标自动收起，移到屏幕边缘唤出";
+                        checked: root.edge-auto-hide;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.edge-auto-hide-changed(v); }
                     }
                     setting-row {
                         title: "永远居中";
