@@ -63,6 +63,8 @@ impl App {
             }
         }
         main_window.set_window_opacity(db.get_setting_i64("window_opacity", 100) as i32);
+        // 初始化边缘吸附状态
+        title_drag::set_edge_dock(db.get_setting_bool("edge_dock", false));
         // 编辑窗口当前编辑的项目 id 与待保存图标
         let editing_item_id = Arc::new(Mutex::new(0i64));
         let editing_icon: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -448,6 +450,7 @@ impl App {
                 let hide_lost = db_for_settings.get_setting_bool("hide_on_lost_focus", false);
                 let lock_size = db_for_settings.get_setting_bool("lock_size", false);
                 let lock_pos = db_for_settings.get_setting_bool("lock_position", false);
+                let edge_dock = db_for_settings.get_setting_bool("edge_dock", false);
                 let always_center = db_for_settings.get_setting_bool("always_center", false);
                 let columns = db_for_settings.get_setting_i64("item_columns", 8) as i32;
                 let icon_size = db_for_settings.get_setting_i64("item_icon_size", 48) as i32;
@@ -485,6 +488,7 @@ impl App {
                 sw.set_hide_on_lost_focus(hide_lost);
                 sw.set_lock_size(lock_size);
                 sw.set_lock_position(lock_pos);
+                sw.set_edge_dock(edge_dock);
                 sw.set_always_center(always_center);
                 sw.set_item_columns(columns);
                 sw.set_item_icon_size(icon_size);
@@ -810,6 +814,17 @@ impl App {
             settings_window.on_lock_position_changed(move |v| {
                 let _ = db_clone.set_setting_bool("lock_position", v);
                 if let Some(sw) = sw_weak.upgrade() { sw.set_lock_position(v); }
+            });
+        }
+
+        // 15.10.1 边缘吸附
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_edge_dock_changed(move |v| {
+                let _ = db_clone.set_setting_bool("edge_dock", v);
+                title_drag::set_edge_dock(v);
+                if let Some(sw) = sw_weak.upgrade() { sw.set_edge_dock(v); }
             });
         }
 
@@ -2652,17 +2667,26 @@ fn set_window_opacity(_percent: i32) {}
 mod title_drag {
     use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
     use windows::Win32::Foundation::{HWND, POINT, RECT};
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, GetCursorPos, GetWindowRect, SetWindowPos,
-        SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+        FindWindowW, GetCursorPos, GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOSIZE,
+        SWP_NOZORDER,
     };
     use windows::core::{HSTRING, PCWSTR};
 
     static ACTIVE: AtomicBool = AtomicBool::new(false);
+    static EDGE_DOCK: AtomicBool = AtomicBool::new(false);
     static START_CURSOR_X: AtomicI32 = AtomicI32::new(0);
     static START_CURSOR_Y: AtomicI32 = AtomicI32::new(0);
     static START_WIN_X: AtomicI32 = AtomicI32::new(0);
     static START_WIN_Y: AtomicI32 = AtomicI32::new(0);
+
+    /// 设置是否启用边缘吸附
+    pub fn set_edge_dock(enabled: bool) {
+        EDGE_DOCK.store(enabled, Ordering::SeqCst);
+    }
 
     fn find_hwnd() -> Option<HWND> {
         let title = HSTRING::from("Dawn Launcher");
@@ -2717,6 +2741,59 @@ mod title_drag {
 
     pub fn end() {
         ACTIVE.store(false, Ordering::SeqCst);
+        if EDGE_DOCK.load(Ordering::SeqCst) {
+            snap_to_edge();
+        }
+    }
+
+    /// 拖动结束后若靠近屏幕工作区边缘，则自动贴边
+    fn snap_to_edge() {
+        let Some(hwnd) = find_hwnd() else { return };
+        let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        let mut mi = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
+        unsafe {
+            if GetWindowRect(hwnd, &mut rect).is_err() {
+                return;
+            }
+            let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            if !GetMonitorInfoW(monitor, &mut mi).as_bool() {
+                return;
+            }
+        }
+        let work = mi.rcWork;
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+        const THRESHOLD: i32 = 16;
+
+        let mut nx = rect.left;
+        let mut ny = rect.top;
+        if rect.left - work.left < THRESHOLD {
+            nx = work.left;
+        } else if work.right - rect.right < THRESHOLD {
+            nx = work.right - width;
+        }
+        if rect.top - work.top < THRESHOLD {
+            ny = work.top;
+        } else if work.bottom - rect.bottom < THRESHOLD {
+            ny = work.bottom - height;
+        }
+        if nx != rect.left || ny != rect.top {
+            unsafe {
+                let _ = SetWindowPos(
+                    hwnd,
+                    HWND(0),
+                    nx,
+                    ny,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
+            log::info!("窗口边缘吸附: ({}, {})", nx, ny);
+        }
     }
 }
 
@@ -2725,6 +2802,7 @@ mod title_drag {
     pub fn start() {}
     pub fn move_window() {}
     pub fn end() {}
+    pub fn set_edge_dock(_enabled: bool) {}
 }
 
 /// 为主窗口设置圆角和阴影 (Windows DWM API)
