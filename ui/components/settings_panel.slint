@@ -182,6 +182,7 @@ export component SettingsPanel inherits Rectangle {
     in property <bool> hide-on-lost-focus: false;
     in property <bool> lock-size: false;
     in property <bool> lock-position: false;
+    in property <bool> edge-dock: false;
     in property <bool> always-center: false;
     // ===== 项目设置 =====
     in property <int> item-columns: 8;
@@ -228,6 +229,7 @@ export component SettingsPanel inherits Rectangle {
     callback hide-on-lost-focus-changed(bool);
     callback lock-size-changed(bool);
     callback lock-position-changed(bool);
+    callback edge-dock-changed(bool);
     callback always-center-changed(bool);
     callback item-columns-changed(float);
     callback item-icon-size-changed(float);
@@ -401,6 +403,13 @@ export component SettingsPanel inherits Rectangle {
                         checked: root.lock-position;
                         theme-mode: root.theme-mode;
                         toggled(v) => { root.lock-position-changed(v); }
+                    }
+                    setting-row {
+                        title: "边缘吸附";
+                        desc: "拖动窗口靠近屏幕边缘时自动贴边";
+                        checked: root.edge-dock;
+                        theme-mode: root.theme-mode;
+                        toggled(v) => { root.edge-dock-changed(v); }
                     }
                     setting-row {
                         title: "永远居中";
