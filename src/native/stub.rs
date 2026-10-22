@@ -12,6 +12,14 @@ pub fn get_shortcut_file_info(_path: &str) -> Option<HashMap<String, String>> {
 
 pub fn open_file_location(_path: &str) {}
 
+pub fn explorer_context_menu(_path: &str, _x: i32, _y: i32) -> bool {
+    false
+}
+
+pub fn explorer_context_menu_at_cursor(_path: &str) -> bool {
+    false
+}
+
 pub fn search_path(_file: &str) -> Option<String> {
     None
 }

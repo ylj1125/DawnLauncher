@@ -11,9 +11,9 @@
 // - scan_appx: 扫描已安装的 Appx (商店) 应用
 // - open_appx: 通过 AppUserModelID 启动 Appx 应用
 //
-// 待迁移（后续迭代）：
 // - explorer_context_menu: 资源管理器右键菜单 (COM IContextMenu)
-// - create_mouse_hook / enable_mouse_hook: 全局鼠标 HOOK
+//
+// 待迁移（后续迭代）：
 // - is_fullscreen / switch_english: 全屏检测/输入法切换
 
 use std::collections::HashMap;
@@ -28,6 +28,22 @@ use windows::Win32::UI::Shell::{
     IShellLinkW, ShellLink, SLGP_UNCPRIORITY,
 };
 use windows::Win32::Foundation::MAX_PATH;
+
+// windows-rs 0.51 将 TrackPopupMenu 的 BOOL 返回值映射为 Result<()>，
+// 会丢失 TPM_RETURNCMD 返回的命令 ID，因此这里直接绑定 user32 原始接口。
+#[link(name = "user32")]
+extern "system" {
+    #[link_name = "TrackPopupMenu"]
+    fn track_popup_menu_raw(
+        hmenu: isize,
+        uflags: u32,
+        x: i32,
+        y: i32,
+        nreserved: i32,
+        hwnd: isize,
+        prcrect: *const core::ffi::c_void,
+    ) -> i32;
+}
 
 /// 获取文件/文件夹图标，返回 Base64 编码的 PNG data URL
 /// 如果失败返回 None
@@ -213,6 +229,108 @@ pub fn open_file_location(path: &str) {
             SW_SHOWNORMAL,
         )
     };
+}
+
+/// 显示资源管理器原生右键菜单 (COM IContextMenu)
+/// path: 文件/文件夹路径，x/y: 屏幕坐标
+/// 返回 true 表示菜单已弹出（不代表用户选择了命令）
+pub fn explorer_context_menu(path: &str, x: i32, y: i32) -> bool {
+    use windows::core::{PCSTR, PCWSTR};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::Shell::{
+        BHID_SFUIObject, IContextMenu, IShellItem, SHCreateItemFromParsingName, CMF_NORMAL,
+        CMINVOKECOMMANDINFO,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreatePopupMenu, DestroyMenu, FindWindowW, GetForegroundWindow, SetForegroundWindow,
+        SW_NORMAL, TPM_NONOTIFY, TPM_RETURNCMD,
+    };
+
+    // 目标必须真实存在（网址/无效路径不弹菜单）
+    if !std::path::Path::new(path).exists() {
+        return false;
+    }
+
+    // 确保当前线程已初始化 COM（重复调用安全）
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    }
+
+    let path_h = HSTRING::from(path);
+    let shell_item: Result<IShellItem, _> = unsafe {
+        SHCreateItemFromParsingName(PCWSTR(path_h.as_ptr()), None)
+    };
+    let Ok(shell_item) = shell_item else {
+        return false;
+    };
+
+    // 绑定到 IContextMenu
+    let context_menu: Result<IContextMenu, _> =
+        unsafe { shell_item.BindToHandler(None, &BHID_SFUIObject) };
+    let Ok(context_menu) = context_menu else {
+        return false;
+    };
+
+    let Ok(menu) = (unsafe { CreatePopupMenu() }) else {
+        return false;
+    };
+
+    // 把资源管理器的菜单项写入弹窗菜单
+    if unsafe { context_menu.QueryContextMenu(menu, 0, 1, 0x7FFF, CMF_NORMAL) }.is_err() {
+        unsafe {
+            let _ = DestroyMenu(menu);
+        }
+        return false;
+    }
+
+    // 菜单宿主窗口：优先使用前台窗口（即本应用窗口）
+    let mut hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.0 == 0 {
+        let title = HSTRING::from("Dawn Launcher");
+        hwnd = unsafe { FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) };
+    }
+    if hwnd.0 == 0 {
+        hwnd = HWND(0);
+    }
+
+    let cmd = unsafe {
+        let _ = SetForegroundWindow(hwnd);
+        track_popup_menu_raw(
+            menu.0,
+            (TPM_RETURNCMD | TPM_NONOTIFY).0,
+            x,
+            y,
+            0,
+            hwnd.0,
+            std::ptr::null(),
+        )
+    };
+
+    // 用户选择了菜单项：命令 ID 从 1 开始，lpVerb 用整数伪装成指针传入
+    if cmd != 0 {
+        let mut info = CMINVOKECOMMANDINFO::default();
+        info.cbSize = std::mem::size_of::<CMINVOKECOMMANDINFO>() as u32;
+        info.hwnd = hwnd;
+        info.lpVerb = PCSTR((cmd - 1) as *mut u8);
+        info.nShow = SW_NORMAL.0 as i32;
+        let _ = unsafe { context_menu.InvokeCommand(&info) };
+    }
+
+    unsafe {
+        let _ = DestroyMenu(menu);
+    }
+    true
+}
+
+/// 在当前鼠标位置弹出资源管理器原生右键菜单
+pub fn explorer_context_menu_at_cursor(path: &str) -> bool {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    let mut pt = POINT { x: 0, y: 0 };
+    let ok = unsafe { GetCursorPos(&mut pt) }.is_ok();
+    let (x, y) = if ok { (pt.x, pt.y) } else { (0, 0) };
+    explorer_context_menu(path, x, y)
 }
 
 /// 判断当前前台窗口是否全屏 (简化版，后续完整实现)

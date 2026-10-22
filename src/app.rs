@@ -1973,6 +1973,32 @@ impl App {
                             native::open_file_location(&target);
                         }
                     }
+                    ("item", "explorer-menu") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        if let Some(mut target) = db_for_ctx.get_item_target(item_id) {
+                            // 相对路径基于程序所在目录解析
+                            if target.starts_with('.') {
+                                let base = get_data_dir_string();
+                                target = std::path::Path::new(&base)
+                                    .join(std::path::Path::new(&target))
+                                    .to_string_lossy()
+                                    .to_string();
+                            }
+                            #[cfg(target_os = "windows")]
+                            {
+                                if !native::explorer_context_menu_at_cursor(&target) {
+                                    show_error_dialog(
+                                        "无法显示菜单",
+                                        "该项目不是有效的文件或文件夹路径",
+                                    );
+                                }
+                            }
+                            #[cfg(not(target_os = "windows"))]
+                            {
+                                let _ = &target;
+                            }
+                        }
+                    }
                     ("item", "rename") => {
                         let item_id = *right_item_id.lock().unwrap();
                         drop(w);
@@ -3931,11 +3957,12 @@ fn show_context_menu(
 }
 
 /// 显示项目右键菜单
-/// 包含: 打开/打开位置/重命名/复制路径/刷新图标/转为相对路径/转为绝对路径/删除
+/// 包含: 打开/打开位置/资源管理器菜单/重命名/复制路径/刷新图标/转为相对路径/转为绝对路径/删除
 fn show_item_context_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
         ("open", "打开", "▶", false, false),
         ("open-location", "打开文件位置", "📁", false, false),
+        ("explorer-menu", "资源管理器菜单", "🗂", false, false),
         ("", "", "", true, false), // 分隔线
         ("rename", "重命名", "✏", false, false),
         ("edit", "编辑项目", "⚙", false, false),
