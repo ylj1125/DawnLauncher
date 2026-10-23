@@ -10,13 +10,14 @@ use crate::db::Database;
 use crate::models::{Classification, Item};
 use crate::native;
 // MainWindow, ClassificationInfo, ItemInfo, MenuItem 由 slint::include_modules!() 生成在 crate 根
-use crate::{ClassificationInfo, DragHelper, ItemEditWindow, ItemInfo, MenuItem, MainWindow, QuickSearchWindow, SettingsWindow};
+use crate::{ClassificationInfo, DragHelper, ImportScanWindow, ItemEditWindow, ItemInfo, MenuItem, MainWindow, QuickSearchWindow, ScanEntry, SettingsWindow};
 
 pub struct App {
     main_window: MainWindow,
     quick_search_window: QuickSearchWindow,
     settings_window: SettingsWindow,
     item_edit_window: ItemEditWindow,
+    scan_import_window: ImportScanWindow,
     db: Arc<Database>,
     current_classification_id: Arc<Mutex<i64>>,
     expanded_classifications: Arc<Mutex<std::collections::HashSet<i64>>>,
@@ -51,6 +52,10 @@ impl App {
         // 3.1.2 创建项目编辑窗口（初始隐藏）
         let item_edit_window = ItemEditWindow::new()?;
         item_edit_window.window().hide().ok();
+
+        // 3.1.3 创建扫描导入选择窗口（初始隐藏）
+        let scan_import_window = ImportScanWindow::new()?;
+        scan_import_window.window().hide().ok();
         // 应用窗口背景图与不透明度设置
         let bg_path = db.get_setting("window_bg_image", "");
         if !bg_path.is_empty() {
@@ -1240,30 +1245,26 @@ impl App {
         }
 
         // 15.38 工具: 扫描开始菜单 (导入 .lnk 应用)
+        // 扫描后弹出选择窗口，用户勾选后再导入
         {
+            let scan_win = scan_import_window.as_weak();
             let db_for_scan_menu = db.clone();
-            let window_for_scan_menu = main_window.as_weak();
             let current_id_for_scan_menu = current_id.clone();
             main_window.on_scan_start_menu(move || {
+                let scan_win = scan_win.clone();
                 let db = db_for_scan_menu.clone();
-                let win = window_for_scan_menu.clone();
                 let cid = current_id_for_scan_menu.clone();
-                // 扫描涉及磁盘遍历与 PowerShell，放到后台线程，避免阻塞 UI
                 std::thread::spawn(move || {
                     let entries = native::scan_start_menu();
                     let class_id: i64 = *cid.lock().unwrap();
-                    let (added, skipped) = import_entries(&db, class_id, entries);
-                    let msg = format!(
-                        "扫描开始菜单完成\n\n新增 {} 个应用\n跳过 {} 个（已存在）",
-                        added, skipped
-                    );
                     let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(w) = win.upgrade() {
-                            let items = db.list_items(class_id);
-                            w.set_items(to_item_model(&items, 0));
-                            w.set_status_text(SharedString::from(format!("{} 项", items.len())));
-                        }
-                        show_info_dialog("扫描完成", &msg);
+                        prepare_scan_import_window(
+                            &scan_win,
+                            &db,
+                            class_id,
+                            "开始菜单",
+                            entries,
+                        );
                     });
                 });
             });
@@ -1271,32 +1272,24 @@ impl App {
 
         // 15.39 工具: 扫描商店应用 (Appx / UWP)
         {
+            let scan_win = scan_import_window.as_weak();
             let db_for_scan_appx = db.clone();
-            let window_for_scan_appx = main_window.as_weak();
             let current_id_for_scan_appx = current_id.clone();
             main_window.on_scan_appx(move || {
+                let scan_win = scan_win.clone();
                 let db = db_for_scan_appx.clone();
-                let win = window_for_scan_appx.clone();
                 let cid = current_id_for_scan_appx.clone();
                 std::thread::spawn(move || {
                     let entries = native::scan_appx();
                     let class_id: i64 = *cid.lock().unwrap();
-                    let (added, skipped) = import_entries(&db, class_id, entries);
-                    let msg = if added == 0 && skipped == 0 {
-                        "未扫描到商店应用（Appx）".to_string()
-                    } else {
-                        format!(
-                            "扫描商店应用完成\n\n新增 {} 个应用\n跳过 {} 个（已存在）",
-                            added, skipped
-                        )
-                    };
                     let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(w) = win.upgrade() {
-                            let items = db.list_items(class_id);
-                            w.set_items(to_item_model(&items, 0));
-                            w.set_status_text(SharedString::from(format!("{} 项", items.len())));
-                        }
-                        show_info_dialog("扫描完成", &msg);
+                        prepare_scan_import_window(
+                            &scan_win,
+                            &db,
+                            class_id,
+                            "商店应用",
+                            entries,
+                        );
                     });
                 });
             });
@@ -2445,12 +2438,19 @@ impl App {
             quick_search_window,
             settings_window,
             item_edit_window,
+            scan_import_window,
             db,
             current_classification_id: current_id,
             expanded_classifications,
             hotkey_rx,
             tray_icon_enabled,
             minimize_to_tray,
+        }).map(|mut this| {
+            // 让扫描导入窗口继承主题
+            let cur_theme = this.main_window.get_theme_mode();
+            this.scan_import_window
+                .set_theme_mode(cur_theme.clone());
+            this
         })
     }
 
@@ -2522,6 +2522,18 @@ impl App {
             },
         );
         std::mem::forget(frame_timer);
+
+        // === 注册全局 weak 缓存 ===
+        register_main_window(self.main_window.as_weak());
+        register_scan_import_window(self.scan_import_window.as_weak());
+
+        // === 扫描导入窗口回调 ===
+        let scan_win = &self.scan_import_window;
+        scan_win.on_import_requested(move || commit_scan_import());
+        scan_win.on_cancel_requested(move || cancel_scan_import());
+        scan_win.on_select_all_requested(move || apply_scan_selection("all"));
+        scan_win.on_select_none_requested(move || apply_scan_selection("none"));
+        scan_win.on_invert_requested(move || apply_scan_selection("invert"));
 
         self.main_window.run()
     }
@@ -3493,9 +3505,199 @@ fn build_item_from_path(path: &str, classification_id: i64, order: i64) -> Item 
     }
 }
 
+/// 扫描条目在显示窗口中的状态 (缓存已扫描结果，避免再次遍历磁盘)
+struct ScanSession {
+    db: Arc<Database>,
+    classification_id: i64,
+    entries: Vec<native::LauncherEntry>,
+}
+
+/// 扫描导入窗口：准备数据并显示
+fn prepare_scan_import_window(
+    scan_win: &slint::Weak<ImportScanWindow>,
+    db: &Arc<Database>,
+    classification_id: i64,
+    source_label: &str,
+    entries: Vec<native::LauncherEntry>,
+) {
+    let Some(w) = scan_win.upgrade() else {
+        return;
+    };
+    if entries.is_empty() {
+        w.window().hide().ok();
+        show_info_dialog("扫描结果", "未扫描到可导入的项目");
+        return;
+    }
+
+    // 计算当前分类内已存在的 target 集合（忽略大小写）
+    let existing_set: std::collections::HashSet<String> = db
+        .list_items(classification_id)
+        .iter()
+        .filter_map(|i| i.data.target.as_deref())
+        .map(|t| t.to_lowercase())
+        .collect();
+
+    let mut exists_count = 0i32;
+    let slint_entries: Vec<ScanEntry> = entries
+        .iter()
+        .map(|e| {
+            let key = e.target.to_lowercase();
+            let exists = !key.is_empty() && existing_set.contains(&key);
+            if exists {
+                exists_count += 1;
+            }
+            let icon = e
+                .icon
+                .as_deref()
+                .and_then(parse_icon_data_url)
+                .unwrap_or_default();
+            ScanEntry {
+                name: SharedString::from(e.name.as_str()),
+                target: SharedString::from(e.target.as_str()),
+                kind: e.kind as i32,
+                icon,
+                selected: !exists, // 已存在默认不勾选
+                exists,
+            }
+        })
+        .collect();
+
+    let total = slint_entries.len() as i32;
+    w.set_source_label(SharedString::from(source_label));
+    w.set_total_count(total);
+    w.set_exists_count(exists_count);
+
+    // 把 ScanSession 塞进窗口的 user_data 机制做回传？Slint 无此机制，
+    // 改用 Mutex 静态存储。见下方 SCAN_SESSION_CACHE。
+    {
+        let mut cache = SCAN_SESSION_CACHE.lock().unwrap();
+        *cache = Some(ScanSession {
+            db: db.clone(),
+            classification_id,
+            entries,
+        });
+    }
+
+    w.set_entries(ModelRc::from(Rc::new(slint::VecModel::from(slint_entries))));
+    w.window().show().ok();
+    w.window().show().ok();
+}
+
+/// 扫描导入窗口: 应用批量选择操作
+fn apply_scan_selection(op: &str) {
+    let Some((scan_win, _db, _cid)) = get_active_scan_window() else {
+        return;
+    };
+    let mut cur: Vec<ScanEntry> = scan_win.get_entries().iter().collect();
+    for e in cur.iter_mut() {
+        match op {
+            "all" => {
+                if !e.exists {
+                    e.selected = true;
+                }
+            }
+            "none" => e.selected = false,
+            "invert" => {
+                if !e.exists {
+                    e.selected = !e.selected;
+                }
+            }
+            _ => {}
+        }
+    }
+    scan_win.set_entries(ModelRc::from(Rc::new(slint::VecModel::from(cur))));
+}
+
+/// 扫描导入窗口: 把选中的条目写入数据库
+fn commit_scan_import() {
+    let Some((scan_win, db, class_id)) = get_active_scan_window() else {
+        return;
+    };
+
+    // 从当前 Slint 窗口读取用户勾选结果
+    let current: Vec<ScanEntry> = scan_win.get_entries().iter().collect();
+    let selected_targets: std::collections::HashSet<String> = current
+        .iter()
+        .filter(|e| e.selected && !e.exists)
+        .map(|e| e.target.to_string())
+        .collect();
+
+    // 取缓存的原始 LauncherEntry 列表，仅保留被勾选的
+    let cache = SCAN_SESSION_CACHE.lock().unwrap();
+    let Some(ref session) = *cache else {
+        return;
+    };
+    let to_import: Vec<native::LauncherEntry> = session
+        .entries
+        .iter()
+        .filter(|e| selected_targets.contains(&e.target))
+        .cloned()
+        .collect();
+    drop(cache);
+
+    if to_import.is_empty() {
+        show_info_dialog("扫描导入", "没有选中任何新项目");
+        return;
+    }
+
+    let (added, skipped) = import_entries(&db, class_id, to_import);
+    scan_win.window().hide().ok();
+
+    // 刷新主窗口列表
+    if let Some(main) = MAIN_WINDOW_WEAK_CACHE.lock().unwrap().as_ref().and_then(|w| w.upgrade()) {
+        let items = db.list_items(class_id);
+        main.set_items(to_item_model(&items, 0));
+        main.set_status_text(SharedString::from(format!("{} 项", items.len())));
+    }
+
+    let msg = format!(
+        "导入完成\n\n新增 {} 个项目\n跳过 {} 个（已存在）",
+        added, skipped
+    );
+    show_info_dialog("扫描导入", &msg);
+}
+
+fn cancel_scan_import() {
+    if let Some((scan_win, _db, _cid)) = get_active_scan_window() {
+        scan_win.window().hide().ok();
+    }
+    let mut cache = SCAN_SESSION_CACHE.lock().unwrap();
+    *cache = None;
+}
+
+/// 扫描结果缓存：最近一次扫描的 LauncherEntry 列表 + 所属分类
+static SCAN_SESSION_CACHE: std::sync::Mutex<Option<ScanSession>> =
+    std::sync::Mutex::new(None);
+
+/// 主窗口 Weak 句柄：用于扫描导入完成后刷新
+static MAIN_WINDOW_WEAK_CACHE: std::sync::Mutex<Option<slint::Weak<MainWindow>>> =
+    std::sync::Mutex::new(None);
+
+fn register_main_window(w: slint::Weak<MainWindow>) {
+    *MAIN_WINDOW_WEAK_CACHE.lock().unwrap() = Some(w);
+}
+
+/// 扫描导入窗口 Weak 句柄
+static SCAN_WINDOW_WEAK_CACHE: std::sync::Mutex<Option<slint::Weak<ImportScanWindow>>> =
+    std::sync::Mutex::new(None);
+
+fn register_scan_import_window(w: slint::Weak<ImportScanWindow>) {
+    *SCAN_WINDOW_WEAK_CACHE.lock().unwrap() = Some(w);
+}
+
+fn get_active_scan_window() -> Option<(ImportScanWindow, Arc<Database>, i64)> {
+    let guard = SCAN_WINDOW_WEAK_CACHE.lock().unwrap();
+    let w_ref = guard.as_ref().and_then(|w| w.upgrade())?;
+    drop(guard);
+    let cache = SCAN_SESSION_CACHE.lock().unwrap();
+    match *cache {
+        Some(ref s) => Some((w_ref, s.db.clone(), s.classification_id)),
+        None => None,
+    }
+}
+
 /// 将扫描得到的启动项批量导入指定分类
-/// 按 target 去重（忽略大小写，并与该分类内已有项目比对）
-/// 返回 (新增数量, 跳过数量)
+/// 仅做实际写入，不做去重/跳过（调用方已过滤）
 fn import_entries(
     db: &Database,
     classification_id: i64,
@@ -3504,24 +3706,14 @@ fn import_entries(
     if entries.is_empty() {
         return (0, 0);
     }
-    // 分类内已有项目的 target 集合
-    let existing = db.list_items(classification_id);
-    let mut seen: std::collections::HashSet<String> = existing
-        .iter()
-        .filter_map(|i| i.data.target.as_deref())
-        .map(|t| t.to_lowercase())
-        .collect();
-
     let mut order = db.max_item_order(classification_id);
     let mut added = 0usize;
     let mut skipped = 0usize;
     for entry in entries {
-        let key = entry.target.to_lowercase();
-        if key.is_empty() || seen.contains(&key) {
+        if entry.target.is_empty() {
             skipped += 1;
             continue;
         }
-        seen.insert(key);
         order += 1;
         let item = Item {
             id: 0,
