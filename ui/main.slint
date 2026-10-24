@@ -1487,14 +1487,17 @@ export struct ScanEntry {
     exists: bool,       // 是否已在当前分类中 (置灰禁用)
 }
 
-// 列表项: CheckBox + 图标 + 名称 + 路径 + 已存在标记
+// 列表项: 复选框 + 图标 + 名称 + 路径 + 已存在标记
+// 复选框仅做展示，点击由整行 TouchArea 处理（避免控件被遮挡/绑定失效）
 component scan-entry-row inherits Rectangle {
     in-out property <ScanEntry> entry;
     in property <string> theme-mode: "light";
 
+    callback toggled();
+
     height: 48px;
     horizontal-stretch: 1;
-    background: row-hover.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+    background: (row-touch.has-hover && !entry.exists) ? ThemeSettings.hover-c(root.theme-mode) : transparent;
     border-radius: ThemeSettings.border-radius;
 
     HorizontalLayout {
@@ -1503,11 +1506,25 @@ component scan-entry-row inherits Rectangle {
         spacing: 10px;
         alignment: start;
 
-        CheckBox {
-            // 已存在的条目灰显且不可勾选
-            checked <=> entry.selected;
-            enabled: !entry.exists;
-            visible: !entry.exists || entry.selected;
+        // 复选框
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            background: entry.selected ? ThemeSettings.accent-color : transparent;
+            border-width: 1px;
+            border-color: entry.selected
+                ? ThemeSettings.accent-color
+                : ThemeSettings.text-sec(root.theme-mode);
+
+            Text {
+                text: "✓";
+                color: #ffffff;
+                font-size: 12px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                visible: entry.selected;
+            }
         }
 
         // 图标: 36x36
@@ -1561,9 +1578,13 @@ component scan-entry-row inherits Rectangle {
         }
     }
 
-    row-hover := TouchArea {
-        width: 100%;
-        height: 100%;
+    // 整行点击 = 切换选中；已存在条目不可切换
+    row-touch := TouchArea {
+        clicked => {
+            if (!entry.exists) {
+                root.toggled();
+            }
+        }
     }
 }
 
@@ -1582,12 +1603,15 @@ export component ImportScanWindow inherits Window {
     // Rust 侧预先算好的统计，避免 Slint 遍历 model
     in property <int> total-count: 0;
     in property <int> exists-count: 0;
+    in property <int> selected-count: 0;
 
     callback import-requested();
     callback cancel-requested();
     callback select-all-requested();
     callback select-none-requested();
     callback invert-requested();
+    // 单条切换：参数为条目索引，由 Rust 侧更新数据
+    callback entry-toggled(int);
 
     VerticalLayout {
         spacing: 0px;
@@ -1610,8 +1634,8 @@ export component ImportScanWindow inherits Window {
                 }
 
                 Text {
-                    text: "共 " + root.total-count + " 项"
-                          + (root.exists-count > 0 ? ("，" + root.exists-count + " 项已存在") : "");
+                    text: "共 " + root.total-count + " 项，已选 " + root.selected-count + " 项"
+                          + (root.exists-count > 0 ? ("（" + root.exists-count + " 项已存在）") : "");
                     color: ThemeSettings.text-sec(root.theme-mode);
                     font-size: ThemeSettings.font-size-small;
                     vertical-alignment: center;
@@ -1669,6 +1693,7 @@ export component ImportScanWindow inherits Window {
                 for entry[i] in root.entries : scan-entry-row {
                     entry: entry;
                     theme-mode: root.theme-mode;
+                    toggled => { root.entry-toggled(i); }
                 }
             }
         }

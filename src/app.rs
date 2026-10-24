@@ -2534,6 +2534,7 @@ impl App {
         scan_win.on_select_all_requested(move || apply_scan_selection("all"));
         scan_win.on_select_none_requested(move || apply_scan_selection("none"));
         scan_win.on_invert_requested(move || apply_scan_selection("invert"));
+        scan_win.on_entry_toggled(move |index| toggle_scan_entry(index));
 
         self.main_window.run()
     }
@@ -3569,6 +3570,7 @@ fn prepare_scan_import_window(
 
     // 把 ScanSession 塞进窗口的 user_data 机制做回传？Slint 无此机制，
     // 改用 Mutex 静态存储。见下方 SCAN_SESSION_CACHE。
+    let ui_model = Rc::new(slint::VecModel::from(slint_entries));
     {
         let mut cache = SCAN_SESSION_CACHE.lock().unwrap();
         *cache = Some(ScanSession {
@@ -3577,8 +3579,10 @@ fn prepare_scan_import_window(
             entries,
         });
     }
+    set_scan_ui_model(Some(ui_model.clone()));
 
-    w.set_entries(ModelRc::from(Rc::new(slint::VecModel::from(slint_entries))));
+    w.set_entries(ModelRc::from(ui_model));
+    w.set_selected_count(total - exists_count);
     w.window().show().ok();
     // 独立窗口可能被主窗口遮挡，显式置前
     native::focus_window_by_title("扫描导入");
@@ -3590,29 +3594,65 @@ fn prepare_scan_import_window(
     );
 }
 
-/// 扫描导入窗口: 应用批量选择操作
-fn apply_scan_selection(op: &str) {
-    let Some((scan_win, _db, _cid)) = get_active_scan_window() else {
+/// 扫描导入窗口: 单条切换选中状态
+fn toggle_scan_entry(index: i32) {
+    let Some((win, _db, _cid)) = get_active_scan_window() else {
         return;
     };
-    let mut cur: Vec<ScanEntry> = scan_win.get_entries().iter().collect();
-    for e in cur.iter_mut() {
-        match op {
-            "all" => {
-                if !e.exists {
-                    e.selected = true;
-                }
-            }
-            "none" => e.selected = false,
-            "invert" => {
-                if !e.exists {
-                    e.selected = !e.selected;
-                }
-            }
-            _ => {}
+    let Some(model) = scan_ui_model() else {
+        return;
+    };
+    if index < 0 {
+        return;
+    }
+    let idx = index as usize;
+    let Some(mut entry) = model.row_data(idx) else {
+        return;
+    };
+    if entry.exists {
+        return;
+    }
+    entry.selected = !entry.selected;
+    model.set_row_data(idx, entry);
+    update_scan_selected_count(&win, &model);
+}
+
+/// 同步「已选 N 项」计数
+fn update_scan_selected_count(win: &ImportScanWindow, model: &slint::VecModel<ScanEntry>) {
+    let count = (0..model.row_count())
+        .filter_map(|i| model.row_data(i))
+        .filter(|e| e.selected && !e.exists)
+        .count() as i32;
+    win.set_selected_count(count);
+}
+
+/// 扫描导入窗口: 应用批量选择操作
+fn apply_scan_selection(op: &str) {
+    let Some((win, _db, _cid)) = get_active_scan_window() else {
+        return;
+    };
+    let Some(model) = scan_ui_model() else {
+        return;
+    };
+    for i in 0..model.row_count() {
+        let Some(mut entry) = model.row_data(i) else {
+            continue;
+        };
+        if entry.exists {
+            continue;
+        }
+        let selected = match op {
+            "all" => true,
+            "none" => false,
+            "invert" => !entry.selected,
+            _ => continue,
+        };
+        if entry.selected != selected {
+            entry.selected = selected;
+            model.set_row_data(i, entry);
         }
     }
-    scan_win.set_entries(ModelRc::from(Rc::new(slint::VecModel::from(cur))));
+    update_scan_selected_count(&win, &model);
 }
 
 /// 扫描导入窗口: 把选中的条目写入数据库
@@ -3634,10 +3674,26 @@ fn commit_scan_import() {
     let Some(ref session) = *cache else {
         return;
     };
+    // 双重去重：以写入时刻数据库中的 target 为准，避免界面标记与实际数据不一致时产生重复项目
+    let existing_targets: std::collections::HashSet<String> = db
+        .list_items(class_id)
+        .iter()
+        .filter_map(|i| i.data.target.as_deref())
+        .map(|t| t.to_lowercase())
+        .collect();
+    let mut duplicates = 0usize;
     let to_import: Vec<native::LauncherEntry> = session
         .entries
         .iter()
         .filter(|e| selected_targets.contains(&e.target))
+        .filter(|e| {
+            if existing_targets.contains(&e.target.to_lowercase()) {
+                duplicates += 1;
+                false
+            } else {
+                true
+            }
+        })
         .cloned()
         .collect();
     drop(cache);
@@ -3648,7 +3704,10 @@ fn commit_scan_import() {
     }
 
     let (added, skipped) = import_entries(&db, class_id, to_import);
+    let skipped = skipped + duplicates;
     scan_win.window().hide().ok();
+    set_scan_ui_model(None);
+    *SCAN_SESSION_CACHE.lock().unwrap() = None;
 
     // 刷新主窗口列表
     if let Some(main) = MAIN_WINDOW_WEAK_CACHE.lock().unwrap().as_ref().and_then(|w| w.upgrade()) {
@@ -3668,6 +3727,7 @@ fn cancel_scan_import() {
     if let Some((scan_win, _db, _cid)) = get_active_scan_window() {
         scan_win.window().hide().ok();
     }
+    set_scan_ui_model(None);
     let mut cache = SCAN_SESSION_CACHE.lock().unwrap();
     *cache = None;
 }
@@ -3701,6 +3761,21 @@ fn get_active_scan_window() -> Option<(ImportScanWindow, Arc<Database>, i64)> {
         Some(ref s) => Some((w_ref, s.db.clone(), s.classification_id)),
         None => None,
     }
+}
+
+/// 扫描导入窗口的列表模型：仅 UI 线程访问，故用 thread_local（Rc 不是 Send，不能放静态 Mutex）
+/// 原地改写模型可保留滚动位置，并让复选框状态即时刷新
+thread_local! {
+    static SCAN_UI_MODEL: std::cell::RefCell<Option<Rc<slint::VecModel<ScanEntry>>>> =
+        std::cell::RefCell::new(None);
+}
+
+fn set_scan_ui_model(model: Option<Rc<slint::VecModel<ScanEntry>>>) {
+    SCAN_UI_MODEL.with(|c| *c.borrow_mut() = model);
+}
+
+fn scan_ui_model() -> Option<Rc<slint::VecModel<ScanEntry>>> {
+    SCAN_UI_MODEL.with(|c| c.borrow().clone())
 }
 
 /// 将扫描得到的启动项批量导入指定分类
