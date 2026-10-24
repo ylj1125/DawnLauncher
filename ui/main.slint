@@ -166,6 +166,8 @@ export component MainWindow inherits Window {
                 : ThemeSettings.sidebar-bg(root.theme-mode);
 
             HorizontalLayout {
+                spacing: 2px;
+                padding-right: 6px;
                 // 标题 + 拖拽区域
                 Rectangle {
                     horizontal-stretch: 1;
@@ -205,14 +207,16 @@ export component MainWindow inherits Window {
 
                 // 快速搜索按钮
                 Rectangle {
-                    width: 40px;
-                    height: parent.height;
+                    width: 32px;
+                    height: 24px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 6px;
                     background: search-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
 
                     Image {
                         source: @image-url("assets/search.svg");
-                        width: 18px;
-                        height: 18px;
+                        width: 16px;
+                        height: 16px;
                         x: (parent.width - self.width) / 2;
                         y: (parent.height - self.height) / 2;
                         colorize: ThemeSettings.text-c(root.theme-mode);
@@ -236,17 +240,19 @@ export component MainWindow inherits Window {
 
                 // 三明治菜单按钮
                 Rectangle {
-                    width: 40px;
-                    height: parent.height;
+                    width: 32px;
+                    height: 24px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 6px;
                     background: menu-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
 
                     // 用三条线绘制汉堡图标，避免字体缺字显示为方块
                     VerticalLayout {
-                        x: (parent.width - 18px) / 2;
-                        y: (parent.height - 14px) / 2;
-                        width: 18px;
-                        height: 14px;
-                        spacing: 4px;
+                        x: (parent.width - 16px) / 2;
+                        y: (parent.height - 12px) / 2;
+                        width: 16px;
+                        height: 12px;
+                        spacing: 3px;
                         Rectangle { height: 2px; background: ThemeSettings.text-c(root.theme-mode); border-radius: 1px; }
                         Rectangle { height: 2px; background: ThemeSettings.text-c(root.theme-mode); border-radius: 1px; }
                         Rectangle { height: 2px; background: ThemeSettings.text-c(root.theme-mode); border-radius: 1px; }
@@ -263,14 +269,16 @@ export component MainWindow inherits Window {
 
                 // 关闭按钮
                 Rectangle {
-                    width: 40px;
-                    height: parent.height;
+                    width: 32px;
+                    height: 24px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 6px;
                     background: close-touch.has-hover ? #e81123 : transparent;
 
                     Text {
                         text: "×";
-                        color: ThemeSettings.text-c(root.theme-mode);
-                        font-size: 18px;
+                        color: close-touch.has-hover ? #ffffff : ThemeSettings.text-c(root.theme-mode);
+                        font-size: 17px;
                         horizontal-alignment: center;
                         vertical-alignment: center;
                     }
@@ -347,8 +355,8 @@ export component MainWindow inherits Window {
             // 右侧内容区
             VerticalLayout {
                 horizontal-stretch: 1;
-                padding: ThemeSettings.spacing-large;
-                spacing: ThemeSettings.spacing-normal;
+                padding: 14px;
+                spacing: 10px;
 
                 // 工具栏
                 HorizontalLayout {
@@ -502,8 +510,8 @@ export component MainWindow inherits Window {
                         // 自动换行的网格布局：窗口变宽时一行显示更多项目，避免一列到底
                         FlexboxLayout {
                             width: parent.width;
-                            spacing: ThemeSettings.spacing-normal;
-                            padding: 2px;
+                            spacing: 10px;
+                            padding: 6px;
 
                             for item in root.items : ItemCard {
                                 item-id: item.id;

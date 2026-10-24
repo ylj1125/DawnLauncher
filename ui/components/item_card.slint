@@ -29,34 +29,49 @@ export component ItemCard inherits Rectangle {
 
     width: ThemeSettings.item-card-width;
     height: root.hide-name ? ThemeSettings.item-card-width : ThemeSettings.item-card-height;
-    border-radius: ThemeSettings.border-radius;
-    background: selected ? ThemeSettings.selected-c(root.theme-mode) : (touch-area.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
+    border-radius: 10px;
+    background: selected ? ThemeSettings.selected-c(root.theme-mode) : (touch-area.has-hover ? ThemeSettings.card-bg(root.theme-mode) : transparent);
+    // hover 时浮起的淡阴影
+    drop-shadow-blur: touch-area.has-hover ? 10px : 0px;
+    drop-shadow-offset-y: touch-area.has-hover ? 3px : 0px;
+    drop-shadow-color: #00000033;
     // 批量模式下选中态用蓝色边框
     border-width: (root.batch-mode && root.selected) ? 2px : 0px;
     border-color: ThemeSettings.accent-color;
 
     VerticalLayout {
         alignment: center;
-        spacing: ThemeSettings.spacing-small;
-        padding: ThemeSettings.spacing-small;
+        spacing: 6px;
+        padding-top: 8px;
+        padding-bottom: 4px;
+        padding-left: 4px;
+        padding-right: 4px;
 
-        Image {
-            source: root.icon;
-            width: root.icon-size;
+        // 图标容器：固定高度并水平居中，避免与名称文字宽度互相挤压导致偏移
+        Rectangle {
+            width: 100%;
             height: root.icon-size;
-            opacity: root.invalid ? 0.3 : 1.0;
-            horizontal-alignment: center;
-            image-fit: contain;
+            background: transparent;
+
+            Image {
+                source: root.icon;
+                width: root.icon-size;
+                height: root.icon-size;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                image-fit: contain;
+                opacity: root.invalid ? 0.3 : 1.0;
+            }
         }
 
         if !root.hide-name : Text {
             text: root.name;
-            color: ThemeSettings.text-c(root.theme-mode);
+            color: root.selected ? ThemeSettings.accent-color : ThemeSettings.text-c(root.theme-mode);
             font-size: ThemeSettings.font-size-small;
             horizontal-alignment: center;
             overflow: elide;
             horizontal-stretch: 1;
-            width: 76px;
+            width: 100%;
         }
     }
 

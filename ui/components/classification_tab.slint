@@ -15,29 +15,43 @@ export component ClassificationTab inherits Rectangle {
     callback right-clicked;
     callback expand-toggled;
 
-    height: 36px;
+    height: 34px;
     horizontal-stretch: 1;
-    border-radius: ThemeSettings.border-radius;
-    background: selected ? ThemeSettings.selected-c(root.theme-mode) : (touch-area.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
+    border-radius: 8px;
+    background: selected
+        ? ThemeSettings.accent-color.transparentize(0.88)
+        : (touch-area.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
+
+    // 选中态左侧强调条
+    Rectangle {
+        x: 0px;
+        y: (root.height - 16px) / 2;
+        width: 3px;
+        height: 16px;
+        border-radius: 2px;
+        background: ThemeSettings.accent-color;
+        visible: root.selected;
+    }
 
     HorizontalLayout {
         alignment: start;
-        spacing: ThemeSettings.spacing-normal;
+        spacing: 6px;
         // 子分类缩进
-        padding-left: ThemeSettings.spacing-normal + root.depth * 16px;
-        padding-right: ThemeSettings.spacing-normal;
+        padding-left: 10px + root.depth * 16px;
+        padding-right: 8px;
 
-        // 子分类折叠箭头 (有子分类时显示，可点击切换展开/折叠)
+        // 子分类折叠三角 (有子分类时显示，可点击切换展开/折叠)
         Rectangle {
             width: 12px;
             height: 100%;
 
-            Text {
-                text: root.has-children ? (root.expanded ? "▾" : "▸") : "";
-                color: ThemeSettings.text-sec(root.theme-mode);
-                font-size: 10px;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+            if root.has-children : Path {
+                width: 12px;
+                height: 12px;
+                x: 0px;
+                y: (parent.height - self.height) / 2;
+                commands: root.expanded ? "M 2 4 L 10 4 L 6 9 Z" : "M 3 2 L 9 6 L 3 10 Z";
+                fill: ThemeSettings.text-sec(root.theme-mode);
             }
 
             // 仅在有子分类时响应点击
@@ -51,6 +65,7 @@ export component ClassificationTab inherits Rectangle {
             text: root.name;
             color: root.selected ? ThemeSettings.accent-color : ThemeSettings.text-c(root.theme-mode);
             font-size: ThemeSettings.font-size-normal;
+            font-weight: root.selected ? 600 : 400;
             vertical-alignment: center;
             horizontal-alignment: left;
             overflow: elide;
@@ -60,6 +75,7 @@ export component ClassificationTab inherits Rectangle {
 
     touch-area := TouchArea {
         clicked => { root.clicked(); }
+        double-clicked => { root.expand-toggled(); }
         pointer-event(e) => {
             if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
                 root.right-clicked();
@@ -68,21 +84,25 @@ export component ClassificationTab inherits Rectangle {
     }
 
     // ===== 拖拽排序 =====
-    // 右侧拖拽手柄（避免与单击选择冲突）
+    // 右侧拖拽手柄（三点，避免字体缺字显示为方块；仅悬停时显现）
     Rectangle {
         x: root.width - 18px;
         y: (root.height - 16px) / 2;
         width: 14px;
         height: 16px;
         background: transparent;
+        opacity: touch-area.has-hover ? 1.0 : 0.0;
 
-        Text {
-            text: "⋮";
-            color: ThemeSettings.text-sec(root.theme-mode);
-            opacity: 0.5;
-            font-size: 12px;
-            horizontal-alignment: center;
-            vertical-alignment: center;
+        VerticalLayout {
+            x: (parent.width - 3px) / 2;
+            y: (parent.height - 10px) / 2;
+            width: 3px;
+            height: 10px;
+            spacing: 2px;
+
+            Rectangle { height: 3px; width: 3px; border-radius: 1.5px; background: ThemeSettings.text-sec(root.theme-mode); }
+            Rectangle { height: 3px; width: 3px; border-radius: 1.5px; background: ThemeSettings.text-sec(root.theme-mode); }
+            Rectangle { height: 3px; width: 3px; border-radius: 1.5px; background: ThemeSettings.text-sec(root.theme-mode); }
         }
 
         DragArea {
