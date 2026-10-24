@@ -1506,7 +1506,7 @@ component scan-entry-row inherits Rectangle {
         spacing: 10px;
         alignment: start;
 
-        // 复选框
+        // 复选框：选中时显示纯色实心块，不画勾（避免字体缺字形渲染成方块）
         Rectangle {
             width: 16px;
             height: 16px;
@@ -1516,15 +1516,6 @@ component scan-entry-row inherits Rectangle {
             border-color: entry.selected
                 ? ThemeSettings.accent-color
                 : ThemeSettings.text-sec(root.theme-mode);
-
-            Text {
-                text: "✓";
-                color: #ffffff;
-                font-size: 12px;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                visible: entry.selected;
-            }
         }
 
         // 图标: 36x36

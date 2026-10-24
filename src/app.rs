@@ -4115,18 +4115,38 @@ $form.CancelButton = $cancelBtn
 $form.Controls.Add($cancelBtn)
 
 $result = $form.ShowDialog()
-if ($result -eq [System.Windows.Forms.DialogResult]::OK) {{ $textbox.Text }} else {{ '' }}
+$text = ''
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {{ $text = $textbox.Text }}
+if ($text.Length -gt 0) {{
+    [Console]::Out.Write([System.BitConverter]::ToString([System.Text.Encoding]::UTF8.GetBytes($text)))
+}}
 "#,
         title.replace('\'', "''"),
         prompt.replace('\'', "''")
     );
     let output = run_hidden("powershell", &["-NoProfile", "-NonInteractive", "-Command", &script])?;
-    let stdout = String::from_utf8_lossy(&output).trim().to_string();
-    if stdout.is_empty() {
+    // PowerShell 的 stdout 走系统 ANSI 代码页，中文会乱码；
+    // 脚本改为输出 UTF-8 字节的十六进制串，这里再解码还原
+    let raw = String::from_utf8_lossy(&output).trim().to_string();
+    if raw.is_empty() {
         None
     } else {
-        Some(stdout)
+        decode_hex_utf8(&raw)
     }
+}
+
+/// 把 "E4-B8-AD-..." 形式的十六进制串还原为 UTF-8 字符串
+#[cfg(target_os = "windows")]
+fn decode_hex_utf8(hex: &str) -> Option<String> {
+    let bytes: Vec<u8> = hex
+        .split('-')
+        .map(|p| u8::from_str_radix(p.trim(), 16))
+        .collect::<Result<Vec<u8>, _>>()
+        .ok()?;
+    if bytes.is_empty() {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
 }
 
 #[cfg(not(target_os = "windows"))]
