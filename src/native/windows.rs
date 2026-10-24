@@ -1290,6 +1290,25 @@ pub fn remove_tray_icon() {
     log::info!("系统托盘图标已删除");
 }
 
+/// 按窗口标题把指定窗口显示并置前（用于扫描导入等独立窗口）
+pub fn focus_window_by_title(window_title: &str) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, SetForegroundWindow, ShowWindow, SW_SHOW,
+    };
+    use windows::core::HSTRING;
+
+    let title = HSTRING::from(window_title);
+    let hwnd = unsafe { FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) };
+    if hwnd.0 == 0 {
+        log::warn!("按标题未找到窗口: {}", window_title);
+        return;
+    }
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_SHOW);
+        let _ = SetForegroundWindow(hwnd);
+    }
+}
+
 /// 显示/隐藏主窗口（通过托盘图标调用）
 /// visible: true=显示, false=隐藏
 pub fn show_main_window(window_title: &str, visible: bool) {

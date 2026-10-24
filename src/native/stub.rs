@@ -20,6 +20,8 @@ pub fn explorer_context_menu_at_cursor(_path: &str) -> bool {
     false
 }
 
+pub fn focus_window_by_title(_window_title: &str) {}
+
 pub fn search_path(_file: &str) -> Option<String> {
     None
 }

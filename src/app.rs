@@ -3580,7 +3580,14 @@ fn prepare_scan_import_window(
 
     w.set_entries(ModelRc::from(Rc::new(slint::VecModel::from(slint_entries))));
     w.window().show().ok();
-    w.window().show().ok();
+    // 独立窗口可能被主窗口遮挡，显式置前
+    native::focus_window_by_title("扫描导入");
+    log::info!(
+        "扫描导入: 来源={}, 共 {} 项, 已存在 {} 项, 等待用户勾选",
+        source_label,
+        total,
+        exists_count
+    );
 }
 
 /// 扫描导入窗口: 应用批量选择操作

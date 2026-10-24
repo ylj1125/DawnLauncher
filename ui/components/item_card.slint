@@ -69,13 +69,18 @@ export component ItemCard inherits Rectangle {
         height: 16px;
         background: transparent;
 
-        Text {
-            text: "⋮";
-            color: ThemeSettings.text-sec(root.theme-mode);
-            opacity: 0.5;
-            font-size: 12px;
-            horizontal-alignment: center;
-            vertical-alignment: center;
+        // 用三个小圆点绘制拖动提示（避免字体缺字显示为方块）
+        VerticalLayout {
+            x: 6px;
+            y: 3px;
+            width: 4px;
+            height: 10px;
+            spacing: 2px;
+            alignment: center;
+
+            Rectangle { height: 2px; width: 2px; border-radius: 1px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.5; }
+            Rectangle { height: 2px; width: 2px; border-radius: 1px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.5; }
+            Rectangle { height: 2px; width: 2px; border-radius: 1px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.5; }
         }
 
         DragArea {

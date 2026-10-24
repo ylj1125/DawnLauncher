@@ -194,7 +194,7 @@ export component MainWindow inherits Window {
                         alignment: start;
 
                         Text {
-                            text: "Dawn Launcher v0.10";
+                            text: "Dawn Launcher v0.11";
                             color: ThemeSettings.text-c(root.theme-mode);
                             font-size: ThemeSettings.font-size-normal;
                             font-weight: 700;
@@ -499,8 +499,11 @@ export component MainWindow inherits Window {
                         vertical-stretch: 1;
                         horizontal-stretch: 1;
 
-                        VerticalLayout {
+                        // 自动换行的网格布局：窗口变宽时一行显示更多项目，避免一列到底
+                        FlexboxLayout {
+                            width: parent.width;
                             spacing: ThemeSettings.spacing-normal;
+                            padding: 2px;
 
                             for item in root.items : ItemCard {
                                 item-id: item.id;
