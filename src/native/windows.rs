@@ -229,6 +229,168 @@ pub fn open_path_ex(
     Ok(())
 }
 
+/// 在桌面上创建快捷方式
+/// 网址生成 .url 文件，其余生成 .lnk（支持启动参数与起始位置）
+pub fn create_desktop_shortcut(name: &str, target: &str, params: &str, work_dir: &str) -> bool {
+    let desktop = match dirs::desktop_dir() {
+        Some(d) => d,
+        None => return false,
+    };
+    let safe_name: String = name
+        .chars()
+        .map(|c| match c {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => c,
+        })
+        .collect();
+    let safe_name = if safe_name.trim().is_empty() {
+        "快捷方式".to_string()
+    } else {
+        safe_name
+    };
+
+    // 网址: 写入 .url 文件
+    if target.starts_with("http://") || target.starts_with("https://") {
+        let path = desktop.join(format!("{}.url", safe_name));
+        let content = format!("[InternetShortcut]\r\nURL={}\r\n", target);
+        return std::fs::write(path, content).is_ok();
+    }
+
+    let esc = |s: &str| s.replace('\'', "''");
+    let lnk_path = desktop.join(format!("{}.lnk", safe_name));
+    let script = format!(
+        r#"$ws = New-Object -ComObject WScript.Shell
+$s = $ws.CreateShortcut('{}')
+$s.TargetPath = '{}'
+$s.Arguments = '{}'
+$s.WorkingDirectory = '{}'
+$s.IconLocation = '{},0'
+$s.Save()
+[Console]::Out.Write('OK')"#,
+        esc(&lnk_path.to_string_lossy()),
+        esc(target),
+        esc(params),
+        esc(work_dir),
+        esc(target)
+    );
+    match run_hidden(
+        "powershell",
+        &["-NoProfile", "-NonInteractive", "-Command", &script],
+    ) {
+        Some(out) => String::from_utf8_lossy(&out).contains("OK"),
+        None => false,
+    }
+}
+
+/// 弹出保存对话框导出图标 PNG，返回是否成功保存
+pub fn export_icon_with_dialog(bytes: &[u8], default_name: &str) -> bool {
+    let tmp = std::env::temp_dir().join("dawn_icon_export.png");
+    if std::fs::write(&tmp, bytes).is_err() {
+        return false;
+    }
+    let safe_name: String = default_name
+        .chars()
+        .map(|c| match c {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => c,
+        })
+        .collect();
+    let esc = |s: &str| s.replace('\'', "''");
+    let script = format!(
+        r#"Add-Type -AssemblyName System.Windows.Forms
+$dlg = New-Object System.Windows.Forms.SaveFileDialog
+$dlg.Filter = 'PNG 图片|*.png'
+$dlg.FileName = '{}.png'
+if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{
+  Copy-Item -LiteralPath '{}' -Destination $dlg.FileName -Force
+  [Console]::Out.Write('OK')
+}}"#,
+        esc(&safe_name),
+        esc(&tmp.to_string_lossy())
+    );
+    match run_hidden("powershell", &["-NoProfile", "-STA", "-Command", &script]) {
+        Some(out) => String::from_utf8_lossy(&out).contains("OK"),
+        None => false,
+    }
+}
+
+/// 读取剪贴板中的图片，返回 Base64 编码的 PNG
+pub fn clipboard_image_base64() -> Option<String> {
+    let script = r#"Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$img = [System.Windows.Forms.Clipboard]::GetImage()
+if ($img) {
+  $ms = New-Object System.IO.MemoryStream
+  $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+  [Convert]::ToBase64String($ms.ToArray())
+}"#;
+    let out = run_hidden("powershell", &["-NoProfile", "-STA", "-Command", script])?;
+    let text = String::from_utf8_lossy(&out).trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+/// 运行系统项目（shell: 命名空间、ms-settings:、msc/exe、static: 操作）
+pub fn system_item_execute(target: &str, params: &str) {
+    if target == "static:TurnOffMonitor" {
+        // 关闭显示器: 广播 WM_SYSCOMMAND + SC_MONITORPOWER
+        use windows::Win32::UI::WindowsAndMessaging::SendMessageW;
+        use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+        const WM_SYSCOMMAND: u32 = 0x0112;
+        const SC_MONITORPOWER: usize = 0xF170;
+        unsafe {
+            SendMessageW(
+                HWND(0xFFFF as isize), // HWND_BROADCAST
+                WM_SYSCOMMAND,
+                WPARAM(SC_MONITORPOWER),
+                LPARAM(2),
+            );
+        }
+        return;
+    }
+
+    let file = if target.starts_with("shell:")
+        || target.starts_with("ms-settings:")
+        || target.starts_with("static:")
+    {
+        target.to_string()
+    } else {
+        search_path(target).unwrap_or_else(|| target.to_string())
+    };
+
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::PCWSTR;
+
+    let file_h = HSTRING::from(file);
+    let op_h = HSTRING::from("open");
+    let params_h = HSTRING::from(params);
+    let dir_h = system_directory();
+    unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(op_h.as_ptr()),
+            PCWSTR(file_h.as_ptr()),
+            if params.is_empty() {
+                PCWSTR::null()
+            } else {
+                PCWSTR(params_h.as_ptr())
+            },
+            PCWSTR(dir_h.as_ptr()),
+            SW_SHOWNORMAL,
+        );
+    }
+}
+
+/// 系统目录（如 C:\Windows\System32）
+fn system_directory() -> HSTRING {
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+    HSTRING::from(format!("{}\\System32", root))
+}
+
 /// 在资源管理器中打开文件所在位置（选中该文件）
 pub fn open_file_location(path: &str) {
     // 使用 explorer.exe /select,"path" 语法

@@ -39,6 +39,25 @@ pub fn open_path_ex(
     Ok(())
 }
 
+pub fn create_desktop_shortcut(
+    _name: &str,
+    _target: &str,
+    _params: &str,
+    _work_dir: &str,
+) -> bool {
+    false
+}
+
+pub fn export_icon_with_dialog(_bytes: &[u8], _default_name: &str) -> bool {
+    false
+}
+
+pub fn clipboard_image_base64() -> Option<String> {
+    None
+}
+
+pub fn system_item_execute(_target: &str, _params: &str) {}
+
 pub fn is_fullscreen() -> bool {
     false
 }

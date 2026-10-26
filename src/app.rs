@@ -88,10 +88,15 @@ impl App {
 
         // 4. 加载分类列表
         let classifications = db.list_all_classifications();
-        // 选中第一个父分类
+        // 优先使用「默认分类」设置，否则选中第一个父分类
+        let default_id: i64 = db
+            .get_setting("default_classification", "")
+            .parse()
+            .unwrap_or(0);
         let first_id = classifications
             .iter()
-            .find(|c| c.parent_id.is_none())
+            .find(|c| c.id == default_id)
+            .or_else(|| classifications.iter().find(|c| c.parent_id.is_none()))
             .map(|c| c.id)
             .unwrap_or_else(|| classifications.first().map(|c| c.id).unwrap_or(0));
 
@@ -333,12 +338,17 @@ impl App {
 
         // 11. 分类项右键菜单
         let window_for_class_menu = main_window.as_weak();
+        let db_for_class_menu = db.clone();
         let right_clicked_class_id = Arc::new(Mutex::new(0i64));
         let right_clicked_class_id_for_menu = right_clicked_class_id.clone();
         main_window.on_classification_right_clicked(move |id| {
             *right_clicked_class_id_for_menu.lock().unwrap() = id as i64;
+            let default_id: i64 = db_for_class_menu
+                .get_setting("default_classification", "")
+                .parse()
+                .unwrap_or(0);
             if let Some(w) = window_for_class_menu.upgrade() {
-                show_classification_item_menu(&w, 160, 200);
+                show_classification_item_menu(&w, 160, 200, default_id == id as i64);
             }
         });
 
@@ -1601,6 +1611,7 @@ impl App {
             let edit_weak_for_ctx = item_edit_window.as_weak();
             let editing_item_id_for_ctx = editing_item_id.clone();
             let editing_icon_for_ctx = editing_icon.clone();
+            let scan_weak_for_ctx = scan_import_window.as_weak();
             main_window.on_context_menu_item_selected(move |source, action| {
                 let source_str = source.to_string();
                 let action_str = action.to_string();
@@ -1691,6 +1702,24 @@ impl App {
                                 });
                             }
                         }
+                    }
+                    ("item-area", "add-system-item") => {
+                        // 内置系统项目清单：后台提取图标后打开选择窗口
+                        drop(w);
+                        let db_bg = db_for_ctx.clone();
+                        let scan_bg = scan_weak_for_ctx.clone();
+                        std::thread::spawn(move || {
+                            let entries = build_system_entries();
+                            let _ = slint::invoke_from_event_loop(move || {
+                                prepare_scan_import_window(
+                                    &scan_bg,
+                                    &db_bg,
+                                    class_id,
+                                    "系统项目",
+                                    entries,
+                                );
+                            });
+                        });
                     }
                     ("item-area", "batch-mode") => {
                         w.set_batch_mode(true);
@@ -1926,6 +1955,25 @@ impl App {
                             }
                         }
                     }
+                    ("classification-item", "set-default") => {
+                        let cid = *right_class_id.lock().unwrap();
+                        match db_for_ctx.set_setting("default_classification", &cid.to_string()) {
+                            Ok(_) => {
+                                if let Some(w) = window_for_ctx.upgrade() {
+                                    w.set_context_menu_visible(false);
+                                }
+                                show_info_dialog("默认分类", "已设为默认分类，下次启动自动选中");
+                            }
+                            Err(e) => show_error_dialog("错误", &format!("设置失败: {}", e)),
+                        }
+                    }
+                    ("classification-item", "clear-default") => {
+                        if let Err(e) = db_for_ctx.set_setting("default_classification", "") {
+                            show_error_dialog("错误", &format!("设置失败: {}", e));
+                        } else if let Some(w) = window_for_ctx.upgrade() {
+                            w.set_context_menu_visible(false);
+                        }
+                    }
                     ("classification-item", "delete") => {
                         let cid = *right_class_id.lock().unwrap();
                         drop(w);
@@ -2022,6 +2070,114 @@ impl App {
                             {
                                 let _ = copy_to_clipboard(&target);
                                 show_info_dialog("已复制", "路径已复制到剪贴板");
+                            }
+                        }
+                    }
+                    ("item", "copy-name") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        if let Some(item) = db_for_ctx.get_item(item_id) {
+                            #[cfg(target_os = "windows")]
+                            {
+                                let _ = copy_to_clipboard(&item.name);
+                                show_info_dialog("已复制", "名称已复制到剪贴板");
+                            }
+                            #[cfg(not(target_os = "windows"))]
+                            {
+                                let _ = &item;
+                            }
+                        }
+                    }
+                    ("item", "create-shortcut") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        if let Some(item) = db_for_ctx.get_item(item_id) {
+                            let target = item.data.target.clone().unwrap_or_default();
+                            if item.is_appx() {
+                                show_info_dialog("提示", "商店应用无法创建桌面快捷方式");
+                            } else if target.is_empty() {
+                                show_info_dialog("提示", "该项目没有目标路径");
+                            } else {
+                                #[cfg(target_os = "windows")]
+                                {
+                                    let ok = native::create_desktop_shortcut(
+                                        &item.name,
+                                        &target,
+                                        item.data.params.as_deref().unwrap_or(""),
+                                        item.data.start_location.as_deref().unwrap_or(""),
+                                    );
+                                    if ok {
+                                        show_info_dialog("完成", "已在桌面创建快捷方式");
+                                    } else {
+                                        show_error_dialog("失败", "创建快捷方式失败");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    ("item", "export-icon") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        if let Some(item) = db_for_ctx.get_item(item_id) {
+                            let icon_url = item.data.icon.clone().unwrap_or_default();
+                            let bytes = parse_data_url(&icon_url)
+                                .and_then(|(_fmt, b64)| base64_decode(&b64));
+                            match bytes {
+                                Some(bytes) if !bytes.is_empty() => {
+                                    #[cfg(target_os = "windows")]
+                                    {
+                                        if !native::export_icon_with_dialog(&bytes, &item.name) {
+                                            show_info_dialog("提示", "已取消导出");
+                                        }
+                                    }
+                                }
+                                _ => show_info_dialog("提示", "该项目没有可导出的图标"),
+                            }
+                        }
+                    }
+                    ("item", "paste-icon") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        #[cfg(target_os = "windows")]
+                        {
+                            match native::clipboard_image_base64() {
+                                Some(b64) => {
+                                    let url = format!("data:image/png;base64,{}", b64);
+                                    if db_for_ctx.update_item_icon(item_id, &url).is_ok() {
+                                        let items = db_for_ctx.list_items(class_id);
+                                        if let Some(w) = window_for_ctx.upgrade() {
+                                            w.set_items(to_item_model(&items, 0));
+                                        }
+                                        show_info_dialog("完成", "已使用剪贴板图片作为图标");
+                                    } else {
+                                        show_error_dialog("失败", "保存图标失败");
+                                    }
+                                }
+                                None => show_info_dialog("提示", "剪贴板中没有图片"),
+                            }
+                        }
+                    }
+                    ("item", "move-to") | ("item", "copy-to") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        let all_classes = db_for_ctx.list_all_classifications();
+                        let class_names: Vec<String> = all_classes
+                            .iter()
+                            .map(|c| format!("[{}] {}", c.id, c.name))
+                            .collect();
+                        let prompt = format!("请输入目标分类ID:\n{}", class_names.join("\n"));
+                        drop(w);
+                        if let Some(input) = show_input_dialog("选择目标分类", &prompt) {
+                            if let Ok(target_id) = input.trim().parse::<i64>() {
+                                let result = if action_str == "move-to" {
+                                    db_for_ctx.batch_move_items(&[item_id], target_id)
+                                } else {
+                                    db_for_ctx.batch_copy_items(&[item_id], target_id)
+                                };
+                                match result {
+                                    Ok(_) => {
+                                        let items = db_for_ctx.list_items(class_id);
+                                        if let Some(w) = window_for_ctx.upgrade() {
+                                            w.set_items(to_item_model(&items, 0));
+                                        }
+                                    }
+                                    Err(e) => show_error_dialog("错误", &format!("操作失败: {}", e)),
+                                }
                             }
                         }
                     }
@@ -3396,6 +3552,14 @@ fn open_item(item: &Item) {
         return;
     }
 
+    // 系统项目 (shell: 命名空间 / ms-settings: / msc / static: 电源等操作)
+    if item.is_system() {
+        let params = item.data.params.as_deref().unwrap_or("");
+        native::system_item_execute(&target, params);
+        log::info!("执行系统项目: {} {}", target, params);
+        return;
+    }
+
     // 检查目标是否存在 (网址/系统项不检查)
     if !item.is_url() && !item.is_system() && !std::path::Path::new(&target).exists() {
         log::error!("目标路径不存在: {}", target);
@@ -3427,6 +3591,74 @@ fn open_item(item: &Item) {
             }
         }
     }
+}
+
+/// 内置系统项目清单（kind=3）
+/// shell: 命名空间、ms-settings: 设置页、常用管理工具与电源操作
+fn build_system_entries() -> Vec<native::LauncherEntry> {
+    let specs: &[(&str, &str, &str)] = &[
+        ("此电脑", "shell:MyComputerFolder", ""),
+        ("文档", "shell:Local Documents", ""),
+        ("回收站", "shell:RecycleBinFolder", ""),
+        ("控制面板", "shell:ControlPanelFolder", ""),
+        ("程序和功能", "shell:ChangeRemoveProgramsFolder", ""),
+        ("网络和共享中心", "control.exe", "/name Microsoft.NetworkAndSharingCenter"),
+        ("文件资源管理器选项", "control.exe", "folders"),
+        ("电源选项", "control.exe", "/name Microsoft.PowerOptions"),
+        ("任务管理器", "taskmgr.exe", ""),
+        ("命令提示符", "cmd.exe", ""),
+        ("计算器", "calc.exe", ""),
+        ("注册表编辑器", "regedit.exe", ""),
+        ("系统配置", "msconfig.exe", ""),
+        ("设备管理器", "devmgmt.msc", ""),
+        ("服务", "services.msc", ""),
+        ("磁盘管理", "diskmgmt.msc", ""),
+        ("显示设置", "ms-settings:display", ""),
+        ("系统信息", "ms-settings:about", ""),
+        ("个性化", "ms-settings:personalization", ""),
+        ("蓝牙和其他设备", "ms-settings:bluetooth", ""),
+        ("Windows 更新", "ms-settings:windowsupdate", ""),
+        ("网络和 Internet", "ms-settings:network", ""),
+        ("应用和功能", "ms-settings:appsfeatures", ""),
+        ("日期和时间", "ms-settings:dateandtime", ""),
+        ("锁屏", "rundll32.exe", "user32.dll,LockWorkStation"),
+        ("关闭显示器", "static:TurnOffMonitor", ""),
+        ("关机", "shutdown.exe", "/s /t 0"),
+        ("重启", "shutdown.exe", "/r /t 0"),
+    ];
+
+    // shell:/ms-settings: 无文件路径，统一借用 explorer.exe 图标
+    let explorer_icon = std::env::var("SystemRoot")
+        .ok()
+        .map(|root| format!("{}\\explorer.exe", root))
+        .and_then(|p| native::get_file_icon(&p));
+
+    specs
+        .iter()
+        .map(|(name, target, params)| {
+            let needs_file_search = !target.starts_with("shell:")
+                && !target.starts_with("ms-settings:")
+                && !target.starts_with("static:");
+            let icon = if needs_file_search {
+                let resolved = native::search_path(target)
+                    .unwrap_or_else(|| target.to_string());
+                native::get_file_icon(&resolved).or_else(|| explorer_icon.clone())
+            } else {
+                explorer_icon.clone()
+            };
+            native::LauncherEntry {
+                name: (*name).to_string(),
+                target: (*target).to_string(),
+                kind: 3,
+                params: if params.is_empty() {
+                    None
+                } else {
+                    Some((*params).to_string())
+                },
+                icon,
+            }
+        })
+        .collect()
 }
 
 /// 根据路径构建新项目 (自动判断类型)
@@ -4220,18 +4452,18 @@ fn run_hidden(_cmd: &str, _args: &[&str]) -> Option<Vec<u8>> {
 // ==================== 右键菜单辅助函数 ====================
 
 /// 构建菜单项 Slint 模型
-fn build_menu_items(items: &[(&str, &str, &str, bool, bool)]) -> ModelRc<MenuItem> {
+fn build_menu_items(items: &[(&str, &str, &str, bool, bool, bool)]) -> ModelRc<MenuItem> {
     let model = slint::VecModel::from(
         items
             .iter()
-            .map(|(id, label, icon, separator, has_submenu)| MenuItem {
+            .map(|(id, label, icon, separator, has_submenu, checked)| MenuItem {
                 id: SharedString::from(*id),
                 label: SharedString::from(*label),
                 icon: SharedString::from(*icon),
                 separator: *separator,
                 has_submenu: *has_submenu,
                 enabled: true,
-                checked: false,
+                checked: *checked,
             })
             .collect::<Vec<_>>(),
     );
@@ -4244,7 +4476,7 @@ fn show_context_menu(
     source: &str,
     x: i32,
     y: i32,
-    items: &[(&str, &str, &str, bool, bool)],
+    items: &[(&str, &str, &str, bool, bool, bool)],
 ) {
     window.set_context_menu_source(SharedString::from(source));
     window.set_context_menu_x(x as f32);
@@ -4257,37 +4489,50 @@ fn show_context_menu(
 }
 
 /// 显示项目右键菜单
-/// 包含: 打开/打开位置/资源管理器菜单/重命名/复制路径/刷新图标/转为相对路径/转为绝对路径/删除
+/// 包含: 打开/打开位置/资源管理器菜单/重命名/编辑/复制名称/复制路径/创建桌面快捷方式/导出图标/粘贴图标/移动/复制/刷新图标/路径转换/删除
 fn show_item_context_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
-        ("open", "打开", "▶", false, false),
-        ("open-location", "打开文件位置", "📁", false, false),
-        ("explorer-menu", "资源管理器菜单", "🗂", false, false),
-        ("", "", "", true, false), // 分隔线
-        ("rename", "重命名", "✏", false, false),
-        ("edit", "编辑项目", "⚙", false, false),
-        ("copy-path", "复制路径", "📋", false, false),
-        ("refresh-icon", "刷新图标", "🔄", false, false),
-        ("", "", "", true, false),
-        ("to-relative", "转为相对路径", "↻", false, false),
-        ("to-absolute", "转为绝对路径", "↻", false, false),
-        ("", "", "", true, false),
-        ("delete", "删除", "🗑", false, false),
+        ("open", "打开", "▶", false, false, false),
+        ("open-location", "打开文件位置", "📁", false, false, false),
+        ("explorer-menu", "资源管理器菜单", "🗂", false, false, false),
+        ("", "", "", true, false, false), // 分隔线
+        ("rename", "重命名", "✏", false, false, false),
+        ("edit", "编辑项目", "⚙", false, false, false),
+        ("copy-name", "复制名称", "📋", false, false, false),
+        ("copy-path", "复制路径", "📋", false, false, false),
+        ("create-shortcut", "创建桌面快捷方式", "🔗", false, false, false),
+        ("export-icon", "导出图标", "💾", false, false, false),
+        ("paste-icon", "粘贴图片作为图标", "🖼", false, false, false),
+        ("", "", "", true, false, false),
+        ("move-to", "移动到分类", "↪", false, false, false),
+        ("copy-to", "复制到分类", "📄", false, false, false),
+        ("", "", "", true, false, false),
+        ("refresh-icon", "刷新图标", "🔄", false, false, false),
+        ("to-relative", "转为相对路径", "↻", false, false, false),
+        ("to-absolute", "转为绝对路径", "↻", false, false, false),
+        ("", "", "", true, false, false),
+        ("delete", "删除", "🗑", false, false, false),
     ];
     show_context_menu(window, "item", x, y, &items);
 }
 
 /// 显示分类项右键菜单
-/// 包含: 重命名/删除/(如果有子分类: 添加子分类)
-fn show_classification_item_menu(window: &MainWindow, x: i32, y: i32) {
-    let items = [
-        ("rename", "重命名", "✏", false, false),
-        ("add-child", "新建子分类", "+", false, false),
-        ("associate-folder", "关联文件夹...", "📁", false, false),
-        ("aggregate", "聚合分类...", "∑", false, false),
-        ("", "", "", true, false),
-        ("delete", "删除", "🗑", false, false),
+/// 包含: 重命名/新建子分类/关联文件夹/聚合分类/默认分类/删除
+fn show_classification_item_menu(window: &MainWindow, x: i32, y: i32, is_default: bool) {
+    let mut items = vec![
+        ("rename", "重命名", "✏", false, false, false),
+        ("add-child", "新建子分类", "+", false, false, false),
+        ("associate-folder", "关联文件夹...", "📁", false, false, false),
+        ("aggregate", "聚合分类...", "∑", false, false, false),
+        ("", "", "", true, false, false),
     ];
+    if is_default {
+        items.push(("clear-default", "取消默认分类", "★", false, false, true));
+    } else {
+        items.push(("set-default", "设为默认分类", "☆", false, false, false));
+    }
+    items.push(("", "", "", true, false, false));
+    items.push(("delete", "删除", "🗑", false, false, false));
     show_context_menu(window, "classification-item", x, y, &items);
 }
 
@@ -4295,10 +4540,10 @@ fn show_classification_item_menu(window: &MainWindow, x: i32, y: i32) {
 /// 包含: 新建分类/锁定分类顺序
 fn show_classification_area_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
-        ("new-classification", "新建分类", "+", false, false),
-        ("new-folder-classification", "新建关联文件夹分类", "📁", false, false),
-        ("", "", "", true, false),
-        ("lock-order", "锁定分类顺序", "🔒", false, false),
+        ("new-classification", "新建分类", "+", false, false, false),
+        ("new-folder-classification", "新建关联文件夹分类", "📁", false, false, false),
+        ("", "", "", true, false, false),
+        ("lock-order", "锁定分类顺序", "🔒", false, false, false),
     ];
     show_context_menu(window, "classification-area", x, y, &items);
 }
@@ -4307,16 +4552,17 @@ fn show_classification_area_menu(window: &MainWindow, x: i32, y: i32) {
 /// 包含: 新建项目/项目设置/锁定项目顺序/批量操作
 fn show_item_area_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
-        ("new-item", "新建项目", "+", false, false),
-        ("new-url", "新建网址", "🔗", false, false),
-        ("", "", "", true, false),
-        ("sort-default", "排序：默认", "≡", false, false),
-        ("sort-initial", "排序：按名称", "A", false, false),
-        ("sort-open-number", "排序：按打开次数", "🔢", false, false),
-        ("sort-last-open", "排序：按最近打开", "⏱", false, false),
-        ("", "", "", true, false),
-        ("lock-item-order", "锁定项目顺序", "🔒", false, false),
-        ("batch-mode", "批量操作", "☰", false, false),
+        ("new-item", "新建项目", "+", false, false, false),
+        ("new-url", "新建网址", "🔗", false, false, false),
+        ("add-system-item", "添加系统项目...", "⚙", false, false, false),
+        ("", "", "", true, false, false),
+        ("sort-default", "排序：默认", "≡", false, false, false),
+        ("sort-initial", "排序：按名称", "A", false, false, false),
+        ("sort-open-number", "排序：按打开次数", "🔢", false, false, false),
+        ("sort-last-open", "排序：按最近打开", "⏱", false, false, false),
+        ("", "", "", true, false, false),
+        ("lock-item-order", "锁定项目顺序", "🔒", false, false, false),
+        ("batch-mode", "批量操作", "☰", false, false, false),
     ];
     show_context_menu(window, "item-area", x, y, &items);
 }
@@ -4324,21 +4570,21 @@ fn show_item_area_menu(window: &MainWindow, x: i32, y: i32) {
 /// 显示批量操作右键菜单
 fn show_batch_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
-        ("select-all", "全选", "☰", false, false),
-        ("", "", "", true, false),
-        ("batch-open", "批量打开", "▶", false, false),
-        ("", "", "", true, false),
-        ("batch-move", "批量移动到", "↪", false, true),
-        ("batch-copy", "批量复制到", "📋", false, true),
-        ("", "", "", true, false),
-        ("batch-rel-path", "批量转为相对路径", "↻", false, false),
-        ("batch-abs-path", "批量转为绝对路径", "↻", false, false),
-        ("", "", "", true, false),
-        ("batch-refresh-icon", "批量刷新图标", "🔄", false, false),
-        ("", "", "", true, false),
-        ("batch-delete", "批量删除", "🗑", false, false),
-        ("", "", "", true, false),
-        ("batch-cancel", "取消批量操作", "✕", false, false),
+        ("select-all", "全选", "☰", false, false, false),
+        ("", "", "", true, false, false),
+        ("batch-open", "批量打开", "▶", false, false, false),
+        ("", "", "", true, false, false),
+        ("batch-move", "批量移动到", "↪", false, true, false),
+        ("batch-copy", "批量复制到", "📋", false, true, false),
+        ("", "", "", true, false, false),
+        ("batch-rel-path", "批量转为相对路径", "↻", false, false, false),
+        ("batch-abs-path", "批量转为绝对路径", "↻", false, false, false),
+        ("", "", "", true, false, false),
+        ("batch-refresh-icon", "批量刷新图标", "🔄", false, false, false),
+        ("", "", "", true, false, false),
+        ("batch-delete", "批量删除", "🗑", false, false, false),
+        ("", "", "", true, false, false),
+        ("batch-cancel", "取消批量操作", "✕", false, false, false),
     ];
     show_context_menu(window, "batch", x, y, &items);
 }
