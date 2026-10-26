@@ -181,20 +181,41 @@ pub fn search_path(file: &str) -> Option<String> {
 /// 用系统默认程序打开文件或网址
 /// 使用 ShellExecuteW 而非 cmd /C start，避免 mingw 下参数转义问题
 pub fn open_path(path: &str) -> std::io::Result<()> {
+    open_path_ex(path, "", "", false)
+}
+
+/// 带启动参数 / 起始位置 / 管理员权限的打开
+/// as_admin 为 true 时使用 runas 动词（会触发 UAC 提权）
+pub fn open_path_ex(
+    path: &str,
+    params: &str,
+    work_dir: &str,
+    as_admin: bool,
+) -> std::io::Result<()> {
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     use windows::core::PCWSTR;
 
     let path_h = HSTRING::from(path);
-    let operation = HSTRING::from("open");
+    let operation = HSTRING::from(if as_admin { "runas" } else { "open" });
+    let params_h = HSTRING::from(params);
+    let dir_h = HSTRING::from(work_dir);
     // ShellExecuteW 返回 HINSTANCE，错误时返回值 <= 32
     let result = unsafe {
         ShellExecuteW(
             None,
             PCWSTR(operation.as_ptr()),
             PCWSTR(path_h.as_ptr()),
-            PCWSTR::null(),
-            PCWSTR::null(),
+            if params.is_empty() {
+                PCWSTR::null()
+            } else {
+                PCWSTR(params_h.as_ptr())
+            },
+            if work_dir.is_empty() {
+                PCWSTR::null()
+            } else {
+                PCWSTR(dir_h.as_ptr())
+            },
             SW_SHOWNORMAL,
         )
     };
@@ -715,12 +736,18 @@ $names = [System.Drawing.FontFamily]::Families | ForEach-Object {{ $_.Name }}
 /// 扫描一个文件夹下的直接子项 (文件 + 子文件夹)
 /// 用于「关联文件夹」分类：将其内容映射为可启动的项目。
 /// 跳过隐藏项，文件夹排前、其余按名称排序，并批量提取图标。
-pub fn scan_folder(path: &str) -> Vec<LauncherEntry> {
+pub fn scan_folder(path: &str, hidden_patterns: &str) -> Vec<LauncherEntry> {
     let mut result: Vec<LauncherEntry> = Vec::new();
     let dir = match std::fs::read_dir(path) {
         Ok(d) => d,
         Err(_) => return result,
     };
+    // 用户在「关联文件夹 → 隐藏项」中配置的名称/通配符，英文逗号分隔
+    let patterns: Vec<String> = hidden_patterns
+        .split(',')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
 
     struct Raw {
         name: String,
@@ -742,8 +769,16 @@ pub fn scan_folder(path: &str) -> Vec<LauncherEntry> {
             Err(_) => continue,
         };
         let is_dir = meta.is_dir();
-        // 跳过隐藏项与点文件
+        // 跳过系统隐藏项与点文件
         if is_hidden_entry(&p, &meta) {
+            continue;
+        }
+        // 跳过用户配置的隐藏项（支持 *.tmp 这类通配）
+        let name_lower = name.to_lowercase();
+        if patterns
+            .iter()
+            .any(|pat| wildcard_match(&name_lower, pat))
+        {
             continue;
         }
         let target = p.to_string_lossy().to_string();
@@ -796,6 +831,30 @@ fn is_hidden_entry(path: &std::path::Path, meta: &std::fs::Metadata) -> bool {
     path.file_name()
         .map(|n| n.to_string_lossy().starts_with('.'))
         .unwrap_or(false)
+}
+
+/// 通配符匹配（仅支持 * 与 ?，大小写不敏感；调用方需先转小写）
+fn wildcard_match(text: &str, pattern: &str) -> bool {
+    let t: Vec<char> = text.chars().collect();
+    let p: Vec<char> = pattern.chars().collect();
+    // dp[i][j] 表示 p 的前 j 个字符能否匹配 t 的前 i 个字符
+    let mut dp = vec![vec![false; p.len() + 1]; t.len() + 1];
+    dp[0][0] = true;
+    for j in 1..=p.len() {
+        if p[j - 1] == '*' {
+            dp[0][j] = dp[0][j - 1];
+        }
+    }
+    for i in 1..=t.len() {
+        for j in 1..=p.len() {
+            dp[i][j] = match p[j - 1] {
+                '*' => dp[i - 1][j] || dp[i][j - 1],
+                '?' => dp[i - 1][j - 1],
+                c => dp[i - 1][j - 1] && c == t[i - 1],
+            };
+        }
+    }
+    dp[t.len()][p.len()]
 }
 
 /// 网页信息抓取结果

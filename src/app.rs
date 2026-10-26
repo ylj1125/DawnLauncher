@@ -3410,9 +3410,11 @@ fn open_item(item: &Item) {
         return;
     }
 
-    // 统一用 native::open_path 打开 (内部用 cmd /C start "" path)
-    // 这能正确处理 exe/文件夹/网址/带空格路径
-    match native::open_path(&target) {
+    // 统一用 native::open_path_ex 打开，支持启动参数、起始位置与管理员权限
+    let params = item.data.params.as_deref().unwrap_or("");
+    let work_dir = item.data.start_location.as_deref().unwrap_or("");
+    let as_admin = item.data.run_as_admin;
+    match native::open_path_ex(&target, params, work_dir, as_admin) {
         Ok(_) => log::info!("打开成功: {}", target),
         Err(e) => {
             log::error!("打开失败: {}, error: {}", target, e);
@@ -3827,18 +3829,22 @@ fn import_entries(
 /// 删除磁盘上已不存在的项目，插入新出现的文件/子文件夹
 /// 返回是否发生了增删 (true=变化)
 fn sync_associate_folder(db: &Database, classification_id: i64) -> bool {
-    let path = match db.get_classification(classification_id) {
-        Some(c) if c.kind == 1 => match c.data.associate_folder_path {
-            Some(p) if !p.is_empty() => p,
-            _ => return false,
-        },
+    let (path, hidden_items) = match db.get_classification(classification_id) {
+        Some(c) if c.kind == 1 => {
+            let p = match c.data.associate_folder_path {
+                Some(p) if !p.is_empty() => p,
+                _ => return false,
+            };
+            let h = c.data.associate_folder_hidden_items.unwrap_or_default();
+            (p, h)
+        }
         _ => return false,
     };
     if !std::path::Path::new(&path).is_dir() {
         return false;
     }
 
-    let entries = native::scan_folder(&path);
+    let entries = native::scan_folder(&path, &hidden_items);
     let existing = db.list_items(classification_id);
 
     // 当前磁盘目标集合 (忽略大小写)

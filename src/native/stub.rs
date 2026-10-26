@@ -30,6 +30,15 @@ pub fn open_path(_path: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+pub fn open_path_ex(
+    _path: &str,
+    _params: &str,
+    _work_dir: &str,
+    _as_admin: bool,
+) -> std::io::Result<()> {
+    Ok(())
+}
+
 pub fn is_fullscreen() -> bool {
     false
 }
@@ -58,7 +67,7 @@ pub fn open_appx(_aumid: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn scan_folder(_path: &str) -> Vec<LauncherEntry> {
+pub fn scan_folder(_path: &str, _hidden_patterns: &str) -> Vec<LauncherEntry> {
     Vec::new()
 }
 
