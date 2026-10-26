@@ -181,24 +181,52 @@ pub fn search_path(file: &str) -> Option<String> {
 /// 用系统默认程序打开文件或网址
 /// 使用 ShellExecuteW 而非 cmd /C start，避免 mingw 下参数转义问题
 pub fn open_path(path: &str) -> std::io::Result<()> {
+    open_path_with_options(path, None, None, false)
+}
+
+/// 带参数 / 起始位置 / 管理员权限 打开项目
+/// - params: 启动参数（可为空）
+/// - start_location: 工作目录（为空则不指定）
+/// - run_as_admin: true 时用 "runas" 动词提权
+pub fn open_path_with_options(
+    path: &str,
+    params: Option<&str>,
+    start_location: Option<&str>,
+    run_as_admin: bool,
+) -> std::io::Result<()> {
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     use windows::core::PCWSTR;
 
     let path_h = HSTRING::from(path);
-    let operation = HSTRING::from("open");
-    // ShellExecuteW 返回 HINSTANCE，错误时返回值 <= 32
+    let operation = if run_as_admin {
+        HSTRING::from("runas")
+    } else {
+        HSTRING::from("open")
+    };
+    let params_h = params
+        .filter(|p| !p.trim().is_empty())
+        .map(HSTRING::from);
+    let dir_h = start_location
+        .filter(|d| !d.trim().is_empty())
+        .map(HSTRING::from);
+
     let result = unsafe {
         ShellExecuteW(
             None,
             PCWSTR(operation.as_ptr()),
             PCWSTR(path_h.as_ptr()),
-            PCWSTR::null(),
-            PCWSTR::null(),
+            params_h
+                .as_ref()
+                .map(|h| PCWSTR(h.as_ptr()))
+                .unwrap_or(PCWSTR::null()),
+            dir_h
+                .as_ref()
+                .map(|h| PCWSTR(h.as_ptr()))
+                .unwrap_or(PCWSTR::null()),
             SW_SHOWNORMAL,
         )
     };
-    // ShellExecuteW 错误时返回的 HINSTANCE 值 <= 32
     if result.0 as usize <= 32 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Other,

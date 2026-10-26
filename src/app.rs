@@ -1966,6 +1966,16 @@ impl App {
                             db_for_ctx.record_item_open(item_id);
                         }
                     }
+                    ("item", "run-as-admin") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        let items = db_for_ctx.list_items(class_id);
+                        if let Some(item) = items.iter().find(|i| i.id == item_id) {
+                            let mut admin_item = item.clone();
+                            admin_item.data.run_as_admin = true;
+                            open_item(&admin_item);
+                            db_for_ctx.record_item_open(item_id);
+                        }
+                    }
                     ("item", "open-location") => {
                         let item_id = *right_item_id.lock().unwrap();
                         if let Some(target) = db_for_ctx.get_item_target(item_id) {
@@ -2029,6 +2039,50 @@ impl App {
                             {
                                 let _ = copy_to_clipboard(&target);
                                 show_info_dialog("已复制", "路径已复制到剪贴板");
+                            }
+                        }
+                    }
+                    ("item", "copy-name") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        if let Some(item) = db_for_ctx.get_item(item_id) {
+                            #[cfg(target_os = "windows")]
+                            {
+                                let _ = copy_to_clipboard(&item.name);
+                                show_info_dialog("已复制", "名称已复制到剪贴板");
+                            }
+                        }
+                    }
+                    ("item", "move-to") | ("item", "copy-to") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        let all_classes = db_for_ctx.list_all_classifications();
+                        let class_names: Vec<String> = all_classes
+                            .iter()
+                            .map(|c| format!("[{}] {}", c.id, c.name))
+                            .collect();
+                        let prompt = format!(
+                            "请输入目标分类ID:\n{}",
+                            class_names.join("\n")
+                        );
+                        drop(w);
+                        if let Some(input) = show_input_dialog("选择目标分类", &prompt) {
+                            if let Ok(target_id) = input.trim().parse::<i64>() {
+                                let is_move = action_str == "move-to";
+                                let result = if is_move {
+                                    db_for_ctx.batch_move_items(&[item_id], target_id)
+                                } else {
+                                    db_for_ctx.batch_copy_items(&[item_id], target_id)
+                                };
+                                match result {
+                                    Ok(_) => {
+                                        let items = db_for_ctx.list_items(class_id);
+                                        if let Some(w) = window_for_ctx.upgrade() {
+                                            w.set_items(to_item_model(&items, 0));
+                                        }
+                                        let op = if is_move { "移动" } else { "复制" };
+                                        show_info_dialog("完成", &format!("{} 成功", op));
+                                    }
+                                    Err(e) => show_error_dialog("错误", &format!("操作失败: {}", e)),
+                                }
                             }
                         }
                     }
@@ -3397,9 +3451,14 @@ fn open_item(item: &Item) {
         return;
     }
 
-    // 统一用 native::open_path 打开 (内部用 cmd /C start "" path)
-    // 这能正确处理 exe/文件夹/网址/带空格路径
-    match native::open_path(&target) {
+    // 统一用 native::open_path_with_options 打开
+    // 传入启动参数 / 起始位置 / 管理员运行标志（之前这三项被忽略）
+    match native::open_path_with_options(
+        &target,
+        item.data.params.as_deref(),
+        item.data.start_location.as_deref(),
+        item.data.run_as_admin,
+    ) {
         Ok(_) => log::info!("打开成功: {}", target),
         Err(e) => {
             log::error!("打开失败: {}, error: {}", target, e);
@@ -3957,18 +4016,23 @@ fn show_context_menu(
 }
 
 /// 显示项目右键菜单
-/// 包含: 打开/打开位置/资源管理器菜单/重命名/复制路径/刷新图标/转为相对路径/转为绝对路径/删除
+/// 包含: 打开/以管理员运行/打开位置/资源管理器菜单/重命名/编辑/复制名称/复制路径/移动到/复制到/刷新图标/转相对/转绝对/删除
 fn show_item_context_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
         ("open", "打开", "▶", false, false),
+        ("run-as-admin", "以管理员身份运行", "🛡", false, false),
         ("open-location", "打开文件位置", "📁", false, false),
         ("explorer-menu", "资源管理器菜单", "🗂", false, false),
         ("", "", "", true, false), // 分隔线
         ("rename", "重命名", "✏", false, false),
         ("edit", "编辑项目", "⚙", false, false),
+        ("copy-name", "复制名称", "🏷", false, false),
         ("copy-path", "复制路径", "📋", false, false),
-        ("refresh-icon", "刷新图标", "🔄", false, false),
         ("", "", "", true, false),
+        ("move-to", "移动到...", "↪", false, false),
+        ("copy-to", "复制到...", "📋", false, false),
+        ("", "", "", true, false),
+        ("refresh-icon", "刷新图标", "🔄", false, false),
         ("to-relative", "转为相对路径", "↻", false, false),
         ("to-absolute", "转为绝对路径", "↻", false, false),
         ("", "", "", true, false),

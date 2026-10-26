@@ -28,6 +28,15 @@ pub fn open_path(_path: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+pub fn open_path_with_options(
+    _path: &str,
+    _params: Option<&str>,
+    _start_location: Option<&str>,
+    _run_as_admin: bool,
+) -> std::io::Result<()> {
+    Ok(())
+}
+
 pub fn is_fullscreen() -> bool {
     false
 }
