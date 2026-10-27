@@ -83,12 +83,19 @@ impl App {
 
         // 4. 加载分类列表
         let classifications = db.list_all_classifications();
-        // 选中第一个父分类
-        let first_id = classifications
-            .iter()
-            .find(|c| c.parent_id.is_none())
-            .map(|c| c.id)
-            .unwrap_or_else(|| classifications.first().map(|c| c.id).unwrap_or(0));
+        // 选中默认分类（优先使用设置中保存的默认分类，否则选第一个父分类）
+        let default_id = db.get_setting_i64("default_classification_id", 0);
+        let first_id = if default_id > 0
+            && classifications.iter().any(|c| c.id == default_id)
+        {
+            default_id
+        } else {
+            classifications
+                .iter()
+                .find(|c| c.parent_id.is_none())
+                .map(|c| c.id)
+                .unwrap_or_else(|| classifications.first().map(|c| c.id).unwrap_or(0))
+        };
 
         // 4.1 初始化展开状态：默认所有父分类展开
         let expanded_classifications = Arc::new(Mutex::new(
@@ -330,10 +337,16 @@ impl App {
         let window_for_class_menu = main_window.as_weak();
         let right_clicked_class_id = Arc::new(Mutex::new(0i64));
         let right_clicked_class_id_for_menu = right_clicked_class_id.clone();
+        let db_for_class_menu = db.clone();
         main_window.on_classification_right_clicked(move |id| {
             *right_clicked_class_id_for_menu.lock().unwrap() = id as i64;
             if let Some(w) = window_for_class_menu.upgrade() {
-                show_classification_item_menu(&w, 160, 200);
+                // 查询当前分类是否已排除搜索，用于菜单文案切换
+                let exclude = db_for_class_menu
+                    .get_classification(id as i64)
+                    .map(|c| c.data.exclude_search)
+                    .unwrap_or(false);
+                show_classification_item_menu(&w, 160, 200, exclude);
             }
         });
 
@@ -1933,6 +1946,68 @@ impl App {
                             }
                         }
                     }
+                    ("classification-item", "set-default") => {
+                        let cid = *right_class_id.lock().unwrap();
+                        match db_for_ctx.set_setting_i64("default_classification_id", cid) {
+                            Ok(_) => {
+                                show_info_dialog("已设置", "该分类已设为默认分类");
+                                log::info!("默认分类已设为: id={}", cid);
+                            }
+                            Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
+                        }
+                        if let Some(w) = window_for_ctx.upgrade() {
+                            w.set_context_menu_visible(false);
+                        }
+                    }
+                    ("classification-item", "edit-icon") => {
+                        let cid = *right_class_id.lock().unwrap();
+                        drop(w);
+                        if let Some(path) = show_open_file_dialog() {
+                            match image_file_to_data_url(&path) {
+                                Some(data_url) => {
+                                    match db_for_ctx.set_classification_icon(cid, Some(&data_url)) {
+                                        Ok(_) => {
+                                            let classes = db_for_ctx.list_all_classifications();
+                                            let cur = *current_id_for_ctx.lock().unwrap();
+                                            if let Some(w) = window_for_ctx.upgrade() {
+                                                w.set_classifications(to_classification_model(
+                                                    &classes,
+                                                    cur,
+                                                    &expanded_for_ctx.lock().unwrap(),
+                                                ));
+                                            }
+                                            show_info_dialog("已设置", "分类图标已更新");
+                                        }
+                                        Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
+                                    }
+                                }
+                                None => show_error_dialog("错误", "无法读取该图片文件"),
+                            }
+                        }
+                    }
+                    ("classification-item", "toggle-exclude-search") => {
+                        let cid = *right_class_id.lock().unwrap();
+                        if let Some(classification) = db_for_ctx.get_classification(cid) {
+                            let new_val = !classification.data.exclude_search;
+                            match db_for_ctx.set_classification_exclude_search(cid, new_val) {
+                                Ok(_) => {
+                                    let classes = db_for_ctx.list_all_classifications();
+                                    let cur = *current_id_for_ctx.lock().unwrap();
+                                    if let Some(w) = window_for_ctx.upgrade() {
+                                        w.set_classifications(to_classification_model(
+                                            &classes,
+                                            cur,
+                                            &expanded_for_ctx.lock().unwrap(),
+                                        ));
+                                        w.set_context_menu_visible(false);
+                                    }
+                                    let msg = if new_val { "已排除搜索" } else { "已取消排除搜索" };
+                                    show_info_dialog("完成", msg);
+                                }
+                                Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
+                            }
+                        }
+                    }
                     ("classification-item", "delete") => {
                         let cid = *right_class_id.lock().unwrap();
                         drop(w);
@@ -3261,6 +3336,12 @@ fn to_classification_model(
             .iter()
             .map(|c| {
                 let depth = if c.parent_id.is_some() { 1 } else { 0 };
+                let icon = c
+                    .data
+                    .icon
+                    .as_deref()
+                    .and_then(parse_icon_data_url)
+                    .unwrap_or_default();
                 ClassificationInfo {
                     id: c.id as i32,
                     name: SharedString::from(c.name.as_str()),
@@ -3269,6 +3350,7 @@ fn to_classification_model(
                     depth,
                     has_children: has_children_set.contains(&c.id),
                     expanded: expanded.contains(&c.id),
+                    icon,
                 }
             })
             .collect::<Vec<_>>(),
@@ -4042,11 +4124,17 @@ fn show_item_context_menu(window: &MainWindow, x: i32, y: i32) {
 }
 
 /// 显示分类项右键菜单
-/// 包含: 重命名/删除/(如果有子分类: 添加子分类)
-fn show_classification_item_menu(window: &MainWindow, x: i32, y: i32) {
+/// 包含: 重命名/新建子分类/关联文件夹/聚合分类/设为默认分类/设置图标/排除搜索/删除
+fn show_classification_item_menu(window: &MainWindow, x: i32, y: i32, exclude_search: bool) {
+    let exclude_label = if exclude_search { "取消排除搜索" } else { "排除搜索" };
     let items = [
         ("rename", "重命名", "✏", false, false),
         ("add-child", "新建子分类", "+", false, false),
+        ("", "", "", true, false),
+        ("set-default", "设为默认分类", "★", false, false),
+        ("edit-icon", "设置图标...", "🖼", false, false),
+        ("toggle-exclude-search", exclude_label, "🚫", false, false),
+        ("", "", "", true, false),
         ("associate-folder", "关联文件夹...", "📁", false, false),
         ("aggregate", "聚合分类...", "∑", false, false),
         ("", "", "", true, false),

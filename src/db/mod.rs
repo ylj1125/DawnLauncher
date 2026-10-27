@@ -184,9 +184,12 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let like = format!("%{}%", query.trim());
         let mut stmt = match conn.prepare(
-            "SELECT id, classification_id, name, type, data, shortcut_key, global_shortcut_key, `order` \
-             FROM item WHERE name LIKE ? COLLATE NOCASE \
-             ORDER BY COALESCE(json_extract(data, '$.openNumber'), 0) DESC, name ASC",
+            "SELECT i.id, i.classification_id, i.name, i.type, i.data, i.shortcut_key, i.global_shortcut_key, i.`order` \
+             FROM item i \
+             JOIN classification c ON i.classification_id = c.id \
+             WHERE i.name LIKE ? COLLATE NOCASE \
+               AND COALESCE(json_extract(c.data, '$.exclude_search'), 0) = 0 \
+             ORDER BY COALESCE(json_extract(i.data, '$.openNumber'), 0) DESC, i.name ASC",
         ) {
             Ok(s) => s,
             Err(_) => return vec![],
@@ -524,6 +527,50 @@ impl Database {
         let new_data_str = serde_json::to_string(&data).unwrap_or(data_str);
         conn.execute(
             "UPDATE classification SET type = 1, data = ? WHERE id = ?",
+            params![new_data_str, classification_id],
+        )?;
+        Ok(())
+    }
+
+    /// 设置分类图标 (data.icon, 存储为 data URL 或空字符串清除)
+    pub fn set_classification_icon(
+        &self,
+        classification_id: i64,
+        icon: Option<&str>,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let data_str: String = conn.query_row(
+            "SELECT data FROM classification WHERE id = ?",
+            params![classification_id],
+            |r| r.get(0),
+        )?;
+        let mut data: ClassificationData = serde_json::from_str(&data_str).unwrap_or_default();
+        data.icon = icon.map(|s| s.to_string());
+        let new_data_str = serde_json::to_string(&data).unwrap_or(data_str);
+        conn.execute(
+            "UPDATE classification SET data = ? WHERE id = ?",
+            params![new_data_str, classification_id],
+        )?;
+        Ok(())
+    }
+
+    /// 设置分类是否排除搜索 (data.exclude_search)
+    pub fn set_classification_exclude_search(
+        &self,
+        classification_id: i64,
+        exclude: bool,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let data_str: String = conn.query_row(
+            "SELECT data FROM classification WHERE id = ?",
+            params![classification_id],
+            |r| r.get(0),
+        )?;
+        let mut data: ClassificationData = serde_json::from_str(&data_str).unwrap_or_default();
+        data.exclude_search = exclude;
+        let new_data_str = serde_json::to_string(&data).unwrap_or(data_str);
+        conn.execute(
+            "UPDATE classification SET data = ? WHERE id = ?",
             params![new_data_str, classification_id],
         )?;
         Ok(())

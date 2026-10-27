@@ -18,6 +18,7 @@ export struct ClassificationInfo {
     depth: int,        // 层级深度 (0=顶级, 1=子分类)
     has-children: bool, // 是否有子分类
     expanded: bool,     // 是否展开子分类
+    icon: image,        // 分类图标（可选）
 }
 
 export component MainWindow inherits Window {
@@ -326,6 +327,7 @@ export component MainWindow inherits Window {
                                 depth: c.depth;
                                 has-children: c.has-children;
                                 expanded: c.expanded;
+                                icon: c.icon;
                                 clicked => { root.classification-clicked(c.id); }
                                 right-clicked => { root.classification-right-clicked(c.id); }
                                 expand-toggled => { root.classification-expand-toggled(c.id); }
