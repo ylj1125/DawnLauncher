@@ -64,6 +64,20 @@ pub struct ItemData {
     pub last_open: i64,
     pub quick_search_last_open: i64,
     pub multi_items_time_interval: i64,
+    /// 多项目子项列表 (kind=5 时使用)
+    #[serde(default)]
+    pub multi_items: Vec<MultiItem>,
+}
+
+/// 多项目（kind=5）中的子项定义
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MultiItem {
+    pub target: String,
+    pub params: Option<String>,
+    pub start_location: Option<String>,
+    #[serde(default)]
+    pub run_as_admin: bool,
+    pub name: Option<String>,
 }
 
 impl Classification {
@@ -93,5 +107,9 @@ impl Item {
     /// 是否为 Appx
     pub fn is_appx(&self) -> bool {
         self.kind == 4
+    }
+    /// 是否为多项目（kind=5）
+    pub fn is_multi(&self) -> bool {
+        self.kind == 5
     }
 }

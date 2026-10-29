@@ -50,6 +50,10 @@ export component MainWindow inherits Window {
     in property <bool> hide-after-open: false;
     in property <bool> quick-search-enabled: false;
     in property <int> quick-search-width: 600;
+    // ===== 当前分类项目设置 =====
+    in property <string> current-class-layout: "tile";  // tile / list
+    in property <int> current-class-icon-size: 48;     // 覆盖 item-icon-size
+    in property <string> current-class-show-only: "default";  // default / file / folder
     // ===== 窗口背景图 / 不透明度 =====
     in property <image> window-bg-image;
     in-out property <bool> window-bg-visible: false;
@@ -512,8 +516,10 @@ export component MainWindow inherits Window {
                                 selected: item.selected;
                                 theme-mode: root.theme-mode;
                                 batch-mode: root.batch-mode;
-                                icon-size: root.item-icon-size * 1px;
+                                icon-size: root.current-class-icon-size * 1px;
                                 hide-name: root.hide-name;
+                                layout: root.current-class-layout;
+                                show-only: root.current-class-show-only;
                                 clicked => {
                                     if (root.batch-mode) {
                                         // 批量模式下点击切换选中

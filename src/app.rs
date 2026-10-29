@@ -153,18 +153,26 @@ impl App {
                 std::thread::spawn(move || {
                     sync_associate_folder(&db_bg, class_id);
                     let items = db_bg.list_items(class_id);
+                    let settings = db_bg.get_classification(class_id);
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = win_bg.upgrade() {
                             w.set_items(to_item_model(&items, 0));
                             w.set_status_text(SharedString::from(format!("{} 项", items.len())));
+                            if let Some(c) = settings {
+                                apply_class_settings(&w, &c.data);
+                            }
                         }
                     });
                 });
             } else {
                 let items = db_for_class.list_items(class_id);
+                let class_data = db_for_class.get_classification(class_id).map(|c| c.data.clone());
                 if let Some(w) = window_for_class.upgrade() {
                     w.set_items(to_item_model(&items, 0));
                     w.set_status_text(SharedString::from(format!("{} 项", items.len())));
+                    if let Some(data) = class_data {
+                        apply_class_settings(&w, &data);
+                    }
                 }
             }
         });
@@ -341,12 +349,25 @@ impl App {
         main_window.on_classification_right_clicked(move |id| {
             *right_clicked_class_id_for_menu.lock().unwrap() = id as i64;
             if let Some(w) = window_for_class_menu.upgrade() {
-                // 查询当前分类是否已排除搜索，用于菜单文案切换
-                let exclude = db_for_class_menu
-                    .get_classification(id as i64)
-                    .map(|c| c.data.exclude_search)
-                    .unwrap_or(false);
-                show_classification_item_menu(&w, 160, 200, exclude);
+                let cur = db_for_class_menu.get_classification(id as i64);
+                let (exclude, layout, icon_size, show_only) = match &cur {
+                    Some(c) => (
+                        c.data.exclude_search,
+                        c.data.item_layout.clone(),
+                        c.data.item_icon_size.unwrap_or(48),
+                        c.data.item_show_only.clone(),
+                    ),
+                    None => (false, "tile".into(), 48, "default".into()),
+                };
+                show_classification_item_menu(
+                    &w,
+                    160,
+                    200,
+                    exclude,
+                    &layout,
+                    icon_size,
+                    &show_only,
+                );
             }
         });
 
@@ -1712,6 +1733,148 @@ impl App {
                             }
                         }
                     }
+                    ("item-area", "new-system") => {
+                        // 新建系统项目：弹出常见系统项清单让用户选择
+                        drop(w);
+                        // 内置常见系统项 (名称 / target 协议)
+                        let systems: &[(&str, &str)] = &[
+                            ("此电脑", "shell:MyComputerFolder"),
+                            ("回收站", "shell:RecycleBinFolder"),
+                            ("控制面板", "shell:ControlPanelFolder"),
+                            ("打印机和设备", "shell:PrintersFolder"),
+                            ("网络", "shell:NetworkPlacesFolder"),
+                            ("运行", "shell:RunFolder"),
+                            ("Windows 设置", "ms-settings:"),
+                            ("注册表编辑器", "regedit"),
+                            ("设备管理器", "devmgmt.msc"),
+                            ("磁盘管理", "diskmgmt.msc"),
+                            ("服务", "services.msc"),
+                            ("事件查看器", "eventvwr.msc"),
+                            ("任务计划程序", "taskschd.msc"),
+                            ("电源选项", "powercfg.cpl"),
+                            ("日期和时间", "timedate.cpl"),
+                            ("计算器", "calc"),
+                            ("记事本", "notepad"),
+                            ("命令提示符", "cmd"),
+                            ("PowerShell", "powershell"),
+                            ("Windows 更新", "ms-settings:windowsupdate"),
+                        ];
+                        let mut prompt = String::from("请输入编号选择系统项目:\n");
+                        for (i, (n, _)) in systems.iter().enumerate() {
+                            prompt.push_str(&format!("{}: {}\n", i + 1, n));
+                        }
+                        prompt.push_str("或直接输入 shell:/程序名 (手动添加)");
+                        let db_ctx = db_for_ctx.clone();
+                        let class_id_clone = class_id;
+                        let win_ctx = window_for_ctx.clone();
+                        if let Some(input) = show_input_dialog("新建系统项目", &prompt) {
+                            let trimmed = input.trim();
+                            let (name, target) = if let Ok(num) = trimmed.parse::<usize>() {
+                                if num >= 1 && num <= systems.len() {
+                                    let (n, t) = systems[num - 1];
+                                    (n.to_string(), t.to_string())
+                                } else {
+                                    (trimmed.to_string(), trimmed.to_string())
+                                }
+                            } else if let Some(colon) = trimmed.find(':') {
+                                // 允许 "名称=target" 格式手动输入
+                                let n = trimmed[..colon].trim().to_string();
+                                let t = trimmed[colon + 1..].trim().to_string();
+                                (if n.is_empty() { t.clone() } else { n }, t)
+                            } else {
+                                (trimmed.to_string(), trimmed.to_string())
+                            };
+                            if !target.is_empty() {
+                                let order = db_ctx.max_item_order(class_id_clone) + 1;
+                                let icon = native::get_file_icon(&target).ok();
+                                let item = crate::models::Item {
+                                    id: 0,
+                                    classification_id: class_id_clone,
+                                    name,
+                                    kind: 3,
+                                    data: crate::models::ItemData {
+                                        target: Some(target),
+                                        icon,
+                                        ..Default::default()
+                                    },
+                                    shortcut_key: None,
+                                    global_shortcut_key: false,
+                                    order,
+                                };
+                                if db_ctx.insert_item(&item).is_ok() {
+                                    let items = db_ctx.list_items(class_id_clone);
+                                    if let Some(w) = win_ctx.upgrade() {
+                                        w.set_items(to_item_model(&items, 0));
+                                        w.set_status_text(SharedString::from(format!(
+                                            "共 {} 个项目",
+                                            items.len()
+                                        )));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    ("item-area", "new-multi-item") => {
+                        // 新建多项目：让用户依次输入子项路径（每行一个，可含 ;params 分隔）
+                        drop(w);
+                        let prompt = "新建多项目\n\n请输入名称 + 子项列表，格式:\n名称\n路径1\n路径2\n路径3...\n\n示例:\n浏览器合集\nC:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\nC:\\Program Files\\Mozilla Firefox\\firefox.exe\nmsedge";
+                        let db_ctx = db_for_ctx.clone();
+                        let class_id_clone = class_id;
+                        let win_ctx = window_for_ctx.clone();
+                        if let Some(text) = show_input_dialog("新建多项目", prompt) {
+                            let mut lines = text.lines();
+                            let name = lines.next().unwrap_or("多项目").trim().to_string();
+                            let children: Vec<crate::models::MultiItem> = lines
+                                .filter(|l| !l.trim().is_empty())
+                                .map(|line| {
+                                    let l = line.trim();
+                                    let (target, params) = if let Some(idx) = l.find(';') {
+                                        (l[..idx].trim().to_string(), Some(l[idx + 1..].trim().to_string()))
+                                    } else {
+                                        (l.to_string(), None)
+                                    };
+                                    crate::models::MultiItem {
+                                        target,
+                                        params,
+                                        start_location: None,
+                                        run_as_admin: false,
+                                        name: None,
+                                    }
+                                })
+                                .collect();
+                            if children.is_empty() {
+                                show_info_dialog("提示", "至少需要配置一个子项");
+                                return;
+                            }
+                            let order = db_ctx.max_item_order(class_id_clone) + 1;
+                            let icon = db_ctx.get_item(class_id_clone).and_then(|_| None); // 不设图标
+                            let item = crate::models::Item {
+                                id: 0,
+                                classification_id: class_id_clone,
+                                name,
+                                kind: 5,
+                                data: crate::models::ItemData {
+                                    multi_items: children,
+                                    multi_items_time_interval: 200,
+                                    icon,
+                                    ..Default::default()
+                                },
+                                shortcut_key: None,
+                                global_shortcut_key: false,
+                                order,
+                            };
+                            if db_ctx.insert_item(&item).is_ok() {
+                                let items = db_ctx.list_items(class_id_clone);
+                                if let Some(w) = win_ctx.upgrade() {
+                                    w.set_items(to_item_model(&items, 0));
+                                    w.set_status_text(SharedString::from(format!(
+                                        "共 {} 个项目",
+                                        items.len()
+                                    )));
+                                }
+                            }
+                        }
+                    }
                     ("item-area", "batch-mode") => {
                         w.set_batch_mode(true);
                         w.set_context_menu_visible(false);
@@ -1943,6 +2106,74 @@ impl App {
                                     "聚合分类",
                                     &format!("设置失败: {}", e),
                                 ),
+                            }
+                        }
+                    }
+                    ("classification-item", "toggle-layout") => {
+                        let cid = *right_class_id.lock().unwrap();
+                        if let Some(classification) = db_for_ctx.get_classification(cid) {
+                            let new_layout = if classification.data.item_layout == "list" {
+                                "tile".to_string()
+                            } else {
+                                "list".to_string()
+                            };
+                            match db_for_ctx.set_classification_item_layout(cid, &new_layout) {
+                                Ok(_) => {
+                                    let items = db_for_ctx.list_items(cid);
+                                    if let Some(w) = window_for_ctx.upgrade() {
+                                        w.set_items(to_item_model(&items, 0));
+                                        apply_class_settings(&w, &db_for_ctx.get_classification(cid).unwrap().data);
+                                        w.set_context_menu_visible(false);
+                                    }
+                                    show_info_dialog("完成", &format!("布局已切换为：{}", new_layout));
+                                }
+                                Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
+                            }
+                        }
+                    }
+                    ("classification-item", "icon-size") => {
+                        let cid = *right_class_id.lock().unwrap();
+                        drop(w);
+                        let prompt = "请输入图标大小 (整数, 16~128)\n建议: 32 小 / 48 默认 / 64 大";
+                        if let Some(input) = show_input_dialog("图标大小", prompt) {
+                            let size = input.trim().parse::<i64>().unwrap_or(48).clamp(16, 128);
+                            match db_for_ctx.set_classification_item_icon_size(cid, size) {
+                                Ok(_) => {
+                                    let items = db_for_ctx.list_items(cid);
+                                    if let Some(w) = window_for_ctx.upgrade() {
+                                        w.set_items(to_item_model(&items, 0));
+                                        apply_class_settings(&w, &db_for_ctx.get_classification(cid).unwrap().data);
+                                    }
+                                    show_info_dialog("完成", &format!("图标大小已设为 {}", size));
+                                }
+                                Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
+                            }
+                        }
+                    }
+                    ("classification-item", "toggle-show-only") => {
+                        let cid = *right_class_id.lock().unwrap();
+                        if let Some(classification) = db_for_ctx.get_classification(cid) {
+                            let new_val = match classification.data.item_show_only.as_str() {
+                                "default" => "file",
+                                "file" => "folder",
+                                _ => "default",
+                            };
+                            match db_for_ctx.set_classification_item_show_only(cid, new_val) {
+                                Ok(_) => {
+                                    let items = db_for_ctx.list_items(cid);
+                                    if let Some(w) = window_for_ctx.upgrade() {
+                                        w.set_items(to_item_model(&items, 0));
+                                        apply_class_settings(&w, &db_for_ctx.get_classification(cid).unwrap().data);
+                                        w.set_context_menu_visible(false);
+                                    }
+                                    let label = match new_val {
+                                        "file" => "仅文件",
+                                        "folder" => "仅文件夹",
+                                        _ => "全部显示",
+                                    };
+                                    show_info_dialog("完成", &format!("显示已设为：{}", label));
+                                }
+                                Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
                             }
                         }
                     }
@@ -3293,6 +3524,22 @@ fn get_database_path() -> Result<std::path::PathBuf, Box<dyn std::error::Error>>
 }
 
 /// 将分类列表转为 Slint 模型 (包含父子层级)
+/// 将分类设置同步到 MainWindow 的三个 property（供 ItemCard 读取）
+fn apply_class_settings(w: &MainWindow, data: &models::ClassificationData) {
+    let layout = match data.item_layout.as_str() {
+        "list" => "list",
+        _ => "tile",
+    };
+    w.set_current_class_layout(SharedString::from(layout));
+    let icon_size = data.item_icon_size.unwrap_or(48);
+    w.set_current_class_icon_size(icon_size as i32);
+    let show_only = match data.item_show_only.as_str() {
+        "file" | "folder" => data.item_show_only.clone(),
+        _ => "default".to_string(),
+    };
+    w.set_current_class_show_only(SharedString::from(show_only));
+}
+
 /// list 应为已排序的完整分类列表（父+子）
 /// expanded: 当前展开的父分类 id 集合，子分类仅在父分类展开时显示
 fn to_classification_model(
@@ -3516,6 +3763,40 @@ fn open_item(item: &Item) {
                 }
             }
         }
+        return;
+    }
+
+    // 多项目 (kind=5)：循环打开 multi_items 子项，间隔 multi_items_time_interval 毫秒
+    if item.is_multi() {
+        let interval = item.data.multi_items_time_interval.max(0) as u64;
+        let children = item.data.multi_items.clone();
+        if children.is_empty() {
+            show_info_dialog(
+                "提示",
+                "此多项目尚未配置子项。\n请右键 → 编辑项目 → 依次输入子项路径。",
+            );
+            return;
+        }
+        let mut opened = 0usize;
+        for sub in &children {
+            if sub.target.trim().is_empty() {
+                continue;
+            }
+            let sub_opened = native::open_path_with_options(
+                &sub.target,
+                sub.params.as_deref(),
+                sub.start_location.as_deref(),
+                sub.run_as_admin,
+            )
+            .is_ok();
+            if sub_opened {
+                opened += 1;
+            }
+            if interval > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(interval));
+            }
+        }
+        log::info!("多项目 [{}] 已打开 {}/{} 个子项", item.name, opened, children.len());
         return;
     }
 
@@ -4115,6 +4396,8 @@ fn show_item_context_menu(window: &MainWindow, x: i32, y: i32) {
         ("copy-to", "复制到...", "📋", false, false),
         ("", "", "", true, false),
         ("refresh-icon", "刷新图标", "🔄", false, false),
+        ("remark-link", "打开备注链接", "🔗", false, false),
+        ("copy-remark", "复制备注", "📋", false, false),
         ("to-relative", "转为相对路径", "↻", false, false),
         ("to-absolute", "转为绝对路径", "↻", false, false),
         ("", "", "", true, false),
@@ -4124,12 +4407,38 @@ fn show_item_context_menu(window: &MainWindow, x: i32, y: i32) {
 }
 
 /// 显示分类项右键菜单
-/// 包含: 重命名/新建子分类/关联文件夹/聚合分类/设为默认分类/设置图标/排除搜索/删除
-fn show_classification_item_menu(window: &MainWindow, x: i32, y: i32, exclude_search: bool) {
+/// 包含: 重命名/新建子分类/切换布局/图标大小/显示过滤/设为默认分类/设置图标/排除搜索/关联文件夹/聚合分类/删除
+fn show_classification_item_menu(
+    window: &MainWindow,
+    x: i32,
+    y: i32,
+    exclude_search: bool,
+    cur_layout: &str,
+    cur_icon_size: i64,
+    cur_show_only: &str,
+) {
     let exclude_label = if exclude_search { "取消排除搜索" } else { "排除搜索" };
+    let layout_tip = if cur_layout == "list" {
+        "切换到卡片布局"
+    } else {
+        "切换到列表布局"
+    };
+    let icon_tip = format!(
+        "图标大小 (当前 {})",
+        if cur_icon_size == 0 { 48 } else { cur_icon_size }
+    );
+    let show_label = match cur_show_only {
+        "file" => "显示：仅文件夹",
+        "folder" => "显示：仅文件",
+        _ => "显示：仅文件",
+    };
     let items = [
         ("rename", "重命名", "✏", false, false),
         ("add-child", "新建子分类", "+", false, false),
+        ("", "", "", true, false),
+        ("toggle-layout", layout_tip, "▦", false, false),
+        ("icon-size", icon_tip.as_str(), "🖼", false, false),
+        ("toggle-show-only", show_label, "🗂", false, false),
         ("", "", "", true, false),
         ("set-default", "设为默认分类", "★", false, false),
         ("edit-icon", "设置图标...", "🖼", false, false),
@@ -4161,6 +4470,8 @@ fn show_item_area_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
         ("new-item", "新建项目", "+", false, false),
         ("new-url", "新建网址", "🔗", false, false),
+        ("new-system", "新建系统项目...", "⚙", false, false),
+        ("new-multi-item", "新建多项目...", "⧗", false, false),
         ("", "", "", true, false),
         ("sort-default", "排序：默认", "≡", false, false),
         ("sort-initial", "排序：按名称", "A", false, false),

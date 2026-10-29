@@ -814,6 +814,82 @@ impl Database {
         Ok(())
     }
 
+    /// 设置分类的项目布局 (default / tile / list)
+    pub fn set_classification_item_layout(&self, class_id: i64, layout: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let data_str: String = conn.query_row(
+            "SELECT data FROM classification WHERE id = ?",
+            params![class_id],
+            |r| r.get(0),
+        )?;
+        if let Ok(mut data) = serde_json::from_str::<ClassificationData>(&data_str) {
+            data.item_layout = layout.to_string();
+            let new_data_str = serde_json::to_string(&data).unwrap_or(data_str);
+            conn.execute(
+                "UPDATE classification SET data = ? WHERE id = ?",
+                params![new_data_str, class_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// 设置分类的项目图标大小 (默认 1 / 小 0.8 / 大 1.2 等)
+    pub fn set_classification_item_icon_size(&self, class_id: i64, size: i64) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let data_str: String = conn.query_row(
+            "SELECT data FROM classification WHERE id = ?",
+            params![class_id],
+            |r| r.get(0),
+        )?;
+        if let Ok(mut data) = serde_json::from_str::<ClassificationData>(&data_str) {
+            data.item_icon_size = Some(size);
+            let new_data_str = serde_json::to_string(&data).unwrap_or(data_str);
+            conn.execute(
+                "UPDATE classification SET data = ? WHERE id = ?",
+                params![new_data_str, class_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// 设置分类的项目显示过滤 (default / file / folder)
+    pub fn set_classification_item_show_only(&self, class_id: i64, show_only: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let data_str: String = conn.query_row(
+            "SELECT data FROM classification WHERE id = ?",
+            params![class_id],
+            |r| r.get(0),
+        )?;
+        if let Ok(mut data) = serde_json::from_str::<ClassificationData>(&data_str) {
+            data.item_show_only = show_only.to_string();
+            let new_data_str = serde_json::to_string(&data).unwrap_or(data_str);
+            conn.execute(
+                "UPDATE classification SET data = ? WHERE id = ?",
+                params![new_data_str, class_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// 设置分类的列数 (0 表示自动)
+    pub fn set_classification_item_column_number(&self, class_id: i64, col: i64) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let data_str: String = conn.query_row(
+            "SELECT data FROM classification WHERE id = ?",
+            params![class_id],
+            |r| r.get(0),
+        )?;
+        if let Ok(mut data) = serde_json::from_str::<ClassificationData>(&data_str) {
+            data.item_column_number = if col <= 0 { None } else { Some(col) };
+            let new_data_str = serde_json::to_string(&data).unwrap_or(data_str);
+            conn.execute(
+                "UPDATE classification SET data = ? WHERE id = ?",
+                params![new_data_str, class_id],
+            )?;
+        }
+        Ok(())
+    }
+
     /// 设置为聚合分类 (type=2)
     /// 会清空该分类下原有项目，聚合数量与排序写入 data
     pub fn set_classification_aggregate(

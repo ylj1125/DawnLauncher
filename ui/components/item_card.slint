@@ -11,31 +11,34 @@ export struct ItemInfo {
     selected: bool,
 }
 
-// 项目卡片
+// 项目卡片 (tile / list 两种外观，由 layout 属性切换)
 export component ItemCard inherits Rectangle {
     in property <int> item-id;
     in property <string> name;
     in property <image> icon;
     in property <bool> invalid;
     in property <bool> selected;
-    in property <string> theme-mode: "light";  // 接收主题模式
-    in property <bool> batch-mode: false;  // 是否批量模式（批量模式下选中态用蓝色边框）
-    in property <length> icon-size: ThemeSettings.item-icon-size;  // 动态图标大小
-    in property <bool> hide-name: false;  // 是否隐藏名称
+    in property <string> theme-mode: "light";
+    in property <bool> batch-mode: false;
+    in property <length> icon-size: ThemeSettings.item-icon-size;
+    in property <bool> hide-name: false;
+    in property <string> layout: "tile";  // tile 卡片布局 / list 行布局
+    in property <string> show-only: "default";  // default / file / folder  (暂时只影响空图标占位)
 
     callback clicked;
     callback double-clicked;
     callback right-clicked;
 
-    width: ThemeSettings.item-card-width;
-    height: root.hide-name ? ThemeSettings.item-card-width : ThemeSettings.item-card-height;
+    // ===== tile 布局外观 =====
+    width: root.layout == "list" ? 100% : ThemeSettings.item-card-width;
+    height: root.layout == "list" ? 36px : (root.hide-name ? ThemeSettings.item-card-width : ThemeSettings.item-card-height);
     border-radius: ThemeSettings.border-radius;
     background: selected ? ThemeSettings.selected-c(root.theme-mode) : (touch-area.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
-    // 批量模式下选中态用蓝色边框
     border-width: (root.batch-mode && root.selected) ? 2px : 0px;
     border-color: ThemeSettings.accent-color;
 
-    VerticalLayout {
+    // ===== tile 模式 =====
+    if root.layout != "list" : VerticalLayout {
         alignment: center;
         spacing: ThemeSettings.spacing-small;
         padding: ThemeSettings.spacing-small;
@@ -60,9 +63,34 @@ export component ItemCard inherits Rectangle {
         }
     }
 
+    // ===== list 模式 =====
+    if root.layout == "list" : HorizontalLayout {
+        alignment: start;
+        spacing: 10px;
+        padding-left: 10px;
+        padding-right: 10px;
+
+        Image {
+            source: root.icon;
+            width: root.icon-size < 24px ? 24px : root.icon-size;
+            height: root.icon-size < 24px ? 24px : root.icon-size;
+            opacity: root.invalid ? 0.3 : 1.0;
+            image-fit: contain;
+        }
+
+        Text {
+            text: root.name;
+            color: ThemeSettings.text-c(root.theme-mode);
+            font-size: ThemeSettings.font-size-normal;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+
     // ===== 拖拽排序 =====
-    // 左上角拖拽手柄（避免与单击/双击冲突）
-    Rectangle {
+    // 左上角拖拽手柄 (tile 模式)
+    if root.layout != "list" : Rectangle {
         x: 2px;
         y: 2px;
         width: 16px;
@@ -89,7 +117,25 @@ export component ItemCard inherits Rectangle {
         }
     }
 
-    // 放置区域（覆盖整张卡片）
+    // 左侧拖拽手柄 (list 模式，放在左侧图标上方遮罩)
+    if root.layout == "list" : Rectangle {
+        x: 2px;
+        width: 14px;
+        height: 100%;
+        background: transparent;
+
+        DragArea {
+            width: 100%;
+            height: 100%;
+            allow-move: true;
+            data: DragHelper.make-item(root.item-id);
+            drag-image: root.icon;
+            drag-image-offset-x: 24;
+            drag-image-offset-y: 24;
+        }
+    }
+
+    // DropArea 覆盖整张卡片
     DropArea {
         width: 100%;
         height: 100%;
@@ -110,11 +156,8 @@ export component ItemCard inherits Rectangle {
     }
 
     touch-area := TouchArea {
-        // clicked 用于选中（单次点击）
         clicked => { root.clicked(); }
-        // double-clicked 用于打开，Slint 内部独立触发，不被 clicked 拦截
         double-clicked => { root.double-clicked(); }
-        // 右键
         pointer-event(e) => {
             if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
                 root.right-clicked();
