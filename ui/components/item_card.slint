@@ -23,26 +23,31 @@ export component ItemCard inherits Rectangle {
     in property <length> icon-size: ThemeSettings.item-icon-size;
     in property <bool> hide-name: false;
     in property <string> layout: "tile";  // tile 卡片布局 / list 行布局
-    in property <string> show-only: "default";  // default / file / folder  (暂时只影响空图标占位)
-    in property <length> list-width: 400px;  // list 模式下的行宽（由调用方传入容器宽度）
+    in property <string> show-only: "default";
+    in property <length> list-width: 400px;  // list 模式下的行宽
 
     callback clicked;
     callback double-clicked;
     callback right-clicked;
 
-    // ===== 尺寸（list 模式占满整行，tile 模式固定卡片宽高）=====
+    // ===== 尺寸 =====
     width: root.layout == "list" ? root.list-width : ThemeSettings.item-card-width;
     height: root.layout == "list" ? 36px : (root.hide-name ? ThemeSettings.item-card-width : ThemeSettings.item-card-height);
     border-radius: ThemeSettings.border-radius;
-    background: selected ? ThemeSettings.selected-c(root.theme-mode) : (touch-area.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
+    background: selected
+        ? ThemeSettings.selected-c(root.theme-mode)
+        : (touch-area.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
     border-width: (root.batch-mode && root.selected) ? 2px : 0px;
     border-color: ThemeSettings.accent-color;
 
-    // ===== tile 模式 =====
+    // ===== 视觉层：图标 + 名称 =====
+    // tile 模式 - 居中堆叠
     if root.layout != "list" : VerticalLayout {
         alignment: center;
         spacing: ThemeSettings.spacing-small;
         padding: ThemeSettings.spacing-small;
+        width: 100%;
+        height: 100%;
 
         Image {
             source: root.icon;
@@ -55,33 +60,34 @@ export component ItemCard inherits Rectangle {
 
         if !root.hide-name : Text {
             text: root.name;
-            color: ThemeSettings.text-c(root.theme-mode);
+            color: root.invalid ? ThemeSettings.invalid-c(root.theme-mode) : ThemeSettings.text-c(root.theme-mode);
             font-size: ThemeSettings.font-size-small;
             horizontal-alignment: center;
             overflow: elide;
-            horizontal-stretch: 1;
-            width: 76px;
+            width: 72px;
         }
     }
 
-    // ===== list 模式 =====
+    // list 模式 - 水平行
     if root.layout == "list" : HorizontalLayout {
-        alignment: start;
         spacing: 10px;
         padding-left: 10px;
         padding-right: 10px;
+        width: 100%;
+        height: 100%;
 
         Image {
             source: root.icon;
-            width: root.icon-size < 24px ? 24px : root.icon-size;
-            height: root.icon-size < 24px ? 24px : root.icon-size;
+            width: max(root.icon-size, 24px);
+            height: max(root.icon-size, 24px);
             opacity: root.invalid ? 0.3 : 1.0;
+            vertical-alignment: center;
             image-fit: contain;
         }
 
         Text {
             text: root.name;
-            color: ThemeSettings.text-c(root.theme-mode);
+            color: root.invalid ? ThemeSettings.invalid-c(root.theme-mode) : ThemeSettings.text-c(root.theme-mode);
             font-size: ThemeSettings.font-size-normal;
             vertical-alignment: center;
             overflow: elide;
@@ -89,65 +95,31 @@ export component ItemCard inherits Rectangle {
         }
     }
 
-    // ===== 拖拽排序 =====
-    // 左上角拖拽手柄 (tile 模式)
-    if root.layout != "list" : Rectangle {
-        x: 2px;
-        y: 2px;
-        width: 16px;
-        height: 16px;
-        background: transparent;
+    // ===== 事件层（后声明 = 上层）=====
 
-        Text {
-            text: "⋮";
-            color: ThemeSettings.text-sec(root.theme-mode);
-            opacity: 0.5;
-            font-size: 12px;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-
-        DragArea {
-            width: 100%;
-            height: 100%;
-            allow-move: true;
-            data: DragHelper.make-item(root.item-id);
-            drag-image: root.icon;
-            drag-image-offset-x: 24;
-            drag-image-offset-y: 24;
-        }
-    }
-
-    // 左侧拖拽手柄 (list 模式，放在左侧图标上方遮罩)
-    if root.layout == "list" : Rectangle {
-        x: 2px;
-        width: 14px;
+    // 主点击区域 - 整张卡片的点击/双击/右键
+    touch-area := TouchArea {
+        width: 100%;
         height: 100%;
-        background: transparent;
-
-        DragArea {
-            width: 100%;
-            height: 100%;
-            allow-move: true;
-            data: DragHelper.make-item(root.item-id);
-            drag-image: root.icon;
-            drag-image-offset-x: 24;
-            drag-image-offset-y: 24;
+        clicked => { root.clicked(); }
+        double-clicked => { root.double-clicked(); }
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                root.right-clicked();
+            }
         }
     }
 
-    // DropArea 覆盖整张卡片
+    // DropArea 铺满整张卡片（平时透明，拖放时拦截）
     DropArea {
         width: 100%;
         height: 100%;
-
         can-drop(event) => {
             (DragHelper.kind-of(event.data) == "item"
                 && DragHelper.id-of(event.data) != root.item-id)
                 ? DragAction.move
                 : DragAction.none
         }
-
         dropped(event) => {
             if (DragHelper.kind-of(event.data) == "item") {
                 DragHelper.drop-on("item", DragHelper.id-of(event.data), root.item-id);
@@ -156,13 +128,55 @@ export component ItemCard inherits Rectangle {
         }
     }
 
-    touch-area := TouchArea {
-        clicked => { root.clicked(); }
-        double-clicked => { root.double-clicked(); }
-        pointer-event(e) => {
-            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
-                root.right-clicked();
+    // ===== 拖拽排序手柄（最上层，覆盖 TouchArea）=====
+    // tile 模式 - 左上角小方块
+    if root.layout != "list" : Rectangle {
+        x: 2px;
+        y: 2px;
+        width: 14px;
+        height: 14px;
+        background: transparent;
+
+        // 手柄可见：用两条横线表示 grip
+        HorizontalLayout {
+            width: 100%;
+            height: 100%;
+            spacing: 2px;
+            alignment: center;
+
+            VerticalLayout {
+                spacing: 2px;
+                Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.35; }
+                Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.35; }
             }
+        }
+
+        DragArea {
+            width: 100%;
+            height: 100%;
+            allow-move: true;
+            data: DragHelper.make-item(root.item-id);
+            drag-image: root.icon;
+            drag-image-offset-x: 12;
+            drag-image-offset-y: 12;
+        }
+    }
+
+    // list 模式 - 左侧拖拽区
+    if root.layout == "list" : Rectangle {
+        x: 0px;
+        width: 12px;
+        height: 100%;
+        background: transparent;
+
+        DragArea {
+            width: 100%;
+            height: 100%;
+            allow-move: true;
+            data: DragHelper.make-item(root.item-id);
+            drag-image: root.icon;
+            drag-image-offset-x: 12;
+            drag-image-offset-y: 12;
         }
     }
 
