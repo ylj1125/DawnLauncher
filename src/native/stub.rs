@@ -106,3 +106,11 @@ pub fn remove_tray_icon() {}
 pub fn show_main_window(_window_title: &str, _visible: bool) {}
 
 pub fn set_mouse_hook_enabled(_enabled: bool) {}
+
+pub(crate) fn run_hidden(_cmd: &str, _args: &[&str]) -> Option<Vec<u8>> {
+    None
+}
+
+pub(crate) fn run_dialog(_cmd: &str, _args: &[&str]) -> Option<Vec<u8>> {
+    None
+}

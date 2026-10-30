@@ -4496,54 +4496,58 @@ fn show_info_dialog(_title: &str, _message: &str) {}
 #[cfg(target_os = "windows")]
 fn show_input_dialog(title: &str, prompt: &str) -> Option<String> {
     // 使用 WinForms 创建固定大小的输入框，避免默认 InputBox 过宽
+    // 重点：去掉 -NonInteractive（它会阻止 WinForms 正常显示），且不用 CREATE_NO_WINDOW
     let script = format!(
         r#"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $form = New-Object System.Windows.Forms.Form
 $form.Text = '{}'
-$form.Size = New-Object System.Drawing.Size(400, 210)
+$form.Size = New-Object System.Drawing.Size(460, 240)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
 $form.MinimizeBox = $false
 $form.BackColor = '#ffffff'
 $form.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
+$form.TopMost = $true
 
 $label = New-Object System.Windows.Forms.Label
 $label.Text = '{}'
 $label.Location = New-Object System.Drawing.Point(20, 20)
-$label.Size = New-Object System.Drawing.Size(345, 25)
+$label.Size = New-Object System.Drawing.Size(400, 25)
 $form.Controls.Add($label)
 
 $textbox = New-Object System.Windows.Forms.TextBox
 $textbox.Location = New-Object System.Drawing.Point(20, 52)
-$textbox.Size = New-Object System.Drawing.Size(345, 25)
+$textbox.Size = New-Object System.Drawing.Size(400, 25)
+$textbox.Focus() | Out-Null
 $form.Controls.Add($textbox)
 
 $okBtn = New-Object System.Windows.Forms.Button
 $okBtn.Text = '确定'
-$okBtn.Location = New-Object System.Drawing.Point(195, 100)
-$okBtn.Size = New-Object System.Drawing.Size(75, 30)
+$okBtn.Location = New-Object System.Drawing.Point(230, 110)
+$okBtn.Size = New-Object System.Drawing.Size(80, 32)
 $okBtn.DialogResult = [System.Windows.Forms.DialogResult]::OK
 $form.AcceptButton = $okBtn
 $form.Controls.Add($okBtn)
 
 $cancelBtn = New-Object System.Windows.Forms.Button
 $cancelBtn.Text = '取消'
-$cancelBtn.Location = New-Object System.Drawing.Point(285, 100)
-$cancelBtn.Size = New-Object System.Drawing.Size(75, 30)
+$cancelBtn.Location = New-Object System.Drawing.Point(320, 110)
+$cancelBtn.Size = New-Object System.Drawing.Size(80, 32)
 $cancelBtn.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
 $form.CancelButton = $cancelBtn
 $form.Controls.Add($cancelBtn)
 
+$form.Load += {{ $form.Activate(); $textbox.Select(); }}
 $result = $form.ShowDialog()
-if ($result -eq [System.Windows.Forms.DialogResult]::OK) {{ $textbox.Text }} else {{ '' }}
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {{ Write-Output $textbox.Text }} else {{ Write-Output '' }}
 "#,
         title.replace('\'', "''"),
         prompt.replace('\'', "''")
     );
-    let output = run_hidden("powershell", &["-NoProfile", "-NonInteractive", "-Command", &script])?;
+    let output = crate::native::run_dialog("powershell", &["-NoProfile", "-Command", &script])?;
     let stdout = String::from_utf8_lossy(&output).trim().to_string();
     if stdout.is_empty() {
         None
@@ -4584,7 +4588,7 @@ Write-Output $result
         menu_text.replace('\'', "''"),
         title.replace('\'', "''")
     );
-    let output = run_hidden("powershell", &["-NoProfile", "-NonInteractive", "-Command", &script])?;
+    let output = crate::native::run_dialog("powershell", &["-NoProfile", "-Command", &script])?;
     let stdout = String::from_utf8_lossy(&output).trim().to_string();
     if stdout.is_empty() {
         return None;

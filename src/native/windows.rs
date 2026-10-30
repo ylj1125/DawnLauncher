@@ -103,6 +103,15 @@ pub(crate) fn run_hidden(cmd: &str, args: &[&str]) -> Option<Vec<u8>> {
         .map(|o| o.stdout)
 }
 
+/// 运行 PowerShell WinForms 对话框（显示在前台，不带 CREATE_NO_WINDOW）
+pub(crate) fn run_dialog(cmd: &str, args: &[&str]) -> Option<Vec<u8>> {
+    std::process::Command::new(cmd)
+        .args(args)
+        .output()
+        .ok()
+        .map(|o| o.stdout)
+}
+
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn run_hidden(_cmd: &str, _args: &[&str]) -> Option<Vec<u8>> {
     None

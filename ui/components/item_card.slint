@@ -1,4 +1,4 @@
-// 项目卡片组件
+// 项目卡片组件 —— 绝对定位确保居中
 import { ThemeSettings } from "../theme.slint";
 import { DragHelper } from "./drag_helper.slint";
 
@@ -24,7 +24,7 @@ export component ItemCard inherits Rectangle {
     in property <bool> hide-name: false;
     in property <string> layout: "tile";  // tile 卡片布局 / list 行布局
     in property <string> show-only: "default";
-    in property <length> list-width: 400px;  // list 模式下的行宽
+    in property <length> list-width: 400px;
 
     callback clicked;
     callback double-clicked;
@@ -40,21 +40,22 @@ export component ItemCard inherits Rectangle {
     border-width: (root.batch-mode && root.selected) ? 2px : 0px;
     border-color: ThemeSettings.accent-color;
 
-    // ===== 视觉层：图标 + 名称 =====
-    // tile 模式 - 居中堆叠
-    if root.layout != "list" : VerticalLayout {
-        alignment: center;
-        spacing: ThemeSettings.spacing-small;
-        padding: ThemeSettings.spacing-small;
+    // ============================================================
+    // 视觉层（最底层）—— 绝对定位保证居中
+    // ============================================================
+    // tile 模式 - 垂直堆叠居中
+    if root.layout != "list" : Rectangle {
         width: 100%;
         height: 100%;
 
+        // 图标 —— 水平居中
         Image {
             source: root.icon;
             width: root.icon-size;
             height: root.icon-size;
+            x: (parent.width - self.width) / 2;
+            y: 6px;
             opacity: root.invalid ? 0.3 : 1.0;
-            horizontal-alignment: center;
             image-fit: contain;
         }
 
@@ -63,16 +64,15 @@ export component ItemCard inherits Rectangle {
             color: root.invalid ? ThemeSettings.invalid-c(root.theme-mode) : ThemeSettings.text-c(root.theme-mode);
             font-size: ThemeSettings.font-size-small;
             horizontal-alignment: center;
+            width: parent.width;
+            x: 0px;
+            y: 6px + root.icon-size + ThemeSettings.spacing-small;
             overflow: elide;
-            width: 72px;
         }
     }
 
     // list 模式 - 水平行
-    if root.layout == "list" : HorizontalLayout {
-        spacing: 10px;
-        padding-left: 10px;
-        padding-right: 10px;
+    if root.layout == "list" : Rectangle {
         width: 100%;
         height: 100%;
 
@@ -80,8 +80,9 @@ export component ItemCard inherits Rectangle {
             source: root.icon;
             width: max(root.icon-size, 24px);
             height: max(root.icon-size, 24px);
+            x: 22px;
+            y: (parent.height - self.height) / 2;
             opacity: root.invalid ? 0.3 : 1.0;
-            vertical-alignment: center;
             image-fit: contain;
         }
 
@@ -89,15 +90,20 @@ export component ItemCard inherits Rectangle {
             text: root.name;
             color: root.invalid ? ThemeSettings.invalid-c(root.theme-mode) : ThemeSettings.text-c(root.theme-mode);
             font-size: ThemeSettings.font-size-normal;
+            x: 22px + max(root.icon-size, 24px) + 10px;
+            y: 0px;
+            height: 100%;
             vertical-alignment: center;
             overflow: elide;
             horizontal-stretch: 1;
         }
     }
 
-    // ===== 事件层（后声明 = 上层）=====
+    // ============================================================
+    // 事件层（后声明 = z-order 上层）
+    // ============================================================
 
-    // 主点击区域 - 整张卡片的点击/双击/右键
+    // 主点击区域 —— 整张卡片的点击/双击/右键
     touch-area := TouchArea {
         width: 100%;
         height: 100%;
@@ -110,7 +116,7 @@ export component ItemCard inherits Rectangle {
         }
     }
 
-    // DropArea 铺满整张卡片（平时透明，拖放时拦截）
+    // DropArea 铺满整张卡片
     DropArea {
         width: 100%;
         height: 100%;
@@ -128,7 +134,9 @@ export component ItemCard inherits Rectangle {
         }
     }
 
-    // ===== 拖拽排序手柄（最上层，覆盖 TouchArea）=====
+    // ============================================================
+    // 拖拽排序手柄（最上层，绝对定位覆盖手柄区域）
+    // ============================================================
     // tile 模式 - 左上角小方块
     if root.layout != "list" : Rectangle {
         x: 2px;
@@ -137,18 +145,15 @@ export component ItemCard inherits Rectangle {
         height: 14px;
         background: transparent;
 
-        // 手柄可见：用两条横线表示 grip
-        HorizontalLayout {
+        // 手柄可见：两条横线 grip
+        VerticalLayout {
             width: 100%;
             height: 100%;
             spacing: 2px;
             alignment: center;
 
-            VerticalLayout {
-                spacing: 2px;
-                Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.35; }
-                Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.35; }
-            }
+            Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.35; }
+            Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.35; }
         }
 
         DragArea {
@@ -165,7 +170,7 @@ export component ItemCard inherits Rectangle {
     // list 模式 - 左侧拖拽区
     if root.layout == "list" : Rectangle {
         x: 0px;
-        width: 12px;
+        width: 18px;
         height: 100%;
         background: transparent;
 
