@@ -958,6 +958,9 @@ use std::sync::mpsc::Sender;
 
 /// RegisterHotKey 的 mod 标志位
 const MOD_CONTROL: u32 = 0x0002;
+const MOD_ALT: u32 = 0x0001;
+const MOD_SHIFT: u32 = 0x0004;
+const MOD_WIN: u32 = 0x0008;
 const MOD_NOREPEAT: u32 = 0x4000;
 /// VK_SPACE
 const VK_SPACE: u32 = 0x20;
@@ -1016,6 +1019,103 @@ pub fn register_global_hotkey(notify: Sender<()>) {
         // 注销热键
         let _ = unsafe { UnregisterHotKey(std::ptr::null_mut(), HOTKEY_ID_QUICK_SEARCH) };
         log::info!("全局热键已注销");
+    });
+}
+
+/// 解析快捷键字符串（如 "Ctrl+Alt+A"）为 (修饰键, 虚拟键码)
+fn parse_shortcut(s: &str) -> Option<(u32, u32)> {
+    let mut mods = 0u32;
+    let mut vk: Option<u32> = None;
+    for part in s.split('+').map(|p| p.trim()).filter(|p| !p.is_empty()) {
+        match part.to_lowercase().as_str() {
+            "ctrl" | "control" => mods |= MOD_CONTROL,
+            "alt" => mods |= MOD_ALT,
+            "shift" => mods |= MOD_SHIFT,
+            "win" | "super" | "meta" => mods |= MOD_WIN,
+            _ => {
+                if vk.is_some() {
+                    return None;
+                }
+                let up = part.to_uppercase();
+                let code = if up.len() == 1 {
+                    let c = up.chars().next()?;
+                    if c.is_ascii_alphanumeric() {
+                        c as u32
+                    } else {
+                        return None;
+                    }
+                } else if let Some(n) = up.strip_prefix('F').and_then(|n| n.parse::<u32>().ok()) {
+                    if (1..=24).contains(&n) {
+                        0x70 + n - 1
+                    } else {
+                        return None;
+                    }
+                } else {
+                    match up.as_str() {
+                        "SPACE" => 0x20,
+                        "ENTER" | "RETURN" => 0x0D,
+                        "ESC" | "ESCAPE" => 0x1B,
+                        "TAB" => 0x09,
+                        "DELETE" | "DEL" => 0x2E,
+                        "BACKSPACE" => 0x08,
+                        "HOME" => 0x24,
+                        "END" => 0x2F,
+                        "INSERT" | "INS" => 0x2D,
+                        "PGUP" | "PAGEUP" => 0x21,
+                        "PGDN" | "PAGEDOWN" => 0x22,
+                        "UP" => 0x26,
+                        "DOWN" => 0x28,
+                        "LEFT" => 0x25,
+                        "RIGHT" => 0x27,
+                        _ => return None,
+                    }
+                };
+                vk = Some(code);
+            }
+        }
+    }
+    vk.map(|v| (mods, v))
+}
+
+/// 批量注册分类/项目快捷键。specs: (动作标识, 快捷键字符串)
+/// 收到热键时通过 channel 发送动作标识（如 "class:3" / "item:12"）
+pub fn register_shortcut_hotkeys(specs: Vec<(String, String)>, notify: Sender<String>) {
+    std::thread::spawn(move || {
+        let mut map: Vec<(i32, String)> = Vec::new();
+        for (action, shortcut) in specs {
+            if let Some((mods, vk)) = parse_shortcut(&shortcut) {
+                let id = 0xC000 + map.len() as i32;
+                let ok = unsafe { RegisterHotKey(std::ptr::null_mut(), id, mods | MOD_NOREPEAT, vk) };
+                if ok != 0 {
+                    map.push((id, action));
+                } else {
+                    log::warn!("注册快捷键失败: {} -> {}", action, shortcut);
+                }
+            } else {
+                log::warn!("无法解析快捷键: {}", shortcut);
+            }
+        }
+        if map.is_empty() {
+            return;
+        }
+        log::info!("已注册 {} 个分类/项目快捷键", map.len());
+
+        let mut msg = MSG::default();
+        loop {
+            let ret = unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) };
+            if ret <= 0 {
+                break;
+            }
+            if msg.message == WM_HOTKEY {
+                let id = msg.wparam as i32;
+                if let Some((_, action)) = map.iter().find(|(hid, _)| *hid == id) {
+                    let _ = notify.send(action.clone());
+                }
+            }
+        }
+        for (id, _) in &map {
+            let _ = unsafe { UnregisterHotKey(std::ptr::null_mut(), *id) };
+        }
     });
 }
 

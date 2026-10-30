@@ -833,6 +833,24 @@ impl Database {
         Ok(())
     }
 
+    /// 设置项目快捷键 (None 表示清除)
+    pub fn set_item_shortcut(&self, item_id: i64, shortcut: Option<&str>) -> Result<(), rusqlite::Error> {
+        self.conn.lock().unwrap().execute(
+            "UPDATE item SET shortcut_key = ? WHERE id = ?",
+            params![shortcut, item_id],
+        )?;
+        Ok(())
+    }
+
+    /// 设置分类快捷键 (None 表示清除)
+    pub fn set_classification_shortcut(&self, class_id: i64, shortcut: Option<&str>) -> Result<(), rusqlite::Error> {
+        self.conn.lock().unwrap().execute(
+            "UPDATE classification SET shortcut_key = ? WHERE id = ?",
+            params![shortcut, class_id],
+        )?;
+        Ok(())
+    }
+
     /// 设置分类的项目图标大小 (默认 1 / 小 0.8 / 大 1.2 等)
     pub fn set_classification_item_icon_size(&self, class_id: i64, size: i64) -> Result<(), rusqlite::Error> {
         let conn = self.conn.lock().unwrap();

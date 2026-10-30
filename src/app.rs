@@ -201,6 +201,71 @@ impl App {
             });
         }
 
+        // 7.2 注册分类 / 项目快捷键（全局生效，修改后需重启）
+        {
+            let mut specs: Vec<(String, String)> = Vec::new();
+            for c in db.list_all_classifications() {
+                if let Some(k) = c.shortcut_key.as_ref().filter(|k| !k.trim().is_empty()) {
+                    specs.push((format!("class:{}", c.id), k.clone()));
+                }
+                for item in db.list_items(c.id) {
+                    if let Some(k) = item.shortcut_key.as_ref().filter(|k| !k.trim().is_empty()) {
+                        specs.push((format!("item:{}", item.id), k.clone()));
+                    }
+                }
+            }
+            if !specs.is_empty() {
+                let (hk_tx, hk_rx) = std::sync::mpsc::channel::<String>();
+                crate::native::register_shortcut_hotkeys(specs, hk_tx);
+                let hk_rx = Arc::new(Mutex::new(hk_rx));
+                let db_for_hk = db.clone();
+                let window_for_hk = main_window.as_weak();
+                let current_for_hk = current_id.clone();
+                let expanded_for_hk = expanded_classifications.clone();
+                std::thread::spawn(move || loop {
+                    let action = match hk_rx.lock().unwrap().recv() {
+                        Ok(a) => a,
+                        Err(_) => break,
+                    };
+                    let db_ctx = db_for_hk.clone();
+                    let win_ctx = window_for_hk.clone();
+                    let cur_ctx = current_for_hk.clone();
+                    let exp_ctx = expanded_for_hk.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = win_ctx.upgrade() {
+                            if let Some(id) = action
+                                .strip_prefix("class:")
+                                .and_then(|s| s.parse::<i64>().ok())
+                            {
+                                *cur_ctx.lock().unwrap() = id;
+                                let classes = db_ctx.list_all_classifications();
+                                let expanded = exp_ctx.lock().unwrap().clone();
+                                w.set_classifications(to_classification_model(&classes, id, &expanded));
+                                let items = db_ctx.list_items(id);
+                                w.set_items(to_item_model(&items, 0));
+                                w.set_status_text(SharedString::from(format!("{} 项", items.len())));
+                                if let Some(c) = db_ctx.get_classification(id) {
+                                    apply_class_settings(&w, &c.data);
+                                }
+                                w.set_search_text(SharedString::from(""));
+                            } else if let Some(id) = action
+                                .strip_prefix("item:")
+                                .and_then(|s| s.parse::<i64>().ok())
+                            {
+                                if let Some(item) = db_ctx.get_item(id) {
+                                    open_item(&item);
+                                    db_ctx.record_item_open(id);
+                                    if w.get_hide_after_open() {
+                                        w.window().hide().ok();
+                                    }
+                                }
+                            }
+                        }
+                    });
+                });
+            }
+        }
+
         // 8. 项目单击 - 批量模式下切换选中，非批量模式下打开项目
         let db_for_open = db.clone();
         let window_for_open = main_window.as_weak();
@@ -1448,17 +1513,29 @@ impl App {
             title_drag::end();
         });
 
-        // 16.1 快速搜索窗口: 搜索文本变更 -> 实时过滤项目
+        // 16.1 快速搜索窗口: 搜索文本变更 -> 实时过滤项目（支持网络搜索前缀）
         {
             let db_for_qs = db.clone();
             let qs_weak = quick_search_window.as_weak();
             quick_search_window.on_search_changed(move |text| {
                 let query = text.to_string();
-                let results = db_for_qs.search_items(&query);
-                if let Some(qs) = qs_weak.upgrade() {
+                let Some(qs) = qs_weak.upgrade() else { return };
+                // 网络搜索：:g/:b/:ba/:gh/:so + 关键字
+                if let Some((label, _url)) = parse_web_search_query(&query) {
+                    let pseudo = vec![ItemInfo {
+                        id: -1,
+                        name: SharedString::from(format!("🌐 {}", label)),
+                        icon: slint::Image::default(),
+                        invalid: false,
+                        selected: false,
+                    }];
                     qs.set_search_text(text.clone());
-                    qs.set_search_results(to_item_model(&results, 0));
+                    qs.set_search_results(ModelRc::from(Rc::new(slint::VecModel::from(pseudo))));
+                    return;
                 }
+                let results = db_for_qs.search_items(&query);
+                qs.set_search_text(text.clone());
+                qs.set_search_results(to_item_model(&results, 0));
             });
         }
 
@@ -1469,6 +1546,19 @@ impl App {
             let main_weak_open = main_window.as_weak();
             quick_search_window.on_result_double_clicked(move |item_id| {
                 let id = item_id as i64;
+                // 网络搜索伪结果 (id = -1)
+                if id == -1 {
+                    if let Some(qs) = qs_weak_open.upgrade() {
+                        let text = qs.get_search_text().to_string();
+                        if let Some((_, url)) = parse_web_search_query(&text) {
+                            if let Err(e) = native::open_path_with_options(&url, None, None, false) {
+                                log::warn!("打开网络搜索失败: {} ({})", url, e);
+                            }
+                        }
+                        qs.window().hide().ok();
+                    }
+                    return;
+                }
                 // 从全量项目中查找
                 let all_items = db_for_qs_open.list_all_items();
                 if let Some(item) = all_items.iter().find(|i| i.id == id) {
@@ -1497,6 +1587,10 @@ impl App {
             let expanded_for_locate = expanded_classifications.clone();
             quick_search_window.on_result_clicked(move |item_id| {
                 let id = item_id as i64;
+                // 网络搜索伪结果无需定位
+                if id == -1 {
+                    return;
+                }
                 let all_items = db_for_locate.list_all_items();
                 let Some(item) = all_items.iter().find(|i| i.id == id) else {
                     return;
@@ -1599,6 +1693,14 @@ impl App {
             let main_weak_accept = main_window.as_weak();
             main_window.on_search_accepted(move || {
                 if let Some(w) = main_weak_accept.upgrade() {
+                    // 网络搜索前缀优先
+                    let text = w.get_search_text().to_string();
+                    if let Some((_, url)) = parse_web_search_query(&text) {
+                        if let Err(e) = native::open_path_with_options(&url, None, None, false) {
+                            log::warn!("打开网络搜索失败: {} ({})", url, e);
+                        }
+                        return;
+                    }
                     let items: Vec<ItemInfo> = w.get_items().iter().collect();
                     if let Some(first) = items.first() {
                         let id = first.id as i64;
@@ -1786,7 +1888,7 @@ impl App {
                             };
                             if !target.is_empty() {
                                 let order = db_ctx.max_item_order(class_id_clone) + 1;
-                                let icon = native::get_file_icon(&target).ok();
+                                let icon = native::get_file_icon(&target);
                                 let item = crate::models::Item {
                                     id: 0,
                                     classification_id: class_id_clone,
@@ -2177,6 +2279,31 @@ impl App {
                             }
                         }
                     }
+                    ("classification-item", "set-shortcut") => {
+                        let cid = *right_class_id.lock().unwrap();
+                        let current = db_for_ctx
+                            .get_classification(cid)
+                            .and_then(|c| c.shortcut_key.clone())
+                            .unwrap_or_default();
+                        let cur_label = if current.trim().is_empty() {
+                            "无".to_string()
+                        } else {
+                            current.clone()
+                        };
+                        drop(w);
+                        let prompt = format!(
+                            "当前快捷键：{}\n\n请输入快捷键（如 Ctrl+Alt+1），留空则清除\n修饰键: Ctrl / Alt / Shift / Win\n按键: A-Z / 0-9 / F1-F12 等",
+                            cur_label
+                        );
+                        if let Some(input) = show_input_dialog("设置分类快捷键", &prompt) {
+                            let val = input.trim().to_string();
+                            let new_key = if val.is_empty() { None } else { Some(val.as_str()) };
+                            match db_for_ctx.set_classification_shortcut(cid, new_key) {
+                                Ok(_) => show_info_dialog("完成", "快捷键已保存，重启应用后生效"),
+                                Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
+                            }
+                        }
+                    }
                     ("classification-item", "set-default") => {
                         let cid = *right_class_id.lock().unwrap();
                         match db_for_ctx.set_setting_i64("default_classification_id", cid) {
@@ -2355,6 +2482,63 @@ impl App {
                             {
                                 let _ = copy_to_clipboard(&item.name);
                                 show_info_dialog("已复制", "名称已复制到剪贴板");
+                            }
+                        }
+                    }
+                    ("item", "copy-remark") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        if let Some(item) = db_for_ctx.get_item(item_id) {
+                            let remark = item.data.remark.clone().unwrap_or_default();
+                            if remark.trim().is_empty() {
+                                show_info_dialog("提示", "该项目暂无备注");
+                            } else {
+                                #[cfg(target_os = "windows")]
+                                {
+                                    let _ = copy_to_clipboard(&remark);
+                                    show_info_dialog("已复制", "备注已复制到剪贴板");
+                                }
+                            }
+                        }
+                    }
+                    ("item", "remark-link") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        if let Some(item) = db_for_ctx.get_item(item_id) {
+                            let remark = item.data.remark.clone().unwrap_or_default();
+                            match extract_url_from_text(&remark) {
+                                Some(url) => {
+                                    if let Err(e) = native::open_path_with_options(&url, None, None, false) {
+                                        show_error_dialog("打开失败", &format!("无法打开链接:\n{}\n\n{}", url, e));
+                                    }
+                                }
+                                None => show_info_dialog(
+                                    "提示",
+                                    "备注中未找到链接（需以 http:// 或 https:// 开头）",
+                                ),
+                            }
+                        }
+                    }
+                    ("item", "set-shortcut") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        let current = db_for_ctx
+                            .get_item(item_id)
+                            .and_then(|i| i.shortcut_key.clone())
+                            .unwrap_or_default();
+                        let cur_label = if current.trim().is_empty() {
+                            "无".to_string()
+                        } else {
+                            current.clone()
+                        };
+                        drop(w);
+                        let prompt = format!(
+                            "当前快捷键：{}\n\n请输入快捷键（如 Ctrl+Alt+A），留空则清除\n修饰键: Ctrl / Alt / Shift / Win\n按键: A-Z / 0-9 / F1-F12 / Space / Enter 等",
+                            cur_label
+                        );
+                        if let Some(input) = show_input_dialog("设置项目快捷键", &prompt) {
+                            let val = input.trim().to_string();
+                            let new_key = if val.is_empty() { None } else { Some(val.as_str()) };
+                            match db_for_ctx.set_item_shortcut(item_id, new_key) {
+                                Ok(_) => show_info_dialog("完成", "快捷键已保存，重启应用后生效"),
+                                Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
                             }
                         }
                     }
@@ -3523,9 +3707,68 @@ fn get_database_path() -> Result<std::path::PathBuf, Box<dyn std::error::Error>>
     Ok(data_dir.join("dawn-launcher.db"))
 }
 
-/// 将分类列表转为 Slint 模型 (包含父子层级)
+/// URL 查询参数编码（仅保留字母数字与 -_.~）
+fn url_encode_component(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() * 3);
+    for b in input.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
+/// 解析网络搜索触发前缀，返回 (引擎名称, 最终 URL)
+/// 支持 :g 谷歌 / :b 必应 / :ba 百度 / :gh GitHub / :so StackOverflow
+fn parse_web_search_query(text: &str) -> Option<(String, String)> {
+    let t = text.trim();
+    if !t.starts_with(':') {
+        return None;
+    }
+    let (prefix, keyword) = match t.find(' ') {
+        Some(i) => (&t[..i], t[i + 1..].trim()),
+        None => return None,
+    };
+    if keyword.is_empty() {
+        return None;
+    }
+    let (label, template) = match prefix {
+        ":g" => ("Google", "https://www.google.com/search?q={w}"),
+        ":b" => ("Bing", "https://www.bing.com/search?q={w}"),
+        ":ba" => ("百度", "https://www.baidu.com/s?wd={w}"),
+        ":gh" => ("GitHub", "https://github.com/search?q={w}"),
+        ":so" => ("StackOverflow", "https://stackoverflow.com/search?q={w}"),
+        _ => return None,
+    };
+    let url = template.replace("{w}", &url_encode_component(keyword));
+    Some((format!("{} 搜索: {}", label, keyword), url))
+}
+
+/// 从文本中提取第一个 http(s) 链接
+fn extract_url_from_text(text: &str) -> Option<String> {
+    for prefix in ["https://", "http://"] {
+        if let Some(idx) = text.find(prefix) {
+            let rest = &text[idx..];
+            let end = rest
+                .find(|c: char| c.is_whitespace() || c == '"' || c == '\'' || c == '<' || c == '>')
+                .unwrap_or(rest.len());
+            let url = rest[..end].trim_end_matches(|c: char| {
+                c == ',' || c == '.' || c == ')' || c == ']' || c == '}' || c == '。' || c == '，'
+            });
+            if url.len() > prefix.len() {
+                return Some(url.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// 将分类设置同步到 MainWindow 的三个 property（供 ItemCard 读取）
-fn apply_class_settings(w: &MainWindow, data: &models::ClassificationData) {
+fn apply_class_settings(w: &MainWindow, data: &crate::models::ClassificationData) {
     let layout = match data.item_layout.as_str() {
         "list" => "list",
         _ => "tile",
@@ -4389,6 +4632,7 @@ fn show_item_context_menu(window: &MainWindow, x: i32, y: i32) {
         ("", "", "", true, false), // 分隔线
         ("rename", "重命名", "✏", false, false),
         ("edit", "编辑项目", "⚙", false, false),
+        ("set-shortcut", "设置快捷键...", "⌨", false, false),
         ("copy-name", "复制名称", "🏷", false, false),
         ("copy-path", "复制路径", "📋", false, false),
         ("", "", "", true, false),
@@ -4441,6 +4685,7 @@ fn show_classification_item_menu(
         ("toggle-show-only", show_label, "🗂", false, false),
         ("", "", "", true, false),
         ("set-default", "设为默认分类", "★", false, false),
+        ("set-shortcut", "设置快捷键...", "⌨", false, false),
         ("edit-icon", "设置图标...", "🖼", false, false),
         ("toggle-exclude-search", exclude_label, "🚫", false, false),
         ("", "", "", true, false),

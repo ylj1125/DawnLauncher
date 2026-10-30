@@ -501,12 +501,13 @@ export component MainWindow inherits Window {
                         vertical-alignment: center;
                     }
 
-                    ScrollView {
+                    items-scroll := ScrollView {
                         vertical-stretch: 1;
                         horizontal-stretch: 1;
 
-                        VerticalLayout {
+                        FlexboxLayout {
                             spacing: ThemeSettings.spacing-normal;
+                            padding: 6px;
 
                             for item in root.items : ItemCard {
                                 item-id: item.id;
@@ -520,6 +521,7 @@ export component MainWindow inherits Window {
                                 hide-name: root.hide-name;
                                 layout: root.current-class-layout;
                                 show-only: root.current-class-show-only;
+                                list-width: items-scroll.width - 20px;
                                 clicked => {
                                     if (root.batch-mode) {
                                         // 批量模式下点击切换选中
@@ -1666,10 +1668,10 @@ export component ImportScanWindow inherits Window {
         ScrollView {
             horizontal-stretch: 1;
             vertical-stretch: 1;
-            padding: 10px;
 
             VerticalLayout {
                 spacing: 4px;
+                padding: 10px;
 
                 for entry[i] in root.entries : scan-entry-row {
                     entry: entry;

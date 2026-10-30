@@ -43,6 +43,12 @@ pub fn is_fullscreen() -> bool {
 
 pub fn register_global_hotkey(_notify: std::sync::mpsc::Sender<()>) {}
 
+pub fn register_shortcut_hotkeys(
+    _specs: Vec<(String, String)>,
+    _notify: std::sync::mpsc::Sender<String>,
+) {
+}
+
 /// 扫描得到的启动项条目 (非 Windows 平台占位)
 #[derive(Debug, Clone)]
 pub struct LauncherEntry {

@@ -24,13 +24,14 @@ export component ItemCard inherits Rectangle {
     in property <bool> hide-name: false;
     in property <string> layout: "tile";  // tile 卡片布局 / list 行布局
     in property <string> show-only: "default";  // default / file / folder  (暂时只影响空图标占位)
+    in property <length> list-width: 400px;  // list 模式下的行宽（由调用方传入容器宽度）
 
     callback clicked;
     callback double-clicked;
     callback right-clicked;
 
-    // ===== tile 布局外观 =====
-    width: root.layout == "list" ? 100% : ThemeSettings.item-card-width;
+    // ===== 尺寸（list 模式占满整行，tile 模式固定卡片宽高）=====
+    width: root.layout == "list" ? root.list-width : ThemeSettings.item-card-width;
     height: root.layout == "list" ? 36px : (root.hide-name ? ThemeSettings.item-card-width : ThemeSettings.item-card-height);
     border-radius: ThemeSettings.border-radius;
     background: selected ? ThemeSettings.selected-c(root.theme-mode) : (touch-area.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
