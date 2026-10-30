@@ -1762,6 +1762,8 @@ impl App {
                     Some(w) => w,
                     None => return,
                 };
+                // 立刻隐藏右键菜单，否则浮层覆盖整个窗口会阻塞后续模态对话框
+                w.set_context_menu_visible(false);
                 let class_id = current_id_for_ctx.lock().unwrap().clone();
 
                 match (source_str.as_str(), action_str.as_str()) {
@@ -1926,23 +1928,22 @@ impl App {
                         }
                     }
                     ("item-area", "new-multi-item") => {
-                        // 新建多项目：让用户依次输入子项路径（每行一个，可含 ;params 分隔）
-                        drop(w);
-                        let prompt = "新建多项目\n\n请输入名称 + 子项列表，格式:\n名称\n路径1\n路径2\n路径3...\n\n示例:\n浏览器合集\nC:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\nC:\\Program Files\\Mozilla Firefox\\firefox.exe\nmsedge";
+                        // 新建多项目：单行输入，用 | 分隔子项，每项内用 ; 分隔目标与参数
+                        // 格式：名称|路径1;参数1|路径2;参数2|...
+                        let prompt = "新建多项目\n\n请在一行中输入，用 | 分隔每个子项，用 ; 分隔目标与参数:\n名称|C:\\Chrome\\chrome.exe;--incognito|msedge\n\n示例:\n浏览器合集|C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe|Mozilla Firefox\\firefox.exe|msedge";
                         let db_ctx = db_for_ctx.clone();
                         let class_id_clone = class_id;
                         let win_ctx = window_for_ctx.clone();
                         if let Some(text) = show_input_dialog("新建多项目", prompt) {
-                            let mut lines = text.lines();
-                            let name = lines.next().unwrap_or("多项目").trim().to_string();
-                            let children: Vec<crate::models::MultiItem> = lines
-                                .filter(|l| !l.trim().is_empty())
-                                .map(|line| {
-                                    let l = line.trim();
-                                    let (target, params) = if let Some(idx) = l.find(';') {
-                                        (l[..idx].trim().to_string(), Some(l[idx + 1..].trim().to_string()))
+                            let mut pipe_parts = text.split('|');
+                            let name = pipe_parts.next().unwrap_or("多项目").trim().to_string();
+                            let children: Vec<crate::models::MultiItem> = pipe_parts
+                                .map(|pipe_part| {
+                                    let part = pipe_part.trim();
+                                    let (target, params) = if let Some(idx) = part.find(';') {
+                                        (part[..idx].trim().to_string(), Some(part[idx + 1..].trim().to_string()))
                                     } else {
-                                        (l.to_string(), None)
+                                        (part.to_string(), None)
                                     };
                                     crate::models::MultiItem {
                                         target,
@@ -1952,13 +1953,13 @@ impl App {
                                         name: None,
                                     }
                                 })
+                                .filter(|c| !c.target.trim().is_empty())
                                 .collect();
                             if children.is_empty() {
-                                show_info_dialog("提示", "至少需要配置一个子项");
+                                show_info_dialog("提示", "至少需要配置一个子项（格式：名称|路径1|路径2）");
                                 return;
                             }
                             let order = db_ctx.max_item_order(class_id_clone) + 1;
-                            let icon = db_ctx.get_item(class_id_clone).and_then(|_| None); // 不设图标
                             let item = crate::models::Item {
                                 id: 0,
                                 classification_id: class_id_clone,
@@ -1967,7 +1968,6 @@ impl App {
                                 data: crate::models::ItemData {
                                     multi_items: children,
                                     multi_items_time_interval: 200,
-                                    icon,
                                     ..Default::default()
                                 },
                                 shortcut_key: None,
@@ -1975,7 +1975,7 @@ impl App {
                                 order,
                             };
                             if db_ctx.insert_item(&item).is_ok() {
-                                let items = db_ctx.list_items(class_id_clone);
+                                let items = load_class_items(&db_ctx, class_id_clone);
                                 if let Some(w) = win_ctx.upgrade() {
                                     w.set_items(to_item_model(&items, 0));
                                     w.set_status_text(SharedString::from(format!(
@@ -1983,6 +1983,9 @@ impl App {
                                         items.len()
                                     )));
                                 }
+                                show_info_dialog("完成", &format!("已创建多项目「{}」，共 {} 个子项", item.name, item.data.multi_items.len()));
+                            } else {
+                                show_error_dialog("创建失败", "数据库写入失败");
                             }
                         }
                     }
