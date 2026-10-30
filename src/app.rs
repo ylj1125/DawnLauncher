@@ -110,10 +110,13 @@ impl App {
         let class_model = to_classification_model(&classifications, first_id, &expanded_classifications.lock().unwrap());
         main_window.set_classifications(class_model);
 
-        // 6. 加载首个分类的项目
-        let items = db.list_items(first_id);
+        // 6. 加载首个分类的项目（应用该分类的布局/图标/过滤设置）
+        let items = load_class_items(&db, first_id);
         let item_model = to_item_model(&items, 0);
         main_window.set_items(item_model);
+        if let Some(c) = db.get_classification(first_id) {
+            apply_class_settings(&main_window, &c.data);
+        }
         main_window.set_status_text(SharedString::from(format!(
             "共 {} 个分类，{} 个项目",
             classifications.len(),
@@ -152,8 +155,11 @@ impl App {
                 let win_bg = window_for_class.clone();
                 std::thread::spawn(move || {
                     sync_associate_folder(&db_bg, class_id);
-                    let items = db_bg.list_items(class_id);
                     let settings = db_bg.get_classification(class_id);
+                    let items = match &settings {
+                        Some(c) => filter_items_by_show_only(db_bg.list_items(class_id), &c.data),
+                        None => db_bg.list_items(class_id),
+                    };
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = win_bg.upgrade() {
                             w.set_items(to_item_model(&items, 0));
@@ -165,8 +171,11 @@ impl App {
                     });
                 });
             } else {
-                let items = db_for_class.list_items(class_id);
                 let class_data = db_for_class.get_classification(class_id).map(|c| c.data.clone());
+                let items = match &class_data {
+                    Some(data) => filter_items_by_show_only(db_for_class.list_items(class_id), data),
+                    None => db_for_class.list_items(class_id),
+                };
                 if let Some(w) = window_for_class.upgrade() {
                     w.set_items(to_item_model(&items, 0));
                     w.set_status_text(SharedString::from(format!("{} 项", items.len())));
@@ -241,7 +250,7 @@ impl App {
                                 let classes = db_ctx.list_all_classifications();
                                 let expanded = exp_ctx.lock().unwrap().clone();
                                 w.set_classifications(to_classification_model(&classes, id, &expanded));
-                                let items = db_ctx.list_items(id);
+                                let items = load_class_items(&db_ctx, id);
                                 w.set_items(to_item_model(&items, 0));
                                 w.set_status_text(SharedString::from(format!("{} 项", items.len())));
                                 if let Some(c) = db_ctx.get_classification(id) {
@@ -2189,7 +2198,7 @@ impl App {
                                 Ok(_) => {
                                     *current_id_for_ctx.lock().unwrap() = cid;
                                     let classes = db_for_ctx.list_all_classifications();
-                                    let items = db_for_ctx.list_items(cid);
+                                    let items = load_class_items(&db_for_ctx, cid);
                                     if let Some(w) = window_for_ctx.upgrade() {
                                         w.set_classifications(to_classification_model(
                                             &classes,
@@ -2221,7 +2230,7 @@ impl App {
                             };
                             match db_for_ctx.set_classification_item_layout(cid, &new_layout) {
                                 Ok(_) => {
-                                    let items = db_for_ctx.list_items(cid);
+                                    let items = load_class_items(&db_for_ctx, cid);
                                     if let Some(w) = window_for_ctx.upgrade() {
                                         w.set_items(to_item_model(&items, 0));
                                         apply_class_settings(&w, &db_for_ctx.get_classification(cid).unwrap().data);
@@ -2241,7 +2250,7 @@ impl App {
                             let size = input.trim().parse::<i64>().unwrap_or(48).clamp(16, 128);
                             match db_for_ctx.set_classification_item_icon_size(cid, size) {
                                 Ok(_) => {
-                                    let items = db_for_ctx.list_items(cid);
+                                    let items = load_class_items(&db_for_ctx, cid);
                                     if let Some(w) = window_for_ctx.upgrade() {
                                         w.set_items(to_item_model(&items, 0));
                                         apply_class_settings(&w, &db_for_ctx.get_classification(cid).unwrap().data);
@@ -2262,7 +2271,7 @@ impl App {
                             };
                             match db_for_ctx.set_classification_item_show_only(cid, new_val) {
                                 Ok(_) => {
-                                    let items = db_for_ctx.list_items(cid);
+                                    let items = load_class_items(&db_for_ctx, cid);
                                     if let Some(w) = window_for_ctx.upgrade() {
                                         w.set_items(to_item_model(&items, 0));
                                         apply_class_settings(&w, &db_for_ctx.get_classification(cid).unwrap().data);
@@ -3765,6 +3774,26 @@ fn extract_url_from_text(text: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// 按分类设置过滤项目（仅文件 / 仅文件夹）
+fn filter_items_by_show_only(
+    items: Vec<Item>,
+    data: &crate::models::ClassificationData,
+) -> Vec<Item> {
+    match data.item_show_only.as_str() {
+        "file" => items.into_iter().filter(|i| !i.is_folder()).collect(),
+        "folder" => items.into_iter().filter(|i| !i.is_file()).collect(),
+        _ => items,
+    }
+}
+
+/// 读取分类下的项目（应用当前分类的显示过滤）
+fn load_class_items(db: &Database, class_id: i64) -> Vec<Item> {
+    match db.get_classification(class_id) {
+        Some(c) => filter_items_by_show_only(db.list_items(class_id), &c.data),
+        None => db.list_items(class_id),
+    }
 }
 
 /// 将分类设置同步到 MainWindow 的三个 property（供 ItemCard 读取）
