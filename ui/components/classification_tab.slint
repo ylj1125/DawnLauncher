@@ -24,6 +24,8 @@ export component ClassificationTab inherits Rectangle {
     HorizontalLayout {
         alignment: start;
         spacing: ThemeSettings.spacing-normal;
+        width: 100%;
+        height: 100%;
         // 子分类缩进
         padding-left: ThemeSettings.spacing-normal + root.depth * 16px;
         padding-right: ThemeSettings.spacing-normal;
@@ -39,12 +41,6 @@ export component ClassificationTab inherits Rectangle {
                 font-size: 10px;
                 horizontal-alignment: center;
                 vertical-alignment: center;
-            }
-
-            // 仅在有子分类时响应点击
-            arrow-touch := TouchArea {
-                enabled: root.has-children;
-                clicked => { root.expand-toggled(); }
             }
         }
 
@@ -70,38 +66,15 @@ export component ClassificationTab inherits Rectangle {
         }
     }
 
+    // ===== 事件层 =====
     touch-area := TouchArea {
+        width: 100%;
+        height: 100%;
         clicked => { root.clicked(); }
         pointer-event(e) => {
             if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
                 root.right-clicked();
             }
-        }
-    }
-
-    // ===== 拖拽排序 =====
-    // 右侧拖拽手柄（避免与单击选择冲突）
-    Rectangle {
-        x: root.width - 18px;
-        y: (root.height - 16px) / 2;
-        width: 14px;
-        height: 16px;
-        background: transparent;
-
-        Text {
-            text: "⋮";
-            color: ThemeSettings.text-sec(root.theme-mode);
-            opacity: 0.5;
-            font-size: 12px;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-
-        DragArea {
-            width: 100%;
-            height: 100%;
-            allow-move: true;
-            data: DragHelper.make-class(root.tab-id);
         }
     }
 
@@ -123,6 +96,42 @@ export component ClassificationTab inherits Rectangle {
             }
             return DragAction.move;
         }
+    }
+
+    // ===== 拖拽排序手柄（最上层，避免与单击选择冲突）=====
+    Rectangle {
+        x: root.width - 18px;
+        y: (root.height - 16px) / 2;
+        width: 14px;
+        height: 16px;
+        background: transparent;
+
+        // 手柄可见：三条横线 grip
+        VerticalLayout {
+            width: 100%;
+            height: 100%;
+            spacing: 2px;
+            alignment: center;
+
+            Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.35; }
+            Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.35; }
+            Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.35; }
+        }
+
+        DragArea {
+            width: 100%;
+            height: 100%;
+            allow-move: true;
+            data: DragHelper.make-class(root.tab-id);
+        }
+    }
+
+    // ===== 展开/折叠箭头点击区（最上层，仅当有子分类时生效）=====
+    if root.has-children : TouchArea {
+        x: ThemeSettings.spacing-normal + root.depth * 16px;
+        width: 12px;
+        height: 100%;
+        clicked => { root.expand-toggled(); }
     }
 
     animate background { duration: 120ms; }
