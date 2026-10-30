@@ -4561,6 +4561,74 @@ fn show_input_dialog(_title: &str, _prompt: &str) -> Option<String> {
     None
 }
 
+/// 多行文本输入对话框（每行一个子项，用 | 或 ; 分隔 target 与 params）
+#[cfg(target_os = "windows")]
+fn show_multiline_input_dialog(title: &str, prompt: &str) -> Option<String> {
+    let script = format!(
+        r#"
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$form = New-Object System.Windows.Forms.Form
+$form.Text = '{}'
+$form.Size = New-Object System.Drawing.Size(560, 460)
+$form.StartPosition = 'CenterScreen'
+$form.FormBorderStyle = 'FixedDialog'
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.BackColor = '#ffffff'
+$form.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
+$form.TopMost = $true
+
+$label = New-Object System.Windows.Forms.Label
+$label.Text = '{}'
+$label.Location = New-Object System.Drawing.Point(20, 15)
+$label.Size = New-Object System.Drawing.Size(500, 50)
+$form.Controls.Add($label)
+
+$tb = New-Object System.Windows.Forms.TextBox
+$tb.Location = New-Object System.Drawing.Point(20, 72)
+$tb.Size = New-Object System.Drawing.Size(500, 280)
+$tb.Multiline = $true
+$tb.ScrollBars = 'Vertical'
+$tb.AcceptsReturn = $true
+$tb.AcceptsTab = $false
+$tb.WordWrap = $false
+$tb.Font = New-Object System.Drawing.Font('Consolas', 10)
+$form.Controls.Add($tb)
+
+$okBtn = New-Object System.Windows.Forms.Button
+$okBtn.Text = '确定'
+$okBtn.Location = New-Object System.Drawing.Point(340, 370)
+$okBtn.Size = New-Object System.Drawing.Size(90, 32)
+$okBtn.DialogResult = [System.Windows.Forms.DialogResult]::OK
+$form.AcceptButton = $okBtn
+$form.Controls.Add($okBtn)
+
+$cancelBtn = New-Object System.Windows.Forms.Button
+$cancelBtn.Text = '取消'
+$cancelBtn.Location = New-Object System.Drawing.Point(440, 370)
+$cancelBtn.Size = New-Object System.Drawing.Size(90, 32)
+$cancelBtn.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+$form.CancelButton = $cancelBtn
+$form.Controls.Add($cancelBtn)
+
+$form.Load += {{ $form.Activate(); $tb.Select(); }}
+$result = $form.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {{ Write-Output $tb.Text }} else {{ Write-Output '' }}
+"#,
+        title.replace('\'', "''"),
+        prompt.replace('\'', "''")
+    );
+    let output = crate::native::run_dialog("powershell", &["-NoProfile", "-Command", &script])?;
+    let stdout = String::from_utf8_lossy(&output).trim().to_string();
+    if stdout.is_empty() { None } else { Some(stdout) }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn show_multiline_input_dialog(_title: &str, _prompt: &str) -> Option<String> {
+    None
+}
+
 /// 显示动作选择对话框，返回用户选择的动作名称
 /// 返回 None 表示取消
 #[cfg(target_os = "windows")]
