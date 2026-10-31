@@ -1928,20 +1928,22 @@ impl App {
                         }
                     }
                     ("item-area", "new-multi-item") => {
-                        // 新建多项目：单行输入，用 | 分隔子项，每项内用 ; 分隔目标与参数
-                        // 格式：名称|路径1;参数1|路径2;参数2|...
-                        let prompt = "新建多项目\n\n请在一行中输入，用 | 分隔每个子项，用 ; 分隔目标与参数:\n名称|C:\\Chrome\\chrome.exe;--incognito|msedge\n\n示例:\n浏览器合集|C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe|Mozilla Firefox\\firefox.exe|msedge";
+                        // 多行输入：第一行是名称，之后每行一个子项（路径可选 ;参数）
+                        let prompt = "第 1 行填名称，从第 2 行起每行填一个要打开的路径。\n路径后可跟 ; 加参数，例如：\n\n浏览器合集\nC:\\Program Files\\Google\\Chrome\\Application\\chrome.exe;--incognito\nfirefox.exe\nmsedge";
                         let db_ctx = db_for_ctx.clone();
                         let class_id_clone = class_id;
                         let win_ctx = window_for_ctx.clone();
-                        if let Some(text) = show_input_dialog("新建多项目", prompt) {
-                            let mut pipe_parts = text.split('|');
-                            let name = pipe_parts.next().unwrap_or("多项目").trim().to_string();
-                            let children: Vec<crate::models::MultiItem> = pipe_parts
-                                .map(|pipe_part| {
-                                    let part = pipe_part.trim();
+                        if let Some(text) = show_multiline_input_dialog("新建多项目", prompt) {
+                            let mut lines = text.lines().filter(|l| !l.trim().is_empty());
+                            let name = lines.next().unwrap_or("").trim().to_string();
+                            let children: Vec<crate::models::MultiItem> = lines
+                                .map(|line| {
+                                    let part = line.trim();
                                     let (target, params) = if let Some(idx) = part.find(';') {
-                                        (part[..idx].trim().to_string(), Some(part[idx + 1..].trim().to_string()))
+                                        (
+                                            part[..idx].trim().to_string(),
+                                            Some(part[idx + 1..].trim().to_string()),
+                                        )
                                     } else {
                                         (part.to_string(), None)
                                     };
@@ -1953,13 +1955,24 @@ impl App {
                                         name: None,
                                     }
                                 })
-                                .filter(|c| !c.target.trim().is_empty())
+                                .filter(|c| !c.target.is_empty())
                                 .collect();
+                            if name.is_empty() {
+                                show_info_dialog(
+                                    "提示",
+                                    "第 1 行必须填写多项目名称，从第 2 行起每行填一个路径。",
+                                );
+                                return;
+                            }
                             if children.is_empty() {
-                                show_info_dialog("提示", "至少需要配置一个子项（格式：名称|路径1|路径2）");
+                                show_info_dialog(
+                                    "提示",
+                                    "至少需要 1 个子项。格式：\n第 1 行 = 名称\n第 2 行起 = 每行一个路径",
+                                );
                                 return;
                             }
                             let order = db_ctx.max_item_order(class_id_clone) + 1;
+                            let child_count = children.len();
                             let item = crate::models::Item {
                                 id: 0,
                                 classification_id: class_id_clone,
@@ -1974,18 +1987,26 @@ impl App {
                                 global_shortcut_key: false,
                                 order,
                             };
-                            if db_ctx.insert_item(&item).is_ok() {
-                                let items = load_class_items(&db_ctx, class_id_clone);
-                                if let Some(w) = win_ctx.upgrade() {
-                                    w.set_items(to_item_model(&items, 0));
-                                    w.set_status_text(SharedString::from(format!(
-                                        "共 {} 个项目",
-                                        items.len()
-                                    )));
+                            match db_ctx.insert_item(&item) {
+                                Ok(_) => {
+                                    let items = load_class_items(&db_ctx, class_id_clone);
+                                    if let Some(w) = win_ctx.upgrade() {
+                                        w.set_items(to_item_model(&items, 0));
+                                        w.set_status_text(SharedString::from(format!(
+                                            "共 {} 个项目",
+                                            items.len()
+                                        )));
+                                    }
+                                    log::info!(
+                                        "多项目创建成功: {} ({} 个子项)",
+                                        item.name,
+                                        child_count
+                                    );
                                 }
-                                show_info_dialog("完成", &format!("已创建多项目「{}」，共 {} 个子项", item.name, item.data.multi_items.len()));
-                            } else {
-                                show_error_dialog("创建失败", "数据库写入失败");
+                                Err(e) => {
+                                    log::error!("多项目写入失败: {}", e);
+                                    show_error_dialog("创建失败", &format!("数据库写入失败: {}", e));
+                                }
                             }
                         }
                     }
@@ -4499,6 +4520,8 @@ fn show_input_dialog(title: &str, prompt: &str) -> Option<String> {
     // 重点：去掉 -NonInteractive（它会阻止 WinForms 正常显示），且不用 CREATE_NO_WINDOW
     let script = format!(
         r#"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $form = New-Object System.Windows.Forms.Form
@@ -4566,11 +4589,13 @@ fn show_input_dialog(_title: &str, _prompt: &str) -> Option<String> {
 fn show_multiline_input_dialog(title: &str, prompt: &str) -> Option<String> {
     let script = format!(
         r#"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $form = New-Object System.Windows.Forms.Form
 $form.Text = '{}'
-$form.Size = New-Object System.Drawing.Size(560, 460)
+$form.Size = New-Object System.Drawing.Size(600, 520)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
 $form.MaximizeBox = $false
@@ -4581,13 +4606,13 @@ $form.TopMost = $true
 
 $label = New-Object System.Windows.Forms.Label
 $label.Text = '{}'
-$label.Location = New-Object System.Drawing.Point(20, 15)
-$label.Size = New-Object System.Drawing.Size(500, 50)
+$label.Location = New-Object System.Drawing.Point(20, 12)
+$label.Size = New-Object System.Drawing.Size(555, 92)
 $form.Controls.Add($label)
 
 $tb = New-Object System.Windows.Forms.TextBox
-$tb.Location = New-Object System.Drawing.Point(20, 72)
-$tb.Size = New-Object System.Drawing.Size(500, 280)
+$tb.Location = New-Object System.Drawing.Point(20, 108)
+$tb.Size = New-Object System.Drawing.Size(555, 340)
 $tb.Multiline = $true
 $tb.ScrollBars = 'Vertical'
 $tb.AcceptsReturn = $true
@@ -4598,7 +4623,7 @@ $form.Controls.Add($tb)
 
 $okBtn = New-Object System.Windows.Forms.Button
 $okBtn.Text = '确定'
-$okBtn.Location = New-Object System.Drawing.Point(340, 370)
+$okBtn.Location = New-Object System.Drawing.Point(380, 458)
 $okBtn.Size = New-Object System.Drawing.Size(90, 32)
 $okBtn.DialogResult = [System.Windows.Forms.DialogResult]::OK
 $form.AcceptButton = $okBtn
@@ -4606,7 +4631,7 @@ $form.Controls.Add($okBtn)
 
 $cancelBtn = New-Object System.Windows.Forms.Button
 $cancelBtn.Text = '取消'
-$cancelBtn.Location = New-Object System.Drawing.Point(440, 370)
+$cancelBtn.Location = New-Object System.Drawing.Point(485, 458)
 $cancelBtn.Size = New-Object System.Drawing.Size(90, 32)
 $cancelBtn.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
 $form.CancelButton = $cancelBtn
@@ -4620,8 +4645,8 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {{ Write-Output $tb.Tex
         prompt.replace('\'', "''")
     );
     let output = crate::native::run_dialog("powershell", &["-NoProfile", "-Command", &script])?;
-    let stdout = String::from_utf8_lossy(&output).trim().to_string();
-    if stdout.is_empty() { None } else { Some(stdout) }
+    let stdout = String::from_utf8_lossy(&output).trim_end().to_string();
+    if stdout.trim().is_empty() { None } else { Some(stdout) }
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -4649,8 +4674,11 @@ fn show_action_dialog(title: &str, actions: &[&str]) -> Option<String> {
     let menu_text = menu_items.join("\n");
     let script = format!(
         r#"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName Microsoft.VisualBasic
-$result = [Microsoft.VisualBasic.Interaction]::InputBox('请选择操作编号:\n{}', '{}', '1')
+$msg = '请选择操作编号：' + [Environment]::NewLine + '{}'
+$result = [Microsoft.VisualBasic.Interaction]::InputBox($msg, '{}', '1')
 Write-Output $result
 "#,
         menu_text.replace('\'', "''"),
