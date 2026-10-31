@@ -32,6 +32,9 @@ pub struct ClassificationData {
     pub fixed: bool,
     pub aggregate_item_count: i64,
     pub exclude_search: bool,
+    /// 是否显示项目名称；None 表示沿用默认（显示名称）
+    #[serde(default)]
+    pub item_show_name: Option<bool>,
 }
 
 /// 项目类型

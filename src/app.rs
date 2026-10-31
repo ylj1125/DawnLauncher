@@ -424,14 +424,15 @@ impl App {
             *right_clicked_class_id_for_menu.lock().unwrap() = id as i64;
             if let Some(w) = window_for_class_menu.upgrade() {
                 let cur = db_for_class_menu.get_classification(id as i64);
-                let (exclude, layout, icon_size, show_only) = match &cur {
+                let (exclude, layout, icon_size, show_only, show_name) = match &cur {
                     Some(c) => (
                         c.data.exclude_search,
                         c.data.item_layout.clone(),
                         c.data.item_icon_size.unwrap_or(48),
                         c.data.item_show_only.clone(),
+                        c.data.item_show_name.unwrap_or(true),
                     ),
-                    None => (false, "tile".into(), 48, "default".into()),
+                    None => (false, "tile".into(), 48, "default".into(), true),
                 };
                 show_classification_item_menu(
                     &w,
@@ -441,6 +442,7 @@ impl App {
                     &layout,
                     icon_size,
                     &show_only,
+                    show_name,
                 );
             }
         });
@@ -2312,6 +2314,30 @@ impl App {
                             }
                         }
                     }
+                    ("classification-item", "toggle-show-name") => {
+                        let cid = *right_class_id.lock().unwrap();
+                        if let Some(classification) = db_for_ctx.get_classification(cid) {
+                            let cur = classification.data.item_show_name.unwrap_or(true);
+                            match db_for_ctx.set_classification_item_show_name(cid, !cur) {
+                                Ok(_) => {
+                                    if let Some(w) = window_for_ctx.upgrade() {
+                                        if let Some(c) = db_for_ctx.get_classification(cid) {
+                                            apply_class_settings(&w, &c.data);
+                                        }
+                                    }
+                                    show_info_dialog(
+                                        "完成",
+                                        if cur {
+                                            "已切换为仅显示图标"
+                                        } else {
+                                            "已显示项目名称"
+                                        },
+                                    );
+                                }
+                                Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
+                            }
+                        }
+                    }
                     ("classification-item", "set-shortcut") => {
                         let cid = *right_class_id.lock().unwrap();
                         let current = db_for_ctx
@@ -3834,6 +3860,8 @@ fn apply_class_settings(w: &MainWindow, data: &crate::models::ClassificationData
         _ => "default".to_string(),
     };
     w.set_current_class_show_only(SharedString::from(show_only));
+    // 仅图标模式：分类设置为不显示名称，或全局设置隐藏名称
+    w.set_current_class_hide_name(!data.item_show_name.unwrap_or(true));
 }
 
 /// list 应为已排序的完整分类列表（父+子）
@@ -4792,6 +4820,7 @@ fn show_classification_item_menu(
     cur_layout: &str,
     cur_icon_size: i64,
     cur_show_only: &str,
+    cur_show_name: bool,
 ) {
     let exclude_label = if exclude_search { "取消排除搜索" } else { "排除搜索" };
     let layout_tip = if cur_layout == "list" {
@@ -4808,6 +4837,11 @@ fn show_classification_item_menu(
         "folder" => "显示：仅文件",
         _ => "显示：仅文件",
     };
+    let show_name_label = if cur_show_name {
+        "切换为仅显示图标"
+    } else {
+        "显示项目名称"
+    };
     let items = [
         ("rename", "重命名", "✏", false, false),
         ("add-child", "新建子分类", "+", false, false),
@@ -4815,6 +4849,7 @@ fn show_classification_item_menu(
         ("toggle-layout", layout_tip, "▦", false, false),
         ("icon-size", icon_tip.as_str(), "🖼", false, false),
         ("toggle-show-only", show_label, "🗂", false, false),
+        ("toggle-show-name", show_name_label, "🏷", false, false),
         ("", "", "", true, false),
         ("set-default", "设为默认分类", "★", false, false),
         ("set-shortcut", "设置快捷键...", "⌨", false, false),

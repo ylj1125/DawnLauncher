@@ -889,6 +889,25 @@ impl Database {
         Ok(())
     }
 
+    /// 设置分类是否显示项目名称（false = 仅显示图标）
+    pub fn set_classification_item_show_name(&self, class_id: i64, show_name: bool) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let data_str: String = conn.query_row(
+            "SELECT data FROM classification WHERE id = ?",
+            params![class_id],
+            |r| r.get(0),
+        )?;
+        if let Ok(mut data) = serde_json::from_str::<ClassificationData>(&data_str) {
+            data.item_show_name = Some(show_name);
+            let new_data_str = serde_json::to_string(&data).unwrap_or(data_str);
+            conn.execute(
+                "UPDATE classification SET data = ? WHERE id = ?",
+                params![new_data_str, class_id],
+            )?;
+        }
+        Ok(())
+    }
+
     /// 设置分类的列数 (0 表示自动)
     pub fn set_classification_item_column_number(&self, class_id: i64, col: i64) -> Result<(), rusqlite::Error> {
         let conn = self.conn.lock().unwrap();

@@ -54,6 +54,7 @@ export component MainWindow inherits Window {
     in property <string> current-class-layout: "tile";  // tile / list
     in property <int> current-class-icon-size: 48;     // 覆盖 item-icon-size
     in property <string> current-class-show-only: "default";  // default / file / folder
+    in property <bool> current-class-hide-name: false;        // 分类「仅图标」：不显示项目名称
     // ===== 窗口背景图 / 不透明度 =====
     in property <image> window-bg-image;
     in-out property <bool> window-bg-visible: false;
@@ -199,7 +200,7 @@ export component MainWindow inherits Window {
                         alignment: start;
 
                         Text {
-                            text: "Dawn Launcher v0.15";
+                            text: "Dawn Launcher v0.16";
                             color: ThemeSettings.text-c(root.theme-mode);
                             font-size: ThemeSettings.font-size-normal;
                             font-weight: 700;
@@ -518,7 +519,7 @@ export component MainWindow inherits Window {
                                 theme-mode: root.theme-mode;
                                 batch-mode: root.batch-mode;
                                 icon-size: root.current-class-icon-size * 1px;
-                                hide-name: root.hide-name;
+                                hide-name: root.hide-name || root.current-class-hide-name;
                                 layout: root.current-class-layout;
                                 show-only: root.current-class-show-only;
                                 list-width: items-scroll.width - 20px;
