@@ -6,6 +6,10 @@ pub fn get_file_icon(_path: &str) -> Option<String> {
     None
 }
 
+pub fn get_icons_batch(paths: &[String]) -> Vec<Option<String>> {
+    vec![None; paths.len()]
+}
+
 pub fn get_shortcut_file_info(_path: &str) -> Option<HashMap<String, String>> {
     None
 }

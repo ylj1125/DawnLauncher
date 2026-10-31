@@ -422,7 +422,7 @@ fn collect_lnk_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>, d
 /// 批量获取文件图标 (一次 PowerShell 调用)
 /// 路径列表写入临时文件后由 PowerShell 逐行读取，避免命令行长度与转义问题。
 /// 返回与输入等长的结果，按行与输入一一对应。
-fn get_icons_batch(paths: &[String]) -> Vec<Option<String>> {
+pub fn get_icons_batch(paths: &[String]) -> Vec<Option<String>> {
     if paths.is_empty() {
         return Vec::new();
     }

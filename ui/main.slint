@@ -8,6 +8,7 @@ export { DragHelper } from "components/drag_helper.slint";
 import { ClassificationTab } from "components/classification_tab.slint";
 import { SettingsPanel } from "components/settings_panel.slint";
 import { ContextMenu, MenuItem } from "components/context_menu.slint";
+export { NewItemWindow, CatalogEntry, MultiPick, NewItemPayload } from "components/new_item_window.slint";
 
 // 分类数据模型
 export struct ClassificationInfo {
@@ -200,7 +201,7 @@ export component MainWindow inherits Window {
                         alignment: start;
 
                         Text {
-                            text: "Dawn Launcher v0.16";
+                            text: "Dawn Launcher v0.17";
                             color: ThemeSettings.text-c(root.theme-mode);
                             font-size: ThemeSettings.font-size-normal;
                             font-weight: 700;

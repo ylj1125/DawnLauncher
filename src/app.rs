@@ -10,13 +10,17 @@ use crate::db::Database;
 use crate::models::{Classification, Item};
 use crate::native;
 // MainWindow, ClassificationInfo, ItemInfo, MenuItem 由 slint::include_modules!() 生成在 crate 根
-use crate::{ClassificationInfo, DragHelper, ItemEditWindow, ItemInfo, MenuItem, MainWindow, QuickSearchWindow, SettingsWindow};
+use crate::{
+    CatalogEntry, ClassificationInfo, DragHelper, ItemEditWindow, ItemInfo, MainWindow, MenuItem,
+    MultiPick, NewItemPayload, NewItemWindow, QuickSearchWindow, SettingsWindow,
+};
 
 pub struct App {
     main_window: MainWindow,
     quick_search_window: QuickSearchWindow,
     settings_window: SettingsWindow,
     item_edit_window: ItemEditWindow,
+    new_item_window: NewItemWindow,
     db: Arc<Database>,
     current_classification_id: Arc<Mutex<i64>>,
     expanded_classifications: Arc<Mutex<std::collections::HashSet<i64>>>,
@@ -51,6 +55,10 @@ impl App {
         // 3.1.2 创建项目编辑窗口（初始隐藏）
         let item_edit_window = ItemEditWindow::new()?;
         item_edit_window.window().hide().ok();
+
+        // 3.1.3 创建「新建项目」窗口（初始隐藏）
+        let new_item_window = NewItemWindow::new()?;
+        new_item_window.window().hide().ok();
         // 应用窗口背景图与不透明度设置
         let bg_path = db.get_setting("window_bg_image", "");
         if !bg_path.is_empty() {
@@ -71,6 +79,8 @@ impl App {
         // 编辑窗口当前编辑的项目 id 与待保存图标
         let editing_item_id = Arc::new(Mutex::new(0i64));
         let editing_icon: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        // 「新建项目」窗口当前目标分类
+        let new_item_class_id: Arc<Mutex<i64>> = Arc::new(Mutex::new(0i64));
 
         // 3.1.2 托盘状态（运行期可切换）
         let tray_icon_enabled = Arc::new(Mutex::new(db.get_setting_bool("tray_icon", true)));
@@ -1755,6 +1765,8 @@ impl App {
             let edit_weak_for_ctx = item_edit_window.as_weak();
             let editing_item_id_for_ctx = editing_item_id.clone();
             let editing_icon_for_ctx = editing_icon.clone();
+            let ni_window_ctx = new_item_window.as_weak();
+            let ni_class_ctx = new_item_class_id.clone();
             main_window.on_context_menu_item_selected(move |source, action| {
                 let source_str = source.to_string();
                 let action_str = action.to_string();
@@ -1764,6 +1776,44 @@ impl App {
                     Some(w) => w,
                     None => return,
                 };
+
+                // 新建项目 / 新建网址：统一打开「新建项目」窗口（左侧类型栏）
+                if source_str == "item-area" && (action_str == "new-item" || action_str == "new-url") {
+                    let class_id = *current_id_for_ctx.lock().unwrap();
+                    *ni_class_ctx.lock().unwrap() = class_id;
+                    let nw = match ni_window_ctx.upgrade() {
+                        Some(nw) => nw,
+                        None => return,
+                    };
+                    nw.set_class_name(SharedString::from(
+                        db_for_ctx
+                            .get_classification(class_id)
+                            .map(|c| c.name)
+                            .unwrap_or_default(),
+                    ));
+                    nw.set_current_type(SharedString::from(if action_str == "new-url" {
+                        "url"
+                    } else {
+                        "file"
+                    }));
+                    nw.set_item_name(SharedString::from(""));
+                    nw.set_item_target(SharedString::from(""));
+                    nw.set_item_params(SharedString::from(""));
+                    nw.set_item_remark(SharedString::from(""));
+                    nw.set_item_start_location(SharedString::from(""));
+                    nw.set_item_shortcut(SharedString::from(""));
+                    nw.set_item_global_shortcut(false);
+                    nw.set_item_admin(false);
+                    nw.set_catalog_search(SharedString::from(""));
+                    nw.set_system_category(SharedString::from("common"));
+                    nw.set_catalog(ModelRc::from(Rc::new(slint::VecModel::from(
+                        Vec::<CatalogEntry>::new(),
+                    ))));
+                    w.set_context_menu_visible(false);
+                    nw.show().ok();
+                    return;
+                }
+
                 // 立刻隐藏右键菜单，否则浮层覆盖整个窗口会阻塞后续模态对话框
                 w.set_context_menu_visible(false);
                 let class_id = current_id_for_ctx.lock().unwrap().clone();
@@ -2985,6 +3035,414 @@ impl App {
             });
         }
 
+        // ===== 18.5 新建项目窗口 =====
+        {
+            let ni_weak = new_item_window.as_weak();
+            let db_ni = db.clone();
+            let ni_class = new_item_class_id.clone();
+            let catalog_all: Arc<Mutex<Vec<CatalogRaw>>> = Arc::new(Mutex::new(Vec::new()));
+            let picks_all: Arc<Mutex<Vec<PickRaw>>> = Arc::new(Mutex::new(Vec::new()));
+            let selected_icon: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+            let search_arc: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+            let main_weak_ni = main_window.as_weak();
+
+            // 取消
+            {
+                let ni_weak_cancel = ni_weak.clone();
+                new_item_window.on_cancel_requested(move || {
+                    if let Some(w) = ni_weak_cancel.upgrade() {
+                        w.window().hide().ok();
+                    }
+                });
+            }
+
+            // 切换类型
+            {
+                let ni_weak_type = ni_weak.clone();
+                let db_type = db_ni.clone();
+                let catalog_type = catalog_all.clone();
+                let picks_type = picks_all.clone();
+                let search_type = search_arc.clone();
+                let icon_type = selected_icon.clone();
+                new_item_window.on_type_changed(move |ty| {
+                    let ty = ty.to_string();
+                    let w = match ni_weak_type.upgrade() {
+                        Some(w) => w,
+                        None => return,
+                    };
+                    w.set_current_type(SharedString::from(ty.as_str()));
+                    w.set_item_name(SharedString::from(""));
+                    w.set_item_target(SharedString::from(""));
+                    w.set_item_params(SharedString::from(""));
+                    w.set_item_remark(SharedString::from(""));
+                    w.set_item_start_location(SharedString::from(""));
+                    w.set_catalog_search(SharedString::from(""));
+                    *search_type.lock().unwrap() = String::new();
+                    *icon_type.lock().unwrap() = None;
+
+                    match ty.as_str() {
+                        "system" => {
+                            *catalog_type.lock().unwrap() = system_catalog();
+                            let all = catalog_type.lock().unwrap().clone();
+                            let cat = w.get_system_category().to_string();
+                            rebuild_catalog(&w, &all, "", &cat, "");
+                            // 后台批量提取图标
+                            let all2 = catalog_type.clone();
+                            let weak_icons = ni_weak_type.clone();
+                            let search_icons = search_type.clone();
+                            std::thread::spawn(move || {
+                                let targets: Vec<String> = all2
+                                    .lock()
+                                    .unwrap()
+                                    .iter()
+                                    .map(|c| c.target.clone())
+                                    .collect();
+                                let icons = native::get_icons_batch(&targets);
+                                {
+                                    let mut list = all2.lock().unwrap();
+                                    for (i, ic) in icons.into_iter().enumerate() {
+                                        if let Some(slot) = list.get_mut(i) {
+                                            slot.icon = ic;
+                                        }
+                                    }
+                                }
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(w) = weak_icons.upgrade() {
+                                        let q = search_icons.lock().unwrap().clone();
+                                        let cat = w.get_system_category().to_string();
+                                        let all = all2.lock().unwrap().clone();
+                                        rebuild_catalog(&w, &all, &q, &cat, "");
+                                    }
+                                });
+                            });
+                        }
+                        "start" => {
+                            w.set_scanning(true);
+                            *catalog_type.lock().unwrap() = Vec::new();
+                            rebuild_catalog(&w, &[], "", "", "");
+                            let catalog_scan = catalog_type.clone();
+                            let weak_scan = ni_weak_type.clone();
+                            let search_scan = search_type.clone();
+                            std::thread::spawn(move || {
+                                let entries = native::scan_start_menu();
+                                *catalog_scan.lock().unwrap() = entries
+                                    .into_iter()
+                                    .map(|e| CatalogRaw {
+                                        name: e.name,
+                                        target: e.target,
+                                        kind: e.kind,
+                                        icon: e.icon,
+                                        category: String::new(),
+                                    })
+                                    .collect();
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(w) = weak_scan.upgrade() {
+                                        w.set_scanning(false);
+                                        let q = search_scan.lock().unwrap().clone();
+                                        let all = catalog_scan.lock().unwrap().clone();
+                                        rebuild_catalog(&w, &all, &q, "", "");
+                                    }
+                                });
+                            });
+                        }
+                        "appx" => {
+                            w.set_scanning(true);
+                            *catalog_type.lock().unwrap() = Vec::new();
+                            rebuild_catalog(&w, &[], "", "", "");
+                            let catalog_scan = catalog_type.clone();
+                            let weak_scan = ni_weak_type.clone();
+                            let search_scan = search_type.clone();
+                            std::thread::spawn(move || {
+                                let entries = native::scan_appx();
+                                *catalog_scan.lock().unwrap() = entries
+                                    .into_iter()
+                                    .map(|e| CatalogRaw {
+                                        name: e.name,
+                                        target: e.target,
+                                        kind: e.kind,
+                                        icon: e.icon,
+                                        category: String::new(),
+                                    })
+                                    .collect();
+                                let _ = slint::invoke_from_event_loop(move || {
+                                    if let Some(w) = weak_scan.upgrade() {
+                                        w.set_scanning(false);
+                                        let q = search_scan.lock().unwrap().clone();
+                                        let all = catalog_scan.lock().unwrap().clone();
+                                        rebuild_catalog(&w, &all, &q, "", "");
+                                    }
+                                });
+                            });
+                        }
+                        "multi" => {
+                            // 跨分类列出全部项目，供勾选
+                            let classes = db_type.list_all_classifications();
+                            let mut list: Vec<PickRaw> = Vec::new();
+                            for c in classes {
+                                for it in db_type.list_items(c.id) {
+                                    if it.kind == 5 || it.kind == 4 {
+                                        continue;
+                                    }
+                                    list.push(PickRaw {
+                                        id: it.id,
+                                        name: format!("{} · {}", c.name, it.name),
+                                        icon: it.data.icon.clone(),
+                                        selected: false,
+                                        target: it.data.target.clone().unwrap_or_default(),
+                                        params: it.data.params.clone(),
+                                    });
+                                }
+                            }
+                            *picks_type.lock().unwrap() = list.clone();
+                            rebuild_picks(&w, &list);
+                        }
+                        _ => {}
+                    }
+                });
+            }
+
+            // 目录搜索
+            {
+                let ni_weak_s = ni_weak.clone();
+                let catalog_s = catalog_all.clone();
+                let search_s = search_arc.clone();
+                new_item_window.on_catalog_search_changed(move |t| {
+                    *search_s.lock().unwrap() = t.to_string();
+                    if let Some(w) = ni_weak_s.upgrade() {
+                        let cat = w.get_system_category().to_string();
+                        let all = catalog_s.lock().unwrap().clone();
+                        rebuild_catalog(&w, &all, &t, &cat, "");
+                    }
+                });
+            }
+
+            // 系统分类筛选
+            {
+                let ni_weak_c = ni_weak.clone();
+                let catalog_c = catalog_all.clone();
+                let search_c = search_arc.clone();
+                new_item_window.on_system_category_changed(move |cat| {
+                    let cat = cat.to_string();
+                    if let Some(w) = ni_weak_c.upgrade() {
+                        w.set_system_category(SharedString::from(cat.as_str()));
+                        let all = catalog_c.lock().unwrap().clone();
+                        let q = search_c.lock().unwrap().clone();
+                        rebuild_catalog(&w, &all, &q, &cat, "");
+                    }
+                });
+            }
+
+            // 目录条目被选中
+            {
+                let ni_weak_pick = ni_weak.clone();
+                let catalog_p = catalog_all.clone();
+                let icon_p = selected_icon.clone();
+                new_item_window.on_catalog_picked(move |idx| {
+                    if let Some(w) = ni_weak_pick.upgrade() {
+                        let model = w.get_catalog();
+                        if let Some(entry) = model.row_data(idx.max(0) as usize) {
+                            let target = entry.target.to_string();
+                            let icon = catalog_p
+                                .lock()
+                                .unwrap()
+                                .iter()
+                                .find(|c| c.target == target)
+                                .and_then(|c| c.icon.clone());
+                            *icon_p.lock().unwrap() = icon;
+                            w.set_item_name(SharedString::from(entry.name.as_str()));
+                            w.set_item_target(SharedString::from(target.as_str()));
+                            let cat = w.get_system_category().to_string();
+                            let q = w.get_catalog_search().to_string();
+                            let all = catalog_p.lock().unwrap().clone();
+                            rebuild_catalog(&w, &all, &q, &cat, target.as_str());
+                        }
+                    }
+                });
+            }
+
+            // 多项目勾选
+            {
+                let ni_weak_m = ni_weak.clone();
+                let picks_m = picks_all.clone();
+                new_item_window.on_pick_toggled(move |idx| {
+                    if let Some(w) = ni_weak_m.upgrade() {
+                        {
+                            let mut list = picks_m.lock().unwrap();
+                            if let Some(p) = list.get_mut(idx.max(0) as usize) {
+                                p.selected = !p.selected;
+                            }
+                        }
+                        let list = picks_m.lock().unwrap().clone();
+                        rebuild_picks(&w, &list);
+                    }
+                });
+            }
+
+            // 选择路径
+            {
+                let ni_weak_b = ni_weak.clone();
+                new_item_window.on_browse_requested(move || {
+                    if let Some(w) = ni_weak_b.upgrade() {
+                        let ty = w.get_current_type().to_string();
+                        let picked = if ty == "folder" {
+                            show_pick_folder_dialog()
+                        } else {
+                            show_open_file_dialog()
+                        };
+                        if let Some(path) = picked {
+                            if w.get_item_name().is_empty() {
+                                let name = std::path::Path::new(&path)
+                                    .file_stem()
+                                    .map(|s| s.to_string_lossy().to_string())
+                                    .unwrap_or_default();
+                                w.set_item_name(SharedString::from(name.as_str()));
+                            }
+                            w.set_item_target(SharedString::from(path.as_str()));
+                        }
+                    }
+                });
+            }
+
+            // 选择自定义图标
+            {
+                let icon_i = selected_icon.clone();
+                new_item_window.on_pick_icon_requested(move || {
+                    if let Some(path) = show_open_file_dialog() {
+                        let data = image_file_to_data_url(&path);
+                        *icon_i.lock().unwrap() = data;
+                        show_info_dialog("图标", "已设置自定义图标");
+                    }
+                });
+            }
+
+            // 创建项目
+            {
+                let ni_weak_create = ni_weak.clone();
+                let db_create = db_ni.clone();
+                let class_create = ni_class.clone();
+                let icon_create = selected_icon.clone();
+                let picks_create = picks_all.clone();
+                let main_create = main_weak_ni.clone();
+                new_item_window.on_create_requested(move |p: NewItemPayload| {
+                    let w = match ni_weak_create.upgrade() {
+                        Some(w) => w,
+                        None => return,
+                    };
+                    let class_id = *class_create.lock().unwrap();
+                    let ty = w.get_current_type().to_string();
+                    let name = p.name.trim().to_string();
+                    let target = p.target.trim().to_string();
+                    let remark = p.remark.trim().to_string();
+                    let start_location = p.start_location.trim().to_string();
+                    let shortcut = p.shortcut.trim().to_string();
+
+                    if ty != "multi" && name.is_empty() {
+                        show_info_dialog("提示", "请填写名称");
+                        return;
+                    }
+
+                    let kind: i64 = match ty.as_str() {
+                        "url" => 2,
+                        "folder" => 1,
+                        "system" => 3,
+                        "appx" => 4,
+                        "multi" => 5,
+                        _ => 0,
+                    };
+
+                    // 多项目：收集勾选的子项
+                    let mut multi_items: Vec<crate::models::MultiItem> = Vec::new();
+                    if kind == 5 {
+                        for it in picks_create.lock().unwrap().iter() {
+                            if it.selected {
+                                multi_items.push(crate::models::MultiItem {
+                                    target: it.target.clone(),
+                                    params: it.params.clone(),
+                                    start_location: None,
+                                    run_as_admin: false,
+                                    name: Some(it.name.clone()),
+                                });
+                            }
+                        }
+                        if multi_items.is_empty() {
+                            show_info_dialog("提示", "请至少勾选一个项目");
+                            return;
+                        }
+                    }
+
+                    if kind != 5 && target.is_empty() {
+                        show_info_dialog("提示", "请填写路径/网址");
+                        return;
+                    }
+
+                    let order = db_create.max_item_order(class_id) + 1;
+                    let icon = icon_create
+                        .lock()
+                        .unwrap()
+                        .clone()
+                        .or_else(|| {
+                            if kind == 0 || kind == 1 || kind == 3 {
+                                native::get_file_icon(&target)
+                            } else {
+                                None
+                            }
+                        });
+
+                    let item = Item {
+                        id: 0,
+                        classification_id: class_id,
+                        name,
+                        kind,
+                        data: crate::models::ItemData {
+                            target: if kind == 5 { None } else { Some(target.clone()) },
+                            params: if p.params.trim().is_empty() {
+                                None
+                            } else {
+                                Some(p.params.trim().to_string())
+                            },
+                            start_location: if start_location.is_empty() {
+                                None
+                            } else {
+                                Some(start_location)
+                            },
+                            run_as_admin: p.run_as_admin,
+                            icon,
+                            remark: if remark.is_empty() { None } else { Some(remark) },
+                            multi_items,
+                            multi_items_time_interval: p.multi_interval as i64,
+                            ..Default::default()
+                        },
+                        shortcut_key: if shortcut.is_empty() {
+                            None
+                        } else {
+                            Some(shortcut)
+                        },
+                        global_shortcut_key: p.global_shortcut,
+                        order,
+                    };
+
+                    match db_create.insert_item(&item) {
+                        Ok(_) => {
+                            if let Some(mw) = main_create.upgrade() {
+                                let items = db_create.list_items(class_id);
+                                mw.set_items(to_item_model(&items, 0));
+                                mw.set_status_text(SharedString::from(format!(
+                                    "共 {} 个项目",
+                                    items.len()
+                                )));
+                            }
+                            log::info!("新建项目成功: {} (kind={})", item.name, kind);
+                            w.window().hide().ok();
+                        }
+                        Err(e) => {
+                            log::error!("新建项目失败: {}", e);
+                            show_error_dialog("创建失败", &format!("数据库写入失败: {}", e));
+                        }
+                    }
+                });
+            }
+        }
+
         // 17. 应用启动时加载已保存的设置
         {
             let raw_theme = db.get_setting("theme_mode", "light");
@@ -3015,6 +3473,8 @@ impl App {
             apply_font_family(&main_window, &font_family);
             apply_font_family(&quick_search_window, &font_family);
             apply_font_family(&settings_window, &font_family);
+            apply_font_family(&new_item_window, &font_family);
+            new_item_window.set_theme_mode(SharedString::from(theme.clone()));
             // 应用自定义主题颜色到所有窗口的 ThemeSettings 全局
             for (k, v) in [
                 ("bg", &custom_bg),
@@ -3026,6 +3486,7 @@ impl App {
                 set_custom_theme_color(&main_window, k, v);
                 set_custom_theme_color(&quick_search_window, k, v);
                 set_custom_theme_color(&settings_window, k, v);
+                set_custom_theme_color(&new_item_window, k, v);
             }
             // 同步快速搜索窗口主题
             quick_search_window.set_theme_mode(SharedString::from(theme.clone()));
@@ -3048,6 +3509,7 @@ impl App {
             quick_search_window,
             settings_window,
             item_edit_window,
+            new_item_window,
             db,
             current_classification_id: current_id,
             expanded_classifications,
@@ -3930,6 +4392,142 @@ fn to_classification_model(
 }
 
 /// 将项目列表转为 Slint 模型
+/// 「新建项目」窗口目录条目
+#[derive(Clone)]
+struct CatalogRaw {
+    name: String,
+    target: String,
+    kind: i64,
+    icon: Option<String>,
+    category: String,
+}
+
+/// 多项目可勾选条目
+#[derive(Clone)]
+struct PickRaw {
+    id: i64,
+    name: String,
+    icon: Option<String>,
+    selected: bool,
+    target: String,
+    params: Option<String>,
+}
+
+/// 内置系统项目清单（名称 / 目标 / 分类）
+fn system_catalog() -> Vec<CatalogRaw> {
+    let raw: &[(&str, &str, &str)] = &[
+        // 常用
+        ("Windows 设置", "ms-settings:", "common"),
+        ("Windows 更新", "ms-settings:windowsupdate", "common"),
+        ("剪贴板设置", "ms-settings:clipboard", "common"),
+        ("启动应用", "ms-settings:startupapps", "common"),
+        ("设备管理器", "devmgmt.msc", "common"),
+        ("磁盘管理", "diskmgmt.msc", "common"),
+        ("事件查看器", "eventvwr.msc", "common"),
+        ("系统信息", "msinfo32", "common"),
+        ("网络连接", "ncpa.cpl", "common"),
+        ("任务管理器", "taskmgr", "common"),
+        ("控制面板", "shell:ControlPanelFolder", "common"),
+        ("注册表编辑器", "regedit", "common"),
+        // 系统设置
+        ("显示设置", "ms-settings:display", "settings"),
+        ("声音设置", "ms-settings:sound", "settings"),
+        ("个性化", "ms-settings:personalization", "settings"),
+        ("网络和 Internet", "ms-settings:network", "settings"),
+        ("应用和功能", "ms-settings:appsfeatures", "settings"),
+        ("时间和语言", "ms-settings:dateandtime", "settings"),
+        ("电源和睡眠", "ms-settings:powersleep", "settings"),
+        ("隐私", "ms-settings:privacy", "settings"),
+        // 管理工具
+        ("服务", "services.msc", "admin"),
+        ("任务计划程序", "taskschd.msc", "admin"),
+        ("性能监视器", "perfmon", "admin"),
+        ("资源监视器", "resmon", "admin"),
+        ("组策略编辑器", "gpedit.msc", "admin"),
+        ("系统配置", "msconfig", "admin"),
+        ("计算机管理", "compmgmt.msc", "admin"),
+        ("高级系统设置", "sysdm.cpl", "admin"),
+        // 系统文件夹
+        ("此电脑", "shell:MyComputerFolder", "folder"),
+        ("回收站", "shell:RecycleBinFolder", "folder"),
+        ("打印机和设备", "shell:PrintersFolder", "folder"),
+        ("网络", "shell:NetworkPlacesFolder", "folder"),
+        ("下载", "shell:DownloadsFolder", "folder"),
+        ("文档", "shell:Personal", "folder"),
+        ("图片", "shell:MyPictures", "folder"),
+        ("音乐", "shell:MyMusic", "folder"),
+        ("视频", "shell:MyVideo", "folder"),
+        // 快捷操作
+        ("运行", "shell:RunFolder", "shortcut"),
+        ("计算器", "calc", "shortcut"),
+        ("记事本", "notepad", "shortcut"),
+        ("命令提示符", "cmd", "shortcut"),
+        ("PowerShell", "powershell", "shortcut"),
+        ("画图", "mspaint", "shortcut"),
+        ("写字板", "write", "shortcut"),
+        ("放大镜", "magnify", "shortcut"),
+        ("屏幕键盘", "osk", "shortcut"),
+        ("日期和时间", "timedate.cpl", "shortcut"),
+        ("电源选项", "powercfg.cpl", "shortcut"),
+    ];
+    raw.iter()
+        .map(|(n, t, c)| CatalogRaw {
+            name: n.to_string(),
+            target: t.to_string(),
+            kind: 3,
+            icon: None,
+            category: c.to_string(),
+        })
+        .collect()
+}
+
+/// 按分类与关键字过滤目录并写回窗口
+fn rebuild_catalog(
+    window: &NewItemWindow,
+    all: &[CatalogRaw],
+    search: &str,
+    category: &str,
+    selected_target: &str,
+) {
+    let q = search.trim().to_lowercase();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut entries: Vec<CatalogEntry> = Vec::new();
+    for c in all {
+        if !category.is_empty() && category != "all" && c.category != category {
+            continue;
+        }
+        if !q.is_empty() && !c.name.to_lowercase().contains(&q) {
+            continue;
+        }
+        if category == "all" && !seen.insert(c.target.clone()) {
+            continue;
+        }
+        entries.push(CatalogEntry {
+            name: SharedString::from(c.name.as_str()),
+            target: SharedString::from(c.target.as_str()),
+            kind: c.kind as i32,
+            icon: c.icon.as_deref().and_then(parse_icon_data_url).unwrap_or_default(),
+            selected: !selected_target.is_empty() && c.target == selected_target,
+            category: SharedString::from(c.category.as_str()),
+        });
+    }
+    window.set_catalog(ModelRc::from(Rc::new(slint::VecModel::from(entries))));
+}
+
+/// 写回多项目勾选列表
+fn rebuild_picks(window: &NewItemWindow, picks: &[PickRaw]) {
+    let entries: Vec<MultiPick> = picks
+        .iter()
+        .map(|p| MultiPick {
+            id: p.id as i32,
+            name: SharedString::from(p.name.as_str()),
+            icon: p.icon.as_deref().and_then(parse_icon_data_url).unwrap_or_default(),
+            selected: p.selected,
+        })
+        .collect();
+    window.set_picks(ModelRc::from(Rc::new(slint::VecModel::from(entries))));
+}
+
 fn to_item_model(list: &[Item], selected_id: i64) -> ModelRc<ItemInfo> {
     let model = slint::VecModel::from(
         list.iter()
@@ -4067,6 +4665,7 @@ fn base64_decode(input: &str) -> Option<Vec<u8>> {
 fn open_item(item: &Item) {
     let target = match &item.data.target {
         Some(t) if !t.is_empty() => t.clone(),
+        _ if item.is_multi() => String::new(),
         _ => {
             log::warn!("项目 [{}] 无目标路径，无法打开", item.name);
             return;
@@ -4882,8 +5481,6 @@ fn show_item_area_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
         ("new-item", "新建项目", "+", false, false),
         ("new-url", "新建网址", "🔗", false, false),
-        ("new-system", "新建系统项目...", "⚙", false, false),
-        ("new-multi-item", "新建多项目...", "⧗", false, false),
         ("", "", "", true, false),
         ("sort-default", "排序：默认", "≡", false, false),
         ("sort-initial", "排序：按名称", "A", false, false),
