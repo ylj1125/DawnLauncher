@@ -89,6 +89,9 @@ impl App {
         let new_item_class_id: Arc<Mutex<i64>> = Arc::new(Mutex::new(0i64));
         // 「项目设置」窗口当前目标分类
         let item_settings_class_id: Arc<Mutex<i64>> = Arc::new(Mutex::new(0i64));
+        // 全局默认项目布局（分类设为「默认」时使用）
+        let global_item_layout: Arc<Mutex<String>> =
+            Arc::new(Mutex::new(db.get_setting("item_layout", "tile")));
 
         // 3.1.2 托盘状态（运行期可切换）
         let tray_icon_enabled = Arc::new(Mutex::new(db.get_setting_bool("tray_icon", true)));
@@ -133,7 +136,7 @@ impl App {
         let item_model = to_item_model(&items, 0);
         main_window.set_items(item_model);
         if let Some(c) = db.get_classification(first_id) {
-            apply_class_settings(&main_window, &c.data);
+            apply_class_settings(&main_window, &c.data, &global_item_layout);
         }
         main_window.set_status_text(SharedString::from(format!(
             "共 {} 个分类，{} 个项目",
@@ -146,6 +149,7 @@ impl App {
         let window_for_class = main_window.as_weak();
         let current_id = Arc::new(Mutex::new(first_id));
         let current_id_for_class = current_id.clone();
+        let gil_for_class = global_item_layout.clone();
         main_window.on_classification_clicked(move |id| {
             let class_id: i64 = id.into();
             // 立即更新选中状态，保证界面响应
@@ -171,6 +175,7 @@ impl App {
             if is_folder_class {
                 let db_bg = db_for_class.clone();
                 let win_bg = window_for_class.clone();
+                let gil_bg = gil_for_class.clone();
                 std::thread::spawn(move || {
                     sync_associate_folder(&db_bg, class_id);
                     let settings = db_bg.get_classification(class_id);
@@ -183,7 +188,7 @@ impl App {
                             w.set_items(to_item_model(&items, 0));
                             w.set_status_text(SharedString::from(format!("{} 项", items.len())));
                             if let Some(c) = settings {
-                                apply_class_settings(&w, &c.data);
+                                apply_class_settings(&w, &c.data, &gil_bg);
                             }
                         }
                     });
@@ -198,7 +203,7 @@ impl App {
                     w.set_items(to_item_model(&items, 0));
                     w.set_status_text(SharedString::from(format!("{} 项", items.len())));
                     if let Some(data) = class_data {
-                        apply_class_settings(&w, &data);
+                        apply_class_settings(&w, &data, &gil_for_class);
                     }
                 }
             }
@@ -249,6 +254,7 @@ impl App {
                 let window_for_hk = main_window.as_weak();
                 let current_for_hk = current_id.clone();
                 let expanded_for_hk = expanded_classifications.clone();
+                let gil_for_hk = global_item_layout.clone();
                 std::thread::spawn(move || loop {
                     let action = match hk_rx.lock().unwrap().recv() {
                         Ok(a) => a,
@@ -258,6 +264,7 @@ impl App {
                     let win_ctx = window_for_hk.clone();
                     let cur_ctx = current_for_hk.clone();
                     let exp_ctx = expanded_for_hk.clone();
+                    let gil_ctx = gil_for_hk.clone();
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = win_ctx.upgrade() {
                             if let Some(id) = action
@@ -272,7 +279,7 @@ impl App {
                                 w.set_items(to_item_model(&items, 0));
                                 w.set_status_text(SharedString::from(format!("{} 项", items.len())));
                                 if let Some(c) = db_ctx.get_classification(id) {
-                                    apply_class_settings(&w, &c.data);
+                                    apply_class_settings(&w, &c.data, &gil_ctx);
                                 }
                                 w.set_search_text(SharedString::from(""));
                             } else if let Some(id) = action
@@ -1019,6 +1026,30 @@ impl App {
             });
         }
 
+        // 15.12b 全局默认项目布局（分类设为「默认」时使用）
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            let main_weak_il = main_window.as_weak();
+            let cur_id_il = current_id.clone();
+            let gil = global_item_layout.clone();
+            settings_window.on_item_layout_changed(move |layout| {
+                let layout_str = layout.to_string();
+                let _ = db_clone.set_setting("item_layout", &layout_str);
+                *gil.lock().unwrap() = layout_str.clone();
+                if let Some(sw) = sw_weak.upgrade() {
+                    sw.set_item_layout(SharedString::from(layout_str.as_str()));
+                }
+                // 重新应用当前分类设置（「默认」布局会跟随全局设置）
+                if let Some(mw) = main_weak_il.upgrade() {
+                    let cid = *cur_id_il.lock().unwrap();
+                    if let Some(c) = db_clone.get_classification(cid) {
+                        apply_class_settings(&mw, &c.data, &gil);
+                    }
+                }
+            });
+        }
+
         // 15.13.1 字体切换
         {
             let db_clone = db.clone();
@@ -1116,6 +1147,23 @@ impl App {
             });
         }
 
+        // 15.20b 侧边栏位置（左/右）
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            let main_weak_sp = main_window.as_weak();
+            settings_window.on_sidebar_position_changed(move |pos| {
+                let pos_str = pos.to_string();
+                let _ = db_clone.set_setting("sidebar_position", &pos_str);
+                if let Some(sw) = sw_weak.upgrade() {
+                    sw.set_sidebar_position(SharedString::from(pos_str.as_str()));
+                }
+                if let Some(mw) = main_weak_sp.upgrade() {
+                    mw.set_sidebar_position(SharedString::from(pos_str.as_str()));
+                }
+            });
+        }
+
         // 15.21 鼠标悬停切换
         {
             let db_clone = db.clone();
@@ -1164,6 +1212,19 @@ impl App {
                 let v_i = v as i32;
                 let _ = db_clone.set_setting_i64("quick_search_width", v_i as i64);
                 if let Some(sw) = sw_weak.upgrade() { sw.set_quick_search_width(v_i); }
+            });
+        }
+
+        // 15.25b 快速搜索窗口位置（顶部/居中/底部）
+        {
+            let db_clone = db.clone();
+            let sw_weak = settings_window.as_weak();
+            settings_window.on_quick_search_position_changed(move |pos| {
+                let pos_str = pos.to_string();
+                let _ = db_clone.set_setting("quick_search_position", &pos_str);
+                if let Some(sw) = sw_weak.upgrade() {
+                    sw.set_quick_search_position(SharedString::from(pos_str.as_str()));
+                }
             });
         }
 
@@ -1665,10 +1726,11 @@ impl App {
             });
         }
 
-        // 16.4 主窗口: 触发快速搜索 -> 显示并居中快速搜索窗口
+        // 16.4 主窗口: 触发快速搜索 -> 显示快速搜索窗口（按设置位置）
         {
             let qs_weak_show = quick_search_window.as_weak();
             let main_weak_show = main_window.as_weak();
+            let db_show = db.clone();
             main_window.on_quick_search_triggered(move || {
                 if let Some(qs) = qs_weak_show.upgrade() {
                     // 清空搜索文本和结果
@@ -1678,10 +1740,11 @@ impl App {
                     if let Some(w) = main_weak_show.upgrade() {
                         qs.set_theme_mode(w.get_theme_mode());
                     }
-                    // 显示并居中到屏幕
+                    // 显示并按设置位置定位
+                    let pos = db_show.get_setting("quick_search_position", "center");
                     qs.window().show().ok();
-                    center_window_on_screen(&qs);
-                    log::info!("快速搜索窗口已显示");
+                    position_quick_search_window(&qs, &pos);
+                    log::info!("快速搜索窗口已显示 (位置: {})", pos);
                 }
             });
         }
@@ -1773,6 +1836,7 @@ impl App {
             let edit_weak_for_ctx = item_edit_window.as_weak();
             let editing_item_id_for_ctx = editing_item_id.clone();
             let editing_icon_for_ctx = editing_icon.clone();
+            let gil_for_ctx = global_item_layout.clone();
             let ni_window_ctx = new_item_window.as_weak();
             let ni_class_ctx = new_item_class_id.clone();
             let is_window_ctx = item_settings_window.as_weak();
@@ -2364,7 +2428,7 @@ impl App {
                                     let items = load_class_items(&db_for_ctx, cid);
                                     if let Some(w) = window_for_ctx.upgrade() {
                                         w.set_items(to_item_model(&items, 0));
-                                        apply_class_settings(&w, &db_for_ctx.get_classification(cid).unwrap().data);
+                                        apply_class_settings(&w, &db_for_ctx.get_classification(cid).unwrap().data, &gil_for_ctx);
                                         w.set_context_menu_visible(false);
                                     }
                                     show_info_dialog("完成", &format!("布局已切换为：{}", new_layout));
@@ -2384,7 +2448,7 @@ impl App {
                                     let items = load_class_items(&db_for_ctx, cid);
                                     if let Some(w) = window_for_ctx.upgrade() {
                                         w.set_items(to_item_model(&items, 0));
-                                        apply_class_settings(&w, &db_for_ctx.get_classification(cid).unwrap().data);
+                                        apply_class_settings(&w, &db_for_ctx.get_classification(cid).unwrap().data, &gil_for_ctx);
                                     }
                                     show_info_dialog("完成", &format!("图标大小已设为 {}", size));
                                 }
@@ -2405,7 +2469,7 @@ impl App {
                                     let items = load_class_items(&db_for_ctx, cid);
                                     if let Some(w) = window_for_ctx.upgrade() {
                                         w.set_items(to_item_model(&items, 0));
-                                        apply_class_settings(&w, &db_for_ctx.get_classification(cid).unwrap().data);
+                                        apply_class_settings(&w, &db_for_ctx.get_classification(cid).unwrap().data, &gil_for_ctx);
                                         w.set_context_menu_visible(false);
                                     }
                                     let label = match new_val {
@@ -2427,7 +2491,7 @@ impl App {
                                 Ok(_) => {
                                     if let Some(w) = window_for_ctx.upgrade() {
                                         if let Some(c) = db_for_ctx.get_classification(cid) {
-                                            apply_class_settings(&w, &c.data);
+                                            apply_class_settings(&w, &c.data, &gil_for_ctx);
                                         }
                                     }
                                     show_info_dialog(
@@ -3504,6 +3568,7 @@ impl App {
             let db_isw = db.clone();
             let is_class = item_settings_class_id.clone();
             let main_weak_isw = main_window.as_weak();
+            let gil_isw = global_item_layout.clone();
 
             // 取消
             {
@@ -3552,7 +3617,7 @@ impl App {
                     // 刷新主窗口
                     if let Some(mw) = main_weak_isw.upgrade() {
                         if let Some(c) = db_isw.get_classification(cid) {
-                            apply_class_settings(&mw, &c.data);
+                            apply_class_settings(&mw, &c.data, &gil_isw);
                         }
                         let items = load_class_items(&db_isw, cid);
                         mw.set_items(to_item_model(&items, 0));
@@ -3589,6 +3654,9 @@ impl App {
             main_window.set_window_topmost(topmost);
             main_window.set_item_icon_size(icon_size);
             main_window.set_sidebar_width(sidebar_w);
+            main_window.set_sidebar_position(SharedString::from(
+                db.get_setting("sidebar_position", "left"),
+            ));
             main_window.set_hide_name(hide_name);
             main_window.set_hide_after_open(hide_after_open);
             // 应用字体到所有窗口
@@ -3650,6 +3718,7 @@ impl App {
         // 轮询全局热键信号，收到后触发快速搜索窗口
         let qs_weak = self.quick_search_window.as_weak();
         let main_weak = self.main_window.as_weak();
+        let db_run = self.db.clone();
         let rx = self.hotkey_rx.clone();
         let timer = slint::Timer::default();
         timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(100), move || {
@@ -3662,8 +3731,9 @@ impl App {
                         if let Some(w) = main_weak.upgrade() {
                             qs.set_theme_mode(w.get_theme_mode());
                         }
+                        let pos = db_run.get_setting("quick_search_position", "center");
                         qs.window().show().ok();
-                        center_window_on_screen(&qs);
+                        position_quick_search_window(&qs, &pos);
                     }
                 }
             }
@@ -4267,6 +4337,30 @@ fn center_window_on_screen<C: ComponentHandle>(window: &C) {
     }
 }
 
+/// 按设置的位置（top / center / bottom）在屏幕上定位快速搜索窗口
+fn position_quick_search_window<C: ComponentHandle>(window: &C, position: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+        let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) } as f32;
+        let screen_h = unsafe { GetSystemMetrics(SM_CYSCREEN) } as f32;
+        let size = window.window().size();
+        let win_w = size.width as f32;
+        let win_h = size.height as f32;
+        let x = (screen_w - win_w) / 2.0;
+        let y = match position {
+            "top" => screen_h * 0.12,
+            "bottom" => screen_h - win_h - screen_h * 0.12,
+            _ => (screen_h - win_h) / 3.0, // center
+        };
+        window.window().set_position(slint::LogicalPosition::new(x, y));
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, position);
+    }
+}
+
 /// 设置/取消开机自启 (Windows 注册表)
 #[cfg(target_os = "windows")]
 fn set_auto_start(enable: bool, exe_path: &str) -> Result<(), String> {
@@ -4435,10 +4529,17 @@ fn load_class_items(db: &Database, class_id: i64) -> Vec<Item> {
 }
 
 /// 将分类设置同步到 MainWindow 的三个 property（供 ItemCard 读取）
-fn apply_class_settings(w: &MainWindow, data: &crate::models::ClassificationData) {
+fn apply_class_settings(
+    w: &MainWindow,
+    data: &crate::models::ClassificationData,
+    global_layout: &std::sync::Mutex<String>,
+) {
+    let gil = global_layout.lock().unwrap();
     let layout = match data.item_layout.as_str() {
+        "tile" => "tile",
         "list" => "list",
-        _ => "tile",
+        // default: 跟随全局默认布局
+        _ => gil.as_str(),
     };
     w.set_current_class_layout(SharedString::from(layout));
     let icon_size = data.item_icon_size.unwrap_or(48);

@@ -59,6 +59,42 @@ component theme-btn inherits Rectangle {
     }
 }
 
+// 分段选择按钮（用于侧边栏位置 / 项目布局 / 快速搜索位置等二选一或三选一）
+component seg-btn inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> active: false;
+    in property <string> theme-mode: "light";
+
+    callback clicked;
+
+    height: 30px;
+    horizontal-stretch: 1;
+    border-radius: 6px;
+    background: root.active
+        ? ThemeSettings.accent-color
+        : ThemeSettings.card-bg(root.theme-mode);
+    border-width: 1px;
+    border-color: root.active
+        ? ThemeSettings.accent-color
+        : ThemeSettings.border-c(root.theme-mode);
+
+    Text {
+        text: root.label;
+        font-size: ThemeSettings.font-size-small;
+        color: root.active ? #ffffff : ThemeSettings.text-c(root.theme-mode);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: 100%;
+        height: 100%;
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.clicked(); }
+    }
+}
+
 // 导航项组件
 component nav-item inherits Rectangle {
     in property <string> section: "";
@@ -930,6 +966,42 @@ export component SettingsPanel inherits Rectangle {
                         }
                     }
 
+                    // 侧边栏位置
+                    Rectangle {
+                        height: 64px;
+                        horizontal-stretch: 1;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        HorizontalLayout {
+                            padding: ThemeSettings.spacing-normal;
+                            spacing: ThemeSettings.spacing-normal;
+                            alignment: center;
+
+                            Text {
+                                text: "侧边栏位置";
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                font-size: ThemeSettings.font-size-normal;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            seg-btn {
+                                label: "左侧";
+                                active: root.sidebar-position == "left";
+                                theme-mode: root.theme-mode;
+                                clicked => { root.sidebar-position-changed("left"); }
+                            }
+                            seg-btn {
+                                label: "右侧";
+                                active: root.sidebar-position == "right";
+                                theme-mode: root.theme-mode;
+                                clicked => { root.sidebar-position-changed("right"); }
+                            }
+                        }
+                    }
+
                     SettingGroupTitle { text: "行为"; theme-mode: root.theme-mode; }
 
                     setting-row {
@@ -961,6 +1033,42 @@ export component SettingsPanel inherits Rectangle {
                     spacing: ThemeSettings.spacing-normal;
 
                     SettingGroupTitle { text: "布局"; theme-mode: root.theme-mode; }
+
+                    // 全局默认布局（分类设为「默认」时使用）
+                    Rectangle {
+                        height: 64px;
+                        horizontal-stretch: 1;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-radius: ThemeSettings.border-radius;
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        HorizontalLayout {
+                            padding: ThemeSettings.spacing-normal;
+                            spacing: ThemeSettings.spacing-normal;
+                            alignment: center;
+
+                            Text {
+                                text: "默认布局";
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                font-size: ThemeSettings.font-size-normal;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            seg-btn {
+                                label: "平铺";
+                                active: root.item-layout == "tile";
+                                theme-mode: root.theme-mode;
+                                clicked => { root.item-layout-changed("tile"); }
+                            }
+                            seg-btn {
+                                label: "列表";
+                                active: root.item-layout == "list";
+                                theme-mode: root.theme-mode;
+                                clicked => { root.item-layout-changed("list"); }
+                            }
+                        }
+                    }
 
                     setting-row {
                         title: "隐藏名称";
@@ -1028,6 +1136,48 @@ export component SettingsPanel inherits Rectangle {
                     if root.quick-search-enabled : VerticalLayout {
                         horizontal-stretch: 1;
                         spacing: ThemeSettings.spacing-normal;
+
+                        // 窗口位置
+                        Rectangle {
+                            height: 64px;
+                            horizontal-stretch: 1;
+                            background: ThemeSettings.card-bg(root.theme-mode);
+                            border-radius: ThemeSettings.border-radius;
+                            border-width: 1px;
+                            border-color: ThemeSettings.border-c(root.theme-mode);
+
+                            HorizontalLayout {
+                                padding: ThemeSettings.spacing-normal;
+                                spacing: ThemeSettings.spacing-normal;
+                                alignment: center;
+
+                                Text {
+                                    text: "窗口位置";
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    font-size: ThemeSettings.font-size-normal;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+                                seg-btn {
+                                    label: "顶部";
+                                    active: root.quick-search-position == "top";
+                                    theme-mode: root.theme-mode;
+                                    clicked => { root.quick-search-position-changed("top"); }
+                                }
+                                seg-btn {
+                                    label: "居中";
+                                    active: root.quick-search-position == "center";
+                                    theme-mode: root.theme-mode;
+                                    clicked => { root.quick-search-position-changed("center"); }
+                                }
+                                seg-btn {
+                                    label: "底部";
+                                    active: root.quick-search-position == "bottom";
+                                    theme-mode: root.theme-mode;
+                                    clicked => { root.quick-search-position-changed("bottom"); }
+                                }
+                            }
+                        }
 
                         SettingGroupTitle { text: "行为"; theme-mode: root.theme-mode; }
 

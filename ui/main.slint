@@ -48,6 +48,7 @@ export component MainWindow inherits Window {
     in property <int> item-columns: 8;
     in property <int> item-icon-size: 48;
     in property <int> sidebar-width: 140;
+    in property <string> sidebar-position: "left";  // left / right
     in property <bool> hide-name: false;
     in property <bool> hide-after-open: false;
     in property <bool> quick-search-enabled: false;
@@ -202,7 +203,7 @@ export component MainWindow inherits Window {
                         alignment: start;
 
                         Text {
-                            text: "Dawn Launcher v0.17";
+                            text: "Dawn Launcher v0.19";
                             color: ThemeSettings.text-c(root.theme-mode);
                             font-size: ThemeSettings.font-size-normal;
                             font-weight: 700;
@@ -300,8 +301,8 @@ export component MainWindow inherits Window {
             horizontal-stretch: 1;
             spacing: 0px;
 
-            // 左侧分类栏
-            Rectangle {
+            // 分类栏（左侧）
+            if root.sidebar-position == "left" : Rectangle {
                 width: root.sidebar-width * 1px;
                 background: root.window-bg-visible
                     ? ThemeSettings.sidebar-bg(root.theme-mode).transparentize(0.35)
@@ -347,8 +348,8 @@ export component MainWindow inherits Window {
                 }
             }
 
-            // 分隔线
-            Rectangle {
+            // 分隔线（左侧）
+            if root.sidebar-position == "left" : Rectangle {
                 width: 1px;
                 background: ThemeSettings.border-c(root.theme-mode);
             }
@@ -542,6 +543,59 @@ export component MainWindow inherits Window {
                             }
                         }
                     }
+                }
+            }
+
+            // 分隔线（右侧）
+            if root.sidebar-position == "right" : Rectangle {
+                width: 1px;
+                background: ThemeSettings.border-c(root.theme-mode);
+            }
+
+            // 分类栏（右侧）
+            if root.sidebar-position == "right" : Rectangle {
+                width: root.sidebar-width * 1px;
+                background: root.window-bg-visible
+                    ? ThemeSettings.sidebar-bg(root.theme-mode).transparentize(0.35)
+                    : ThemeSettings.sidebar-bg(root.theme-mode);
+
+                // 分类区空白右键
+                TouchArea {
+                    pointer-event(e) => {
+                        if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                            root.classification-area-right-clicked(self.mouse-x, self.mouse-y);
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    padding: ThemeSettings.spacing-small;
+                    spacing: ThemeSettings.spacing-small;
+
+                    // 分类列表
+                    ScrollView {
+                        vertical-stretch: 1;
+
+                        VerticalLayout {
+                            spacing: 2px;
+                            for c in root.classifications : ClassificationTab {
+                                tab-id: c.id;
+                                name: c.name;
+                                selected: c.selected;
+                                theme-mode: root.theme-mode;
+                                depth: c.depth;
+                                has-children: c.has-children;
+                                expanded: c.expanded;
+                                icon: c.icon;
+                                clicked => { root.classification-clicked(c.id); }
+                                right-clicked => { root.classification-right-clicked(c.id); }
+                                expand-toggled => { root.classification-expand-toggled(c.id); }
+                            }
+                        }
+                    }
+
+                    // 底部留白
+                    Rectangle { height: 8px; }
                 }
             }
         }
