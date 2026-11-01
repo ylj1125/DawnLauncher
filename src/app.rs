@@ -11,8 +11,9 @@ use crate::models::{Classification, Item};
 use crate::native;
 // MainWindow, ClassificationInfo, ItemInfo, MenuItem 由 slint::include_modules!() 生成在 crate 根
 use crate::{
-    CatalogEntry, ClassificationInfo, DragHelper, ItemEditWindow, ItemInfo, MainWindow, MenuItem,
-    MultiPick, NewItemPayload, NewItemWindow, QuickSearchWindow, SettingsWindow,
+    CatalogEntry, ClassificationInfo, DragHelper, ItemEditWindow, ItemInfo, ItemSettingsPayload,
+    ItemSettingsWindow, MainWindow, MenuItem, MultiPick, NewItemPayload, NewItemWindow,
+    QuickSearchWindow, SettingsWindow,
 };
 
 pub struct App {
@@ -21,6 +22,7 @@ pub struct App {
     settings_window: SettingsWindow,
     item_edit_window: ItemEditWindow,
     new_item_window: NewItemWindow,
+    item_settings_window: ItemSettingsWindow,
     db: Arc<Database>,
     current_classification_id: Arc<Mutex<i64>>,
     expanded_classifications: Arc<Mutex<std::collections::HashSet<i64>>>,
@@ -59,6 +61,10 @@ impl App {
         // 3.1.3 创建「新建项目」窗口（初始隐藏）
         let new_item_window = NewItemWindow::new()?;
         new_item_window.window().hide().ok();
+
+        // 3.1.4 创建「项目设置」窗口（初始隐藏）
+        let item_settings_window = ItemSettingsWindow::new()?;
+        item_settings_window.window().hide().ok();
         // 应用窗口背景图与不透明度设置
         let bg_path = db.get_setting("window_bg_image", "");
         if !bg_path.is_empty() {
@@ -81,6 +87,8 @@ impl App {
         let editing_icon: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         // 「新建项目」窗口当前目标分类
         let new_item_class_id: Arc<Mutex<i64>> = Arc::new(Mutex::new(0i64));
+        // 「项目设置」窗口当前目标分类
+        let item_settings_class_id: Arc<Mutex<i64>> = Arc::new(Mutex::new(0i64));
 
         // 3.1.2 托盘状态（运行期可切换）
         let tray_icon_enabled = Arc::new(Mutex::new(db.get_setting_bool("tray_icon", true)));
@@ -1767,6 +1775,8 @@ impl App {
             let editing_icon_for_ctx = editing_icon.clone();
             let ni_window_ctx = new_item_window.as_weak();
             let ni_class_ctx = new_item_class_id.clone();
+            let is_window_ctx = item_settings_window.as_weak();
+            let is_class_ctx = item_settings_class_id.clone();
             main_window.on_context_menu_item_selected(move |source, action| {
                 let source_str = source.to_string();
                 let action_str = action.to_string();
@@ -2077,7 +2087,52 @@ impl App {
                         );
                     }
                     ("item-area", "item-settings") => {
-                        // 已改为在项目右键菜单中「编辑项目」
+                        // 打开「项目设置」窗口，按当前分类数据填充
+                        let isw = match is_window_ctx.upgrade() {
+                            Some(w) => w,
+                            None => return,
+                        };
+                        let cid = *current_id_for_ctx.lock().unwrap();
+                        *is_class_ctx.lock().unwrap() = cid;
+                        let data = db_for_ctx
+                            .get_classification(cid)
+                            .map(|c| c.data)
+                            .unwrap_or_default();
+                        isw.set_class_name(SharedString::from(
+                            db_for_ctx
+                                .get_classification(cid)
+                                .map(|c| c.name)
+                                .unwrap_or_default(),
+                        ));
+                        isw.set_show_only(SharedString::from(match data.item_show_only.as_str() {
+                            "file" => "file",
+                            "folder" => "folder",
+                            _ => "default",
+                        }));
+                        let sort_val = match data.item_sort.as_str() {
+                            "initial" => "initial",
+                            "openNumber" => "openNumber",
+                            "lastOpen" => "lastOpen",
+                            _ => "manual",
+                        };
+                        isw.set_sort(SharedString::from(sort_val));
+                        isw.set_sort_label(SharedString::from(match sort_val {
+                            "manual" => "手动排序",
+                            "initial" => "按名称",
+                            "openNumber" => "按打开次数",
+                            "lastOpen" => "按最近打开",
+                            _ => "手动排序",
+                        }));
+                        isw.set_sort_open(false);
+                        isw.set_layout(SharedString::from(match data.item_layout.as_str() {
+                            "tile" => "tile",
+                            "list" => "list",
+                            _ => "default",
+                        }));
+                        isw.set_icon_size(data.item_icon_size.unwrap_or(0) as i32);
+                        isw.set_show_name(data.item_show_name.unwrap_or(true));
+                        w.set_context_menu_visible(false);
+                        isw.show().ok();
                     }
                     // ===== 项目排序 =====
                     ("item-area", "sort-default") => {
@@ -2324,7 +2379,7 @@ impl App {
                         let prompt = "请输入图标大小 (整数, 16~128)\n建议: 32 小 / 48 默认 / 64 大";
                         if let Some(input) = show_input_dialog("图标大小", prompt) {
                             let size = input.trim().parse::<i64>().unwrap_or(48).clamp(16, 128);
-                            match db_for_ctx.set_classification_item_icon_size(cid, size) {
+                            match db_for_ctx.set_classification_item_icon_size(cid, Some(size)) {
                                 Ok(_) => {
                                     let items = load_class_items(&db_for_ctx, cid);
                                     if let Some(w) = window_for_ctx.upgrade() {
@@ -3443,6 +3498,73 @@ impl App {
             }
         }
 
+        // ===== 18.6 项目设置窗口 =====
+        {
+            let isw_weak = item_settings_window.as_weak();
+            let db_isw = db.clone();
+            let is_class = item_settings_class_id.clone();
+            let main_weak_isw = main_window.as_weak();
+
+            // 取消
+            {
+                let isw_cancel = isw_weak.clone();
+                item_settings_window.on_cancel_requested(move || {
+                    if let Some(w) = isw_cancel.upgrade() {
+                        w.window().hide().ok();
+                    }
+                });
+            }
+
+            // 保存
+            {
+                let isw_save = isw_weak.clone();
+                item_settings_window.on_save_requested(move |p: ItemSettingsPayload| {
+                    let cid = *is_class.lock().unwrap();
+                    // 显示内容：all 与 default 等价（不限制）
+                    let show_only = match p.show_only.as_str() {
+                        "file" => "file",
+                        "folder" => "folder",
+                        _ => "default",
+                    };
+                    // 排序：manual 映射为 default
+                    let sort = match p.sort.as_str() {
+                        "initial" => "initial",
+                        "openNumber" => "openNumber",
+                        "lastOpen" => "lastOpen",
+                        _ => "default",
+                    };
+                    let layout = match p.layout.as_str() {
+                        "tile" => "tile",
+                        "list" => "list",
+                        _ => "default",
+                    };
+                    let icon_size = if p.icon_size > 0 {
+                        Some(p.icon_size as i64)
+                    } else {
+                        None
+                    };
+                    let _ = db_isw.set_classification_item_show_only(cid, show_only);
+                    let _ = db_isw.set_classification_item_sort(cid, sort);
+                    let _ = db_isw.set_classification_item_layout(cid, layout);
+                    let _ = db_isw.set_classification_item_icon_size(cid, icon_size);
+                    let _ = db_isw.set_classification_item_show_name(cid, p.show_name);
+
+                    // 刷新主窗口
+                    if let Some(mw) = main_weak_isw.upgrade() {
+                        if let Some(c) = db_isw.get_classification(cid) {
+                            apply_class_settings(&mw, &c.data);
+                        }
+                        let items = load_class_items(&db_isw, cid);
+                        mw.set_items(to_item_model(&items, 0));
+                    }
+
+                    if let Some(w) = isw_save.upgrade() {
+                        w.window().hide().ok();
+                    }
+                });
+            }
+        }
+
         // 17. 应用启动时加载已保存的设置
         {
             let raw_theme = db.get_setting("theme_mode", "light");
@@ -3474,7 +3596,9 @@ impl App {
             apply_font_family(&quick_search_window, &font_family);
             apply_font_family(&settings_window, &font_family);
             apply_font_family(&new_item_window, &font_family);
+            apply_font_family(&item_settings_window, &font_family);
             new_item_window.set_theme_mode(SharedString::from(theme.clone()));
+            item_settings_window.set_theme_mode(SharedString::from(theme.clone()));
             // 应用自定义主题颜色到所有窗口的 ThemeSettings 全局
             for (k, v) in [
                 ("bg", &custom_bg),
@@ -3487,6 +3611,7 @@ impl App {
                 set_custom_theme_color(&quick_search_window, k, v);
                 set_custom_theme_color(&settings_window, k, v);
                 set_custom_theme_color(&new_item_window, k, v);
+                set_custom_theme_color(&item_settings_window, k, v);
             }
             // 同步快速搜索窗口主题
             quick_search_window.set_theme_mode(SharedString::from(theme.clone()));
@@ -3510,6 +3635,7 @@ impl App {
             settings_window,
             item_edit_window,
             new_item_window,
+            item_settings_window,
             db,
             current_classification_id: current_id,
             expanded_classifications,
@@ -5481,6 +5607,8 @@ fn show_item_area_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
         ("new-item", "新建项目", "+", false, false),
         ("new-url", "新建网址", "🔗", false, false),
+        ("", "", "", true, false),
+        ("item-settings", "项目设置", "⚙", false, false),
         ("", "", "", true, false),
         ("sort-default", "排序：默认", "≡", false, false),
         ("sort-initial", "排序：按名称", "A", false, false),

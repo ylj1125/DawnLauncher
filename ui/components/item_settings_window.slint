@@ -1,0 +1,537 @@
+// 项目设置窗口（图3）
+// 显示内容 / 项目排序 / 项目布局 / 图标大小
+import { ScrollView, LineEdit, CheckBox } from "std-widgets.slint";
+import { ThemeSettings } from "../theme.slint";
+
+// 分类级项目设置提交给 Rust 的数据
+export struct ItemSettingsPayload {
+    show-only: string,        // default / all / file / folder
+    sort: string,             // manual / initial / openNumber / lastOpen
+    layout: string,           // default / tile / list
+    icon-size: int,           // 0 表示默认
+    show-name: bool,          // 是否显示项目名称
+}
+
+// 一行设置：左侧标签，右侧内容
+component setting-row inherits Rectangle {
+    in property <string> label: "";
+    in property <string> theme-mode: "light";
+
+    height: 48px;
+    horizontal-stretch: 1;
+
+    Text {
+        text: root.label;
+        width: 96px;
+        font-size: ThemeSettings.font-size-normal;
+        color: ThemeSettings.text-c(root.theme-mode);
+        vertical-alignment: center;
+    }
+}
+
+// 分段按钮组中的单个按钮
+component segment-btn inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> active: false;
+    in property <string> theme-mode: "light";
+
+    callback clicked;
+
+    height: 30px;
+    border-radius: 4px;
+    background: root.active
+        ? ThemeSettings.accent-color
+        : ThemeSettings.card-bg(root.theme-mode);
+    border-width: 1px;
+    border-color: root.active
+        ? ThemeSettings.accent-color
+        : ThemeSettings.border-c(root.theme-mode);
+
+    Text {
+        text: root.label;
+        font-size: ThemeSettings.font-size-small;
+        color: root.active ? #ffffff : ThemeSettings.text-c(root.theme-mode);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: 100%;
+        height: 100%;
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.clicked(); }
+    }
+}
+
+// 图标大小分段按钮（带可选「自定义」）
+component size-btn inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> active: false;
+    in property <string> theme-mode: "light";
+
+    callback clicked;
+
+    width: 52px;
+    height: 30px;
+    border-radius: 4px;
+    background: root.active
+        ? ThemeSettings.accent-color
+        : ThemeSettings.card-bg(root.theme-mode);
+    border-width: 1px;
+    border-color: root.active
+        ? ThemeSettings.accent-color
+        : ThemeSettings.border-c(root.theme-mode);
+
+    Text {
+        text: root.label;
+        font-size: ThemeSettings.font-size-small;
+        color: root.active ? #ffffff : ThemeSettings.text-c(root.theme-mode);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: 100%;
+        height: 100%;
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.clicked(); }
+    }
+}
+
+// 排序下拉（点击弹出简单列表）
+component sort-dropdown inherits Rectangle {
+    in property <string> value: "manual";
+    in property <string> theme-mode: "light";
+
+    callback selected(string);
+
+    height: 34px;
+    border-radius: 6px;
+    background: ThemeSettings.card-bg(root.theme-mode);
+    border-width: 1px;
+    border-color: ThemeSettings.border-c(root.theme-mode);
+
+    in-out property <bool> open: false;
+    in property <string> label: "手动排序";
+
+    Text {
+        x: 12px;
+        text: root.label;
+        font-size: ThemeSettings.font-size-normal;
+        color: ThemeSettings.text-c(root.theme-mode);
+        vertical-alignment: center;
+    }
+    Text {
+        x: parent.width - 26px;
+        text: root.open ? "▲" : "▼";
+        font-size: ThemeSettings.font-size-small;
+        color: ThemeSettings.text-sec(root.theme-mode);
+        vertical-alignment: center;
+    }
+
+    main-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.open = !root.open; }
+    }
+}
+
+// 排序下拉中的选项
+component sort-opt inherits Rectangle {
+    in property <string> label: "";
+    in property <string> value: "";
+    in property <string> theme-mode: "light";
+
+    callback clicked;
+
+    height: 36px;
+    horizontal-stretch: 1;
+    background: opt-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+
+    Text {
+        x: 14px;
+        text: root.label;
+        font-size: ThemeSettings.font-size-normal;
+        color: ThemeSettings.text-c(root.theme-mode);
+        vertical-alignment: center;
+    }
+
+    opt-touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component ItemSettingsWindow inherits Window {
+    title: "项目设置";
+    background: ThemeSettings.bg-color(root.theme-mode);
+    default-font-family: ThemeSettings.font-family;
+    preferred-width: 520px;
+    preferred-height: 420px;
+    min-width: 460px;
+    min-height: 380px;
+
+    in property <string> theme-mode: "light";
+    in property <string> class-name: "";
+
+    // 当前值
+    in-out property <string> show-only: "default";  // default / all / file / folder
+    in-out property <string> sort: "manual";
+    in-out property <string> layout: "default";     // default / tile / list
+    in-out property <int> icon-size: 0;             // 0 = 默认
+    in-out property <bool> show-name: true;
+    in property <string> sort-label: "手动排序";
+    in-out property <bool> sort-open: false;
+
+    callback cancel-requested();
+    callback save-requested(ItemSettingsPayload);
+    callback sort-changed(string);
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // 标题栏
+        Rectangle {
+            height: 46px;
+            background: ThemeSettings.sidebar-bg(root.theme-mode);
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 8px;
+
+                Text {
+                    text: "项目设置";
+                    font-size: ThemeSettings.font-size-large;
+                    font-weight: 600;
+                    color: ThemeSettings.text-c(root.theme-mode);
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    height: 24px;
+                    width: max(90px, class-text.preferred-width + 20px);
+                    border-radius: 4px;
+                    background: ThemeSettings.card-bg(root.theme-mode);
+                    border-width: 1px;
+                    border-color: ThemeSettings.border-c(root.theme-mode);
+
+                    class-text := Text {
+                        text: "分类: " + root.class-name;
+                        font-size: ThemeSettings.font-size-small;
+                        color: ThemeSettings.text-sec(root.theme-mode);
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        x: 0px;
+                        y: 0px;
+                        width: 100%;
+                        height: 100%;
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Rectangle {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 4px;
+                    background: close-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+
+                    Text {
+                        text: "✕";
+                        font-size: ThemeSettings.font-size-normal;
+                        color: ThemeSettings.text-c(root.theme-mode);
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        width: 100%;
+                        height: 100%;
+                    }
+                    close-touch := TouchArea {
+                        width: 100%;
+                        height: 100%;
+                        clicked => { root.cancel-requested(); }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                y: parent.height - 1px;
+                width: parent.width;
+                background: ThemeSettings.border-c(root.theme-mode);
+            }
+        }
+
+        // 表单
+        VerticalLayout {
+            padding: 16px;
+            spacing: 8px;
+            horizontal-stretch: 1;
+
+            // 显示内容
+            setting-row {
+                label: "显示内容";
+                theme-mode: root.theme-mode;
+                HorizontalLayout {
+                    x: 110px;
+                    y: 0px;
+                    width: parent.width - 110px;
+                    height: parent.height;
+                    spacing: 6px;
+                    alignment: start;
+                    segment-btn {
+                        label: "默认";
+                        active: root.show-only == "default";
+                        theme-mode: root.theme-mode;
+                        clicked => { root.show-only = "default"; }
+                    }
+                    segment-btn {
+                        label: "全部";
+                        active: root.show-only == "all";
+                        theme-mode: root.theme-mode;
+                        clicked => { root.show-only = "all"; }
+                    }
+                    segment-btn {
+                        label: "文件";
+                        active: root.show-only == "file";
+                        theme-mode: root.theme-mode;
+                        clicked => { root.show-only = "file"; }
+                    }
+                    segment-btn {
+                        label: "文件夹";
+                        active: root.show-only == "folder";
+                        theme-mode: root.theme-mode;
+                        clicked => { root.show-only = "folder"; }
+                    }
+                }
+            }
+
+            // 项目排序
+            setting-row {
+                label: "项目排序";
+                theme-mode: root.theme-mode;
+                sort-dropdown {
+                    x: 110px;
+                    y: (parent.height - 34px) / 2;
+                    width: parent.width - 110px;
+                    value: root.sort;
+                    label: root.sort-label;
+                    theme-mode: root.theme-mode;
+                    open <=> root.sort-open;
+                    selected(s) => {
+                        root.sort = s;
+                        root.sort-open = false;
+                        root.sort-changed(s);
+                    }
+                }
+                // 下拉展开的选项
+                if root.sort-open : Rectangle {
+                    x: 110px;
+                    y: parent.height;
+                    width: 220px;
+                    height: 144px;
+                    background: ThemeSettings.card-bg(root.theme-mode);
+                    border-width: 1px;
+                    border-color: ThemeSettings.border-c(root.theme-mode);
+                    border-radius: 6px;
+
+                    VerticalLayout {
+                        spacing: 0px;
+                        sort-opt {
+                            label: "手动排序";
+                            value: "manual";
+                            theme-mode: root.theme-mode;
+                            clicked => { root.sort = "manual"; root.sort-open = false; root.sort-changed("manual"); }
+                        }
+                        sort-opt {
+                            label: "按名称";
+                            value: "initial";
+                            theme-mode: root.theme-mode;
+                            clicked => { root.sort = "initial"; root.sort-open = false; root.sort-changed("initial"); }
+                        }
+                        sort-opt {
+                            label: "按打开次数";
+                            value: "openNumber";
+                            theme-mode: root.theme-mode;
+                            clicked => { root.sort = "openNumber"; root.sort-open = false; root.sort-changed("openNumber"); }
+                        }
+                        sort-opt {
+                            label: "按最近打开";
+                            value: "lastOpen";
+                            theme-mode: root.theme-mode;
+                            clicked => { root.sort = "lastOpen"; root.sort-open = false; root.sort-changed("lastOpen"); }
+                        }
+                    }
+                }
+            }
+
+            // 项目布局
+            setting-row {
+                label: "项目布局";
+                theme-mode: root.theme-mode;
+                HorizontalLayout {
+                    x: 110px;
+                    y: 0px;
+                    width: parent.width - 110px;
+                    height: parent.height;
+                    spacing: 6px;
+                    alignment: start;
+                    segment-btn {
+                        label: "默认";
+                        active: root.layout == "default";
+                        theme-mode: root.theme-mode;
+                        clicked => { root.layout = "default"; }
+                    }
+                    segment-btn {
+                        label: "平铺";
+                        active: root.layout == "tile";
+                        theme-mode: root.theme-mode;
+                        clicked => { root.layout = "tile"; }
+                    }
+                    segment-btn {
+                        label: "列表";
+                        active: root.layout == "list";
+                        theme-mode: root.theme-mode;
+                        clicked => { root.layout = "list"; }
+                    }
+                }
+            }
+
+            // 图标大小
+            setting-row {
+                label: "图标大小";
+                theme-mode: root.theme-mode;
+                HorizontalLayout {
+                    x: 110px;
+                    y: 0px;
+                    width: parent.width - 110px;
+                    height: parent.height;
+                    spacing: 6px;
+                    alignment: start;
+                    size-btn {
+                        label: "默认";
+                        active: root.icon-size == 0;
+                        theme-mode: root.theme-mode;
+                        clicked => { root.icon-size = 0; }
+                    }
+                    size-btn {
+                        label: "32";
+                        active: root.icon-size == 32;
+                        theme-mode: root.theme-mode;
+                        clicked => { root.icon-size = 32; }
+                    }
+                    size-btn {
+                        label: "40";
+                        active: root.icon-size == 40;
+                        theme-mode: root.theme-mode;
+                        clicked => { root.icon-size = 40; }
+                    }
+                    size-btn {
+                        label: "48";
+                        active: root.icon-size == 48;
+                        theme-mode: root.theme-mode;
+                        clicked => { root.icon-size = 48; }
+                    }
+                    size-btn {
+                        label: "64";
+                        active: root.icon-size == 64;
+                        theme-mode: root.theme-mode;
+                        clicked => { root.icon-size = 64; }
+                    }
+                    size-btn {
+                        label: "自定义";
+                        active: root.icon-size != 0
+                            && root.icon-size != 32
+                            && root.icon-size != 40
+                            && root.icon-size != 48
+                            && root.icon-size != 64;
+                        theme-mode: root.theme-mode;
+                        clicked => { root.icon-size = 72; }
+                    }
+                }
+            }
+
+            // 显示名称
+            setting-row {
+                label: "显示名称";
+                theme-mode: root.theme-mode;
+                HorizontalLayout {
+                    x: 110px;
+                    y: 0px;
+                    width: parent.width - 110px;
+                    height: parent.height;
+                    spacing: 6px;
+                    alignment: start;
+                    segment-btn {
+                        label: "显示";
+                        active: root.show-name;
+                        theme-mode: root.theme-mode;
+                        clicked => { root.show-name = true; }
+                    }
+                    segment-btn {
+                        label: "仅图标";
+                        active: !root.show-name;
+                        theme-mode: root.theme-mode;
+                        clicked => { root.show-name = false; }
+                    }
+                }
+            }
+
+            // 说明
+            Text {
+                text: "分类项目设置优先于全局项目设置。";
+                font-size: ThemeSettings.font-size-small;
+                color: ThemeSettings.text-sec(root.theme-mode);
+            }
+
+            Rectangle { vertical-stretch: 1; }
+        }
+
+        // 底部按钮
+        Rectangle {
+            height: 54px;
+            background: ThemeSettings.sidebar-bg(root.theme-mode);
+
+            Rectangle {
+                height: 1px;
+                y: 0px;
+                width: parent.width;
+                background: ThemeSettings.border-c(root.theme-mode);
+            }
+
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 10px;
+                alignment: end;
+
+                Rectangle {
+                    width: 84px; height: 32px;
+                    border-radius: 6px;
+                    background: cancel-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : ThemeSettings.card-bg(root.theme-mode);
+                    border-width: 1px;
+                    border-color: ThemeSettings.border-c(root.theme-mode);
+                    Text { text: "取消"; width: 100%; height: 100%; horizontal-alignment: center; vertical-alignment: center; color: ThemeSettings.text-c(root.theme-mode); font-size: ThemeSettings.font-size-normal; }
+                    cancel-touch := TouchArea { width: 100%; height: 100%; clicked => { root.cancel-requested(); } }
+                }
+
+                Rectangle {
+                    width: 84px; height: 32px;
+                    border-radius: 6px;
+                    background: ThemeSettings.accent-color;
+                    Text { text: "确定"; width: 100%; height: 100%; horizontal-alignment: center; vertical-alignment: center; color: #ffffff; font-size: ThemeSettings.font-size-normal; }
+                    TouchArea {
+                        width: 100%; height: 100%;
+                        clicked => {
+                            root.save-requested({
+                                show-only: root.show-only,
+                                sort: root.sort,
+                                layout: root.layout,
+                                icon-size: root.icon-size,
+                                show-name: root.show-name
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

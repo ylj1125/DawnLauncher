@@ -852,7 +852,7 @@ impl Database {
     }
 
     /// 设置分类的项目图标大小 (默认 1 / 小 0.8 / 大 1.2 等)
-    pub fn set_classification_item_icon_size(&self, class_id: i64, size: i64) -> Result<(), rusqlite::Error> {
+    pub fn set_classification_item_icon_size(&self, class_id: i64, size: Option<i64>) -> Result<(), rusqlite::Error> {
         let conn = self.conn.lock().unwrap();
         let data_str: String = conn.query_row(
             "SELECT data FROM classification WHERE id = ?",
@@ -860,7 +860,7 @@ impl Database {
             |r| r.get(0),
         )?;
         if let Ok(mut data) = serde_json::from_str::<ClassificationData>(&data_str) {
-            data.item_icon_size = Some(size);
+            data.item_icon_size = size;
             let new_data_str = serde_json::to_string(&data).unwrap_or(data_str);
             conn.execute(
                 "UPDATE classification SET data = ? WHERE id = ?",

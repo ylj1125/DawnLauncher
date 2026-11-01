@@ -1,6 +1,6 @@
 [package]
 name = "dawn-launcher"
-version = "0.1.0"
+version = "0.18.0"
 edition = "2021"
 description = "Dawn Launcher - Windows 快捷启动工具 (Rust + Slint 重构版)"
 authors = ["FanChenIO"]
