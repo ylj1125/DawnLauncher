@@ -11,9 +11,9 @@ use crate::models::{Classification, Item};
 use crate::native;
 // MainWindow, ClassificationInfo, ItemInfo, MenuItem 由 slint::include_modules!() 生成在 crate 根
 use crate::{
-    CatalogEntry, ClassificationInfo, DragHelper, ItemEditWindow, ItemInfo, ItemSettingsPayload,
-    ItemSettingsWindow, MainWindow, MenuItem, MultiPick, NewItemPayload, NewItemWindow,
-    QuickSearchWindow, SettingsWindow,
+    ActionDialog, CatalogEntry, ClassificationInfo, DragHelper, InputDialog, ItemEditWindow,
+    ItemInfo, ItemSettingsPayload, ItemSettingsWindow, MainWindow, MenuItem, MultiPick,
+    MultilineInputDialog, NewItemPayload, NewItemWindow, QuickSearchWindow, SettingsWindow,
 };
 
 pub struct App {
@@ -29,6 +29,7 @@ pub struct App {
     hotkey_rx: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<()>>>,
     tray_icon_enabled: Arc<Mutex<bool>>,
     minimize_to_tray: Arc<Mutex<bool>>,
+    dialogs: Rc<DialogController>,
 }
 
 impl App {
@@ -65,6 +66,9 @@ impl App {
         // 3.1.4 创建「项目设置」窗口（初始隐藏）
         let item_settings_window = ItemSettingsWindow::new()?;
         item_settings_window.window().hide().ok();
+
+        // 3.1.5 创建 Slint 原生对话框控制器（输入框/多行输入/动作选择）
+        let dialogs = Rc::new(DialogController::new()?);
         // 应用窗口背景图与不透明度设置
         let bg_path = db.get_setting("window_bg_image", "");
         if !bg_path.is_empty() {
@@ -524,19 +528,25 @@ impl App {
         let db_for_new_class = db.clone();
         let window_for_new_class = main_window.as_weak();
         let expanded_for_new_class = expanded_classifications.clone();
+        let dlg_for_new_class = dialogs.clone();
         main_window.on_add_classification_clicked(move || {
-            if let Some(name) = show_input_dialog("新建分类", "请输入分类名称") {
-                if let Ok(id) = db_for_new_class.insert_parent_classification(&name) {
-                    let classifications = db_for_new_class.list_all_classifications();
-                    // 新建的父分类默认展开
-                    expanded_for_new_class.lock().unwrap().insert(id);
-                    if let Some(w) = window_for_new_class.upgrade() {
-                        w.set_classifications(to_classification_model(&classifications, id, &expanded_for_new_class.lock().unwrap()));
-                        w.set_items(to_item_model(&[], 0));
-                        w.set_status_text(SharedString::from("0 个项目"));
+            let db_c = db_for_new_class.clone();
+            let win_c = window_for_new_class.clone();
+            let exp_c = expanded_for_new_class.clone();
+            dlg_for_new_class.ask_input("新建分类", "请输入分类名称", "", move |name| {
+                if let Some(name) = name {
+                    if let Ok(id) = db_c.insert_parent_classification(&name) {
+                        let classifications = db_c.list_all_classifications();
+                        // 新建的父分类默认展开
+                        exp_c.lock().unwrap().insert(id);
+                        if let Some(w) = win_c.upgrade() {
+                            w.set_classifications(to_classification_model(&classifications, id, &exp_c.lock().unwrap()));
+                            w.set_items(to_item_model(&[], 0));
+                            w.set_status_text(SharedString::from("0 个项目"));
+                        }
                     }
                 }
-            }
+            });
         });
 
         // 14. 拖拽文件添加项目 (Slint 1.5 通过 DropArea/Window 事件)
@@ -726,6 +736,7 @@ impl App {
             let window_for_theme = main_window.as_weak();
             let qs_for_theme = quick_search_window.as_weak();
             let sw_for_theme = settings_window.as_weak();
+            let dlg_for_theme = dialogs.clone();
             settings_window.on_theme_mode_changed(move |mode| {
                 let mode_str = mode.to_string();
                 log::info!("主题切换: {}", mode_str);
@@ -740,6 +751,7 @@ impl App {
                 if let Some(sw) = sw_for_theme.upgrade() {
                     sw.set_theme_mode(mode.clone());
                 }
+                dlg_for_theme.apply_theme(&mode_str);
             });
         }
 
@@ -749,6 +761,7 @@ impl App {
             let main_cc = main_window.as_weak();
             let qs_cc = quick_search_window.as_weak();
             let sw_cc = settings_window.as_weak();
+            let dlg_cc = dialogs.clone();
             settings_window.on_custom_color_changed(move |key, val| {
                 let key_str = key.to_string();
                 let val_str = val.to_string();
@@ -776,6 +789,7 @@ impl App {
                         _ => {}
                     }
                 }
+                dlg_cc.apply_custom_color(&key_clone, &val_clone);
             });
         }
 
@@ -1056,6 +1070,7 @@ impl App {
             let main_weak = main_window.as_weak();
             let qs_weak = quick_search_window.as_weak();
             let sw_weak = settings_window.as_weak();
+            let dlg_for_font = dialogs.clone();
             settings_window.on_font_changed(move |family| {
                 let family_str = family.to_string();
                 log::info!("字体切换: {}", family_str);
@@ -1073,6 +1088,7 @@ impl App {
                         sw.get_font_list().iter().position(|f| f == ss).unwrap_or(0) as i32,
                     );
                 }
+                dlg_for_font.apply_font_family(&family_str);
             });
         }
 
@@ -1744,6 +1760,9 @@ impl App {
                     let pos = db_show.get_setting("quick_search_position", "center");
                     qs.window().show().ok();
                     position_quick_search_window(&qs, &pos);
+                    // 切换到英文输入法，便于直接输入搜索关键词
+                    #[cfg(target_os = "windows")]
+                    native::switch_english();
                     log::info!("快速搜索窗口已显示 (位置: {})", pos);
                 }
             });
@@ -1841,6 +1860,7 @@ impl App {
             let ni_class_ctx = new_item_class_id.clone();
             let is_window_ctx = item_settings_window.as_weak();
             let is_class_ctx = item_settings_class_id.clone();
+            let dlg_ctx = dialogs.clone();
             main_window.on_context_menu_item_selected(move |source, action| {
                 let source_str = source.to_string();
                 let action_str = action.to_string();
@@ -1915,62 +1935,64 @@ impl App {
                     ("item-area", "new-url") => {
                         // 新建网址: 输入地址后后台抓取标题与图标
                         drop(w);
-                        if let Some(raw) =
-                            show_input_dialog("新建网址", "请输入网址（如 https://www.example.com）")
-                        {
-                            let mut url = raw.trim().to_string();
-                            if !url.is_empty() {
-                                // 自动补全协议
-                                if !url.starts_with("http://") && !url.starts_with("https://") {
-                                    url = format!("https://{}", url);
-                                }
-                                let order = db_for_ctx.max_item_order(class_id) + 1;
-                                let db_bg = db_for_ctx.clone();
-                                let win_bg = window_for_ctx.clone();
-                                // 抓取标题/图标涉及网络请求，放后台线程避免阻塞 UI
-                                std::thread::spawn(move || {
-                                    let (name, icon) = match native::fetch_url_info(&url) {
-                                        Some(u) => {
-                                            let n = if u.title.trim().is_empty() {
-                                                url.clone()
-                                            } else {
-                                                u.title
-                                            };
-                                            (n, u.icon)
-                                        }
-                                        None => (url.clone(), None),
-                                    };
-                                    let item = Item {
-                                        id: 0,
-                                        classification_id: class_id,
-                                        name,
-                                        kind: 2,
-                                        data: crate::models::ItemData {
-                                            target: Some(url.clone()),
-                                            params: None,
-                                            icon,
-                                            ..Default::default()
-                                        },
-                                        shortcut_key: None,
-                                        global_shortcut_key: false,
-                                        order,
-                                    };
-                                    let ok = db_bg.insert_item(&item).is_ok();
-                                    let _ = slint::invoke_from_event_loop(move || {
-                                        if let Some(w) = win_bg.upgrade() {
-                                            if ok {
-                                                let items = db_bg.list_items(class_id);
-                                                w.set_items(to_item_model(&items, 0));
-                                                w.set_status_text(SharedString::from(format!(
-                                                    "共 {} 个项目",
-                                                    items.len()
-                                                )));
+                        let db_c = db_for_ctx.clone();
+                        let win_c = window_for_ctx.clone();
+                        dlg_ctx.ask_input("新建网址", "请输入网址（如 https://www.example.com）", "", move |raw| {
+                            if let Some(raw) = raw {
+                                let mut url = raw.trim().to_string();
+                                if !url.is_empty() {
+                                    // 自动补全协议
+                                    if !url.starts_with("http://") && !url.starts_with("https://") {
+                                        url = format!("https://{}", url);
+                                    }
+                                    let order = db_c.max_item_order(class_id) + 1;
+                                    let db_bg = db_c.clone();
+                                    let win_bg = win_c.clone();
+                                    // 抓取标题/图标涉及网络请求，放后台线程避免阻塞 UI
+                                    std::thread::spawn(move || {
+                                        let (name, icon) = match native::fetch_url_info(&url) {
+                                            Some(u) => {
+                                                let n = if u.title.trim().is_empty() {
+                                                    url.clone()
+                                                } else {
+                                                    u.title
+                                                };
+                                                (n, u.icon)
                                             }
-                                        }
+                                            None => (url.clone(), None),
+                                        };
+                                        let item = Item {
+                                            id: 0,
+                                            classification_id: class_id,
+                                            name,
+                                            kind: 2,
+                                            data: crate::models::ItemData {
+                                                target: Some(url.clone()),
+                                                params: None,
+                                                icon,
+                                                ..Default::default()
+                                            },
+                                            shortcut_key: None,
+                                            global_shortcut_key: false,
+                                            order,
+                                        };
+                                        let ok = db_bg.insert_item(&item).is_ok();
+                                        let _ = slint::invoke_from_event_loop(move || {
+                                            if let Some(w) = win_bg.upgrade() {
+                                                if ok {
+                                                    let items = db_bg.list_items(class_id);
+                                                    w.set_items(to_item_model(&items, 0));
+                                                    w.set_status_text(SharedString::from(format!(
+                                                        "共 {} 个项目",
+                                                        items.len()
+                                                    )));
+                                                }
+                                            }
+                                        });
                                     });
-                                });
+                                }
                             }
-                        }
+                        });
                     }
                     ("item-area", "new-system") => {
                         // 新建系统项目：弹出常见系统项清单让用户选择
@@ -3665,8 +3687,10 @@ impl App {
             apply_font_family(&settings_window, &font_family);
             apply_font_family(&new_item_window, &font_family);
             apply_font_family(&item_settings_window, &font_family);
+            dialogs.apply_font_family(&font_family);
             new_item_window.set_theme_mode(SharedString::from(theme.clone()));
             item_settings_window.set_theme_mode(SharedString::from(theme.clone()));
+            dialogs.apply_theme(&theme);
             // 应用自定义主题颜色到所有窗口的 ThemeSettings 全局
             for (k, v) in [
                 ("bg", &custom_bg),
@@ -3680,6 +3704,7 @@ impl App {
                 set_custom_theme_color(&settings_window, k, v);
                 set_custom_theme_color(&new_item_window, k, v);
                 set_custom_theme_color(&item_settings_window, k, v);
+                dialogs.apply_custom_color(k, v);
             }
             // 同步快速搜索窗口主题
             quick_search_window.set_theme_mode(SharedString::from(theme.clone()));
@@ -3710,6 +3735,7 @@ impl App {
             hotkey_rx,
             tray_icon_enabled,
             minimize_to_tray,
+            dialogs,
         })
     }
 
@@ -3734,6 +3760,9 @@ impl App {
                         let pos = db_run.get_setting("quick_search_position", "center");
                         qs.window().show().ok();
                         position_quick_search_window(&qs, &pos);
+                        // 切换到英文输入法
+                        #[cfg(target_os = "windows")]
+                        native::switch_english();
                     }
                 }
             }
@@ -5412,6 +5441,198 @@ fn show_info_dialog(title: &str, message: &str) {
             PCWSTR(title_h.as_ptr()),
             MB_OK | MB_ICONINFORMATION,
         );
+    }
+}
+
+// ==================== Slint 原生对话框控制器 ====================
+
+/// 基于 Slint 组件的对话框控制器（替代 PowerShell 输入框/动作选择框）
+///
+/// Slint 没有嵌套事件循环，对话框采用异步回调模式：
+/// ask_input/ask_multiline/ask_action 立即返回，用户确认后通过回调交付结果。
+///
+/// 三种对话框窗口常驻（初始隐藏），避免每次创建销毁的开销。
+pub struct DialogController {
+    input: InputDialog,
+    multiline: MultilineInputDialog,
+    action: ActionDialog,
+    pending_input: Rc<std::cell::RefCell<Option<Box<dyn FnOnce(Option<String>)>>>>,
+    pending_multiline: Rc<std::cell::RefCell<Option<Box<dyn FnOnce(Option<String>)>>>>,
+    pending_action: Rc<std::cell::RefCell<Option<Box<dyn FnOnce(Option<String>)>>>>,
+}
+
+impl DialogController {
+    /// 创建三个对话框窗口（初始隐藏）并绑定回调
+    pub fn new() -> Result<Self, slint::PlatformError> {
+        let input = InputDialog::new()?;
+        let multiline = MultilineInputDialog::new()?;
+        let action = ActionDialog::new()?;
+        input.window().hide().ok();
+        multiline.window().hide().ok();
+        action.window().hide().ok();
+
+        // --- InputDialog ---
+        let pending_input = Rc::new(std::cell::RefCell::new(None));
+        {
+            let p = pending_input.clone();
+            let dlg = input.as_weak();
+            input.on_accepted(move |text| {
+                if let Some(cb) = p.borrow_mut().take() {
+                    cb(Some(text.to_string()));
+                }
+                if let Some(d) = dlg.upgrade() {
+                    d.window().hide().ok();
+                }
+            });
+        }
+        {
+            let p = pending_input.clone();
+            let dlg = input.as_weak();
+            input.on_cancelled(move || {
+                if let Some(cb) = p.borrow_mut().take() {
+                    cb(None);
+                }
+                if let Some(d) = dlg.upgrade() {
+                    d.window().hide().ok();
+                }
+            });
+        }
+
+        // --- MultilineInputDialog ---
+        let pending_multiline = Rc::new(std::cell::RefCell::new(None));
+        {
+            let p = pending_multiline.clone();
+            let dlg = multiline.as_weak();
+            multiline.on_accepted(move |text| {
+                if let Some(cb) = p.borrow_mut().take() {
+                    cb(Some(text.to_string()));
+                }
+                if let Some(d) = dlg.upgrade() {
+                    d.window().hide().ok();
+                }
+            });
+        }
+        {
+            let p = pending_multiline.clone();
+            let dlg = multiline.as_weak();
+            multiline.on_cancelled(move || {
+                if let Some(cb) = p.borrow_mut().take() {
+                    cb(None);
+                }
+                if let Some(d) = dlg.upgrade() {
+                    d.window().hide().ok();
+                }
+            });
+        }
+
+        // --- ActionDialog ---
+        let pending_action = Rc::new(std::cell::RefCell::new(None));
+        {
+            let p = pending_action.clone();
+            let dlg = action.as_weak();
+            action.on_selected(move |act| {
+                if let Some(cb) = p.borrow_mut().take() {
+                    cb(Some(act.to_string()));
+                }
+                if let Some(d) = dlg.upgrade() {
+                    d.window().hide().ok();
+                }
+            });
+        }
+        {
+            let p = pending_action.clone();
+            let dlg = action.as_weak();
+            action.on_cancelled(move || {
+                if let Some(cb) = p.borrow_mut().take() {
+                    cb(None);
+                }
+                if let Some(d) = dlg.upgrade() {
+                    d.window().hide().ok();
+                }
+            });
+        }
+
+        Ok(Self {
+            input,
+            multiline,
+            action,
+            pending_input,
+            pending_multiline,
+            pending_action,
+        })
+    }
+
+    /// 显示单行输入对话框，确认后回调返回 Some(输入)，取消返回 None
+    pub fn ask_input<F: FnOnce(Option<String>) + 'static>(
+        &self,
+        title: &str,
+        prompt: &str,
+        default: &str,
+        cb: F,
+    ) {
+        self.input.set_dlg_title(SharedString::from(title));
+        self.input.set_prompt(SharedString::from(prompt));
+        self.input.set_default_text(SharedString::from(default));
+        self.input.set_input_text(SharedString::from(default));
+        *self.pending_input.borrow_mut() = Some(Box::new(cb));
+        self.input.window().show().ok();
+        self.input.window().raise().ok();
+    }
+
+    /// 显示多行输入对话框
+    pub fn ask_multiline<F: FnOnce(Option<String>) + 'static>(
+        &self,
+        title: &str,
+        prompt: &str,
+        cb: F,
+    ) {
+        self.multiline.set_dlg_title(SharedString::from(title));
+        self.multiline.set_prompt(SharedString::from(prompt));
+        self.multiline.set_input_text(SharedString::from(""));
+        *self.pending_multiline.borrow_mut() = Some(Box::new(cb));
+        self.multiline.window().show().ok();
+        self.multiline.window().raise().ok();
+    }
+
+    /// 显示动作选择对话框
+    pub fn ask_action<F: FnOnce(Option<String>) + 'static>(
+        &self,
+        title: &str,
+        prompt: &str,
+        actions: &[&str],
+        cb: F,
+    ) {
+        self.action.set_dlg_title(SharedString::from(title));
+        self.action.set_prompt(SharedString::from(prompt));
+        let model = slint::VecModel::from(
+            actions.iter().map(|a| SharedString::from(*a)).collect::<Vec<_>>(),
+        );
+        self.action.set_actions(ModelRc::from(Rc::new(model)));
+        *self.pending_action.borrow_mut() = Some(Box::new(cb));
+        self.action.window().show().ok();
+        self.action.window().raise().ok();
+    }
+
+    /// 同步主题模式到三个对话框窗口
+    pub fn apply_theme(&self, mode: &str) {
+        let m = SharedString::from(mode);
+        self.input.set_theme_mode(m.clone());
+        self.multiline.set_theme_mode(m.clone());
+        self.action.set_theme_mode(m);
+    }
+
+    /// 同步字体族到三个对话框窗口
+    pub fn apply_font_family(&self, family: &str) {
+        apply_font_family(&self.input, family);
+        apply_font_family(&self.multiline, family);
+        apply_font_family(&self.action, family);
+    }
+
+    /// 同步自定义主题颜色到三个对话框窗口
+    pub fn apply_custom_color(&self, key: &str, hex: &str) {
+        set_custom_theme_color(&self.input, key, hex);
+        set_custom_theme_color(&self.multiline, key, hex);
+        set_custom_theme_color(&self.action, key, hex);
     }
 }
 

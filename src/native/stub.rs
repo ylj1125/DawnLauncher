@@ -45,6 +45,8 @@ pub fn is_fullscreen() -> bool {
     false
 }
 
+pub fn switch_english() {}
+
 pub fn enable_file_drop<F>(_window_title: &str, _callback: F) -> bool
 where
     F: Fn(Vec<String>) + Send + Sync + 'static,

@@ -15,7 +15,7 @@
 // - explorer_context_menu: 资源管理器右键菜单 (COM IContextMenu)
 //
 // 待迁移（后续迭代）：
-// - is_fullscreen / switch_english: 全屏检测/输入法切换
+// - 输入法高级控制（中英文双向切换）
 
 use std::collections::HashMap;
 use std::process::Command;
@@ -529,6 +529,29 @@ pub fn is_fullscreen() -> bool {
             && rect.top <= 0
             && (rect.right - rect.left) >= screen_w
             && (rect.bottom - rect.top) >= screen_h
+    }
+}
+
+/// 将当前线程的键盘布局切换为英文（美式 0409），关闭 IME 中文输入状态
+/// 用于快速搜索窗口打开时，保证用户可以直接输入英文字符
+pub fn switch_english() {
+    use windows::Win32::UI::WindowsAndMessaging::{LoadKeyboardLayoutW, KLF_ACTIVATE};
+    // 00000409 = 美式英语键盘布局
+    let klid = HSTRING::from("00000409");
+    unsafe {
+        LoadKeyboardLayoutW(PCWSTR(klid.as_ptr()), KLF_ACTIVATE);
+    }
+    // 向前台窗口发送 IMC_SETOPENSTATUS(FALSE)，关闭输入法
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetForegroundWindow, SendMessageW, WM_IME_CONTROL,
+        };
+        use windows::Win32::Foundation::LPARAM;
+        const IMC_SETOPENSTATUS: u32 = 0x0028;
+        let hwnd = GetForegroundWindow();
+        if hwnd.0 != 0 {
+            SendMessageW(hwnd, WM_IME_CONTROL, WPARAM(IMC_SETOPENSTATUS as usize), LPARAM(0));
+        }
     }
 }
 
