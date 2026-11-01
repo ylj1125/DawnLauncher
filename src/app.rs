@@ -3784,8 +3784,60 @@ impl App {
         );
         std::mem::forget(frame_timer);
 
+        // 文件拖放：把文件/文件夹拖入主窗口即添加到当前分类
+        #[cfg(target_os = "windows")]
+        {
+            // 先确保窗口已创建，FindWindowW 才能拿到 HWND
+            self.main_window.show().ok();
+            let db_drop = self.db.clone();
+            let weak_drop = self.main_window.as_weak();
+            let cur_drop = self.current_classification_id.clone();
+            let installed = native::enable_file_drop("Dawn Launcher", move |paths| {
+                let db = db_drop.clone();
+                let weak = weak_drop.clone();
+                let cur = cur_drop.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    let class_id = *cur.lock().unwrap();
+                    add_dropped_paths(&db, &weak, class_id, paths);
+                });
+            });
+            if !installed {
+                log::warn!("文件拖放启用失败");
+            }
+        }
+
         self.main_window.run()
     }
+}
+
+/// 将拖入的文件/文件夹批量加入指定分类并刷新界面
+fn add_dropped_paths(
+    db: &Database,
+    window: &slint::Weak<MainWindow>,
+    class_id: i64,
+    paths: Vec<String>,
+) {
+    let mut added = 0usize;
+    for path in paths {
+        let path = path.trim().to_string();
+        if path.is_empty() {
+            continue;
+        }
+        let order = db.max_item_order(class_id) + 1;
+        let item = build_item_from_path(&path, class_id, order);
+        if db.insert_item(&item).is_ok() {
+            added += 1;
+        }
+    }
+    if added == 0 {
+        return;
+    }
+    let items = db.list_items(class_id);
+    if let Some(w) = window.upgrade() {
+        w.set_items(to_item_model(&items, 0));
+        w.set_status_text(SharedString::from(format!("{} 项", items.len())));
+    }
+    log::info!("已从拖放添加 {} 个项目到分类 {}", added, class_id);
 }
 
 /// 打开项目编辑窗口并载入项目数据
@@ -4818,7 +4870,7 @@ fn image_file_to_data_url(path: &str) -> Option<String> {
 }
 
 /// 简易 Base64 编码（标准字母表 + 填充）
-fn base64_encode(input: &[u8]) -> String {
+pub(crate) fn base64_encode(input: &[u8]) -> String {
     const TABLE: &[u8; 64] =
         b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);

@@ -45,6 +45,13 @@ pub fn is_fullscreen() -> bool {
     false
 }
 
+pub fn enable_file_drop<F>(_window_title: &str, _callback: F) -> bool
+where
+    F: Fn(Vec<String>) + Send + Sync + 'static,
+{
+    false
+}
+
 pub fn register_global_hotkey(_notify: std::sync::mpsc::Sender<()>) {}
 
 pub fn register_shortcut_hotkeys(

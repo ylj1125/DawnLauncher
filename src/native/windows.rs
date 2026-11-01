@@ -2,7 +2,8 @@
 // 移植自原项目 rust/windows.rs，去除 napi 依赖，改为纯 Rust 函数
 //
 // 当前已迁移功能：
-// - get_file_icon: 获取文件/文件夹图标 (Base64 PNG)
+// - get_file_icon: 获取文件/文件夹图标 (IShellItemImageFactory 原生提取, Base64 PNG)
+// - enable_file_drop: 拖拽文件到主窗口添加项目 (WM_DROPFILES)
 // - get_shortcut_file_info: 解析 .lnk 快捷方式
 // - open_file_location: 在资源管理器中定位文件
 // - search_path: 在 PATH 环境变量中搜索可执行文件
@@ -18,6 +19,8 @@
 
 use std::collections::HashMap;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::OnceLock;
 use windows::core::{ComInterface, HSTRING, PCWSTR};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
@@ -46,12 +49,143 @@ extern "system" {
 }
 
 /// 获取文件/文件夹图标，返回 Base64 编码的 PNG data URL
-/// 如果失败返回 None
+/// 优先使用 IShellItemImageFactory 原生提取，失败时回退到 PowerShell 方案
 pub fn get_file_icon(path: &str) -> Option<String> {
-    // 此函数完整实现需要 IShellItemImageFactory + GDI 位图处理
-    // MVP 阶段使用简化版本: 调用 PowerShell 通过 SHGetFileInfo 间接获取
-    // 完整版本将在后续迭代中迁移原 rust/windows.rs 的实现
-    get_file_icon_simple(path)
+    get_file_icon_native(path).or_else(|| get_file_icon_simple(path))
+}
+
+/// 原生图标提取: SHCreateItemFromParsingName -> IShellItemImageFactory::GetImage
+/// 得到 32bpp HBITMAP 后转 RGBA 并编码为 PNG，无需启动外部进程
+fn get_file_icon_native(path: &str) -> Option<String> {
+    use windows::Win32::Foundation::SIZE;
+    use windows::Win32::UI::Shell::{
+        IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
+    };
+
+    // 图标按 48px 提取，兼顾清晰度与体积
+    const ICON_SIZE: i32 = 48;
+
+    if !std::path::Path::new(path).exists() {
+        return None;
+    }
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    }
+
+    let path_h = HSTRING::from(path);
+    let factory: IShellItemImageFactory =
+        match unsafe { SHCreateItemFromParsingName(PCWSTR(path_h.as_ptr()), None) } {
+            Ok(f) => f,
+            Err(_) => {
+                unsafe {
+                    let _ = CoUninitialize();
+                }
+                return None;
+            }
+        };
+
+    let hbitmap = match unsafe {
+        factory.GetImage(
+            SIZE {
+                cx: ICON_SIZE,
+                cy: ICON_SIZE,
+            },
+            SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK,
+        )
+    } {
+        Ok(h) => h,
+        Err(_) => {
+            unsafe {
+                let _ = CoUninitialize();
+            }
+            return None;
+        }
+    };
+
+    let png = unsafe { hbitmap_to_png(hbitmap) };
+
+    unsafe {
+        let _ = windows::Win32::Graphics::Gdi::DeleteObject(hbitmap);
+        let _ = CoUninitialize();
+    }
+
+    let png = png?;
+    Some(format!(
+        "data:image/png;base64,{}",
+        crate::app::base64_encode(&png)
+    ))
+}
+
+/// 将 32bpp HBITMAP 转为 RGBA 字节并编码为 PNG
+unsafe fn hbitmap_to_png(hbitmap: windows::Win32::Graphics::Gdi::HBITMAP) -> Option<Vec<u8>> {
+    use windows::Win32::Graphics::Gdi::{
+        CreateCompatibleDC, DeleteDC, GetDIBits, GetObjectW, BITMAP, BITMAPINFO, BI_RGB,
+        DIB_RGB_COLORS,
+    };
+
+    let mut bm: BITMAP = std::mem::zeroed();
+    if GetObjectW(
+        hbitmap,
+        std::mem::size_of::<BITMAP>() as i32,
+        Some(&mut bm as *mut _ as *mut core::ffi::c_void),
+    ) == 0
+    {
+        return None;
+    }
+    let width = bm.bmWidth;
+    let height = bm.bmHeight;
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+
+    let hdc = CreateCompatibleDC(None);
+    if hdc.0 == 0 {
+        return None;
+    }
+
+    // 负高度表示自上而下的 DIB，省去手动翻转
+    let mut bmi: BITMAPINFO = std::mem::zeroed();
+    bmi.bmiHeader.biSize = std::mem::size_of_val(&bmi.bmiHeader) as u32;
+    bmi.bmiHeader.biWidth = width;
+    bmi.bmiHeader.biHeight = -height;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB.0;
+
+    let mut pixels = vec![0u8; (width * height * 4) as usize];
+    let lines = GetDIBits(
+        hdc,
+        hbitmap,
+        0,
+        height as u32,
+        Some(pixels.as_mut_ptr() as *mut core::ffi::c_void),
+        &mut bmi,
+        DIB_RGB_COLORS,
+    );
+    let _ = DeleteDC(hdc);
+    if lines == 0 {
+        return None;
+    }
+
+    // BGRA -> RGBA；若整张图都没有 alpha（老式 24 位图标），统一按不透明处理
+    let has_alpha = pixels.chunks_exact(4).any(|px| px[3] != 0);
+    for px in pixels.chunks_exact_mut(4) {
+        px.swap(0, 2);
+        if !has_alpha {
+            px[3] = 255;
+        }
+    }
+
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, width as u32, height as u32);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().ok()?;
+        writer.write_image_data(&pixels).ok()?;
+    }
+    Some(out)
 }
 
 /// 简化版图标获取: 通过 PowerShell 调用 ExtractAssociatedIcon
@@ -370,10 +504,130 @@ pub fn explorer_context_menu_at_cursor(path: &str) -> bool {
     explorer_context_menu(path, x, y)
 }
 
-/// 判断当前前台窗口是否全屏 (简化版，后续完整实现)
+/// 判断当前前台窗口是否全屏（用窗口矩形与屏幕尺寸比较）
 pub fn is_fullscreen() -> bool {
-    // TODO: 完整实现需要枚举所有窗口并判断是否覆盖屏幕
-    false
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetSystemMetrics, GetWindowRect, SM_CXSCREEN, SM_CYSCREEN,
+    };
+
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0 == 0 {
+            return false;
+        }
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).is_err() {
+            return false;
+        }
+        let screen_w = GetSystemMetrics(SM_CXSCREEN);
+        let screen_h = GetSystemMetrics(SM_CYSCREEN);
+        if screen_w <= 0 || screen_h <= 0 {
+            return false;
+        }
+        rect.left <= 0
+            && rect.top <= 0
+            && (rect.right - rect.left) >= screen_w
+            && (rect.bottom - rect.top) >= screen_h
+    }
+}
+
+// ============================================================
+// 拖拽文件到主窗口 (WM_DROPFILES)
+// ============================================================
+
+/// 拖放回调：收到被拖入的文件/文件夹路径列表
+static DROP_HANDLER: OnceLock<Box<dyn Fn(Vec<String>) + Send + Sync>> = OnceLock::new();
+/// 原窗口过程（子类化前的 winit 过程），用于转发未处理的消息
+static OLD_WNDPROC: AtomicIsize = AtomicIsize::new(0);
+/// 是否已安装（避免重复子类化）
+static DROP_INSTALLED: AtomicBool = AtomicBool::new(false);
+
+const WM_DROPFILES: u32 = 0x0233;
+
+unsafe extern "system" fn drop_wndproc(
+    hwnd: windows::Win32::Foundation::HWND,
+    msg: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::Foundation::LRESULT;
+    use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
+
+    if msg == WM_DROPFILES {
+        let hdrop = HDROP(wparam.0 as isize);
+        let count = DragQueryFileW(hdrop, u32::MAX, None);
+        let mut paths = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            // 先取长度（不含结尾 0），再按长度读取
+            let len = DragQueryFileW(hdrop, i, None);
+            if len == 0 {
+                continue;
+            }
+            let mut buf = vec![0u16; (len + 1) as usize];
+            let copied = DragQueryFileW(hdrop, i, Some(&mut buf[..]));
+            if copied > 0 {
+                buf.truncate(copied as usize);
+                paths.push(String::from_utf16_lossy(&buf));
+            }
+        }
+        DragFinish(hdrop);
+        log::info!("拖入 {} 个文件/文件夹", paths.len());
+        if let Some(handler) = DROP_HANDLER.get() {
+            handler(paths);
+        }
+        return LRESULT(0);
+    }
+
+    let old = OLD_WNDPROC.load(Ordering::SeqCst);
+    if old != 0 {
+        let proc: windows::Win32::UI::WindowsAndMessaging::WNDPROC =
+            std::mem::transmute(old);
+        return windows::Win32::UI::WindowsAndMessaging::CallWindowProcW(
+            proc, hwnd, msg, wparam, lparam,
+        );
+    }
+    windows::Win32::UI::WindowsAndMessaging::DefWindowProcW(hwnd, msg, wparam, lparam)
+}
+
+/// 让主窗口接受文件拖放 (DragAcceptFiles + 子类化窗口过程)
+/// 返回 true 表示安装成功；窗口必须先创建（show 过）才能找到 HWND
+pub fn enable_file_drop<F>(window_title: &str, callback: F) -> bool
+where
+    F: Fn(Vec<String>) + Send + Sync + 'static,
+{
+    use windows::Win32::UI::Shell::DragAcceptFiles;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, GWLP_WNDPROC, SetWindowLongPtrW,
+    };
+
+    if DROP_INSTALLED.load(Ordering::SeqCst) {
+        return true;
+    }
+
+    unsafe {
+        let title = HSTRING::from(window_title);
+        let hwnd = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr()));
+        if hwnd.0 == 0 {
+            log::warn!("未找到主窗口，文件拖放安装失败");
+            return false;
+        }
+        DragAcceptFiles(hwnd, true);
+        let old = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, drop_wndproc as usize as isize);
+        if old == 0 {
+            log::warn!("子类化窗口过程失败，文件拖放不可用");
+            return false;
+        }
+        OLD_WNDPROC.store(old, Ordering::SeqCst);
+    }
+
+    // 子类化成功后再注册回调（消息进入时 DROP_HANDLER 已就绪）
+    if DROP_HANDLER.set(Box::new(callback)).is_err() {
+        return false;
+    }
+    DROP_INSTALLED.store(true, Ordering::SeqCst);
+    log::info!("文件拖放已启用");
+    true
 }
 
 // ============================================================
@@ -419,101 +673,10 @@ fn collect_lnk_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>, d
     }
 }
 
-/// 批量获取文件图标 (一次 PowerShell 调用)
-/// 路径列表写入临时文件后由 PowerShell 逐行读取，避免命令行长度与转义问题。
-/// 返回与输入等长的结果，按行与输入一一对应。
+/// 批量获取文件图标（逐项走原生 IShellItemImageFactory，无需启动 PowerShell）
+/// 返回与输入等长的结果
 pub fn get_icons_batch(paths: &[String]) -> Vec<Option<String>> {
-    if paths.is_empty() {
-        return Vec::new();
-    }
-    // 路径写入临时文件
-    let list_file = std::env::temp_dir().join("dawn-launcher-icon-list.txt");
-    let content = paths.join("\r\n");
-    if std::fs::write(&list_file, content.as_bytes()).is_err() {
-        return vec![None; paths.len()];
-    }
-    let list_path = list_file.to_string_lossy().replace('\'', "''");
-    // 输出为 Base64 (ASCII)，不涉及编码转换；不要设置 [Console]::OutputEncoding，
-    // 否则在 CREATE_NO_WINDOW (无控制台) 下会抛错导致脚本中断
-    // 图标提取优先使用 SHGetFileInfo (对文件/文件夹均适用)，失败时回退 ExtractAssociatedIcon
-    let script = format!(
-        r#"
-Add-Type -AssemblyName System.Drawing
-$code = @'
-using System;
-using System.Drawing;
-using System.Runtime.InteropServices;
-public class DawnIconHelper {{
-    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
-    public struct SHFILEINFO {{
-        public IntPtr hIcon;
-        public int iIcon;
-        public uint dwAttributes;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=260)] public string szDisplayName;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=80)] public string szTypeName;
-    }}
-    [DllImport("shell32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
-    public static extern IntPtr SHGetFileInfo(string pszPath, uint dwFileAttributes, ref SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
-    [DllImport("user32.dll", SetLastError=true)]
-    public static extern bool DestroyIcon(IntPtr hIcon);
-    public static Icon GetIcon(string path, bool isFolder) {{
-        SHFILEINFO info = new SHFILEINFO();
-        uint flags = 0x000000100; // SHGFI_ICON
-        IntPtr r = SHGetFileInfo(path, 0, ref info, (uint)Marshal.SizeOf(info), flags);
-        if (info.hIcon == IntPtr.Zero) return null;
-        try {{ return (Icon)Icon.FromHandle(info.hIcon).Clone(); }}
-        finally {{ DestroyIcon(info.hIcon); }}
-    }}
-}}
-'@
-Add-Type -TypeDefinition $code -ReferencedAssemblies System.Drawing
-$lines = Get-Content -LiteralPath '{list}' -Encoding UTF8
-foreach ($p in $lines) {{
-    $b = '-'
-    if ($p) {{
-        try {{
-            $isFolder = Test-Path -LiteralPath $p -PathType Container
-            $isFile = Test-Path -LiteralPath $p -PathType Leaf
-            $i = $null
-            if ($isFolder -or $isFile) {{
-                $i = [DawnIconHelper]::GetIcon($p, $isFolder)
-            }}
-            if (-not $i -and $isFile) {{
-                $i = [System.Drawing.Icon]::ExtractAssociatedIcon($p)
-            }}
-            if ($i) {{
-                $ms = New-Object System.IO.MemoryStream
-                $i.ToBitmap().Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
-                $b = [Convert]::ToBase64String($ms.ToArray())
-            }}
-        }} catch {{ $b = '-' }}
-    }}
-    Write-Output $b
-}}
-"#,
-        list = list_path
-    );
-    let output = run_hidden("powershell", &["-NoProfile", "-NonInteractive", "-Command", &script]);
-    let _ = std::fs::remove_file(&list_file);
-    let Some(stdout) = output else {
-        return vec![None; paths.len()];
-    };
-    let text = String::from_utf8_lossy(&stdout).to_string();
-    let mut result: Vec<Option<String>> = text
-        .lines()
-        .map(|line| {
-            let line = line.trim();
-            if line.is_empty() || line == "-" {
-                None
-            } else {
-                Some(format!("data:image/png;base64,{}", line))
-            }
-        })
-        .collect();
-    // 对齐到输入长度（PowerShell 可能输出多余告警行）
-    result.resize(paths.len(), None);
-    result.truncate(paths.len());
-    result
+    paths.iter().map(|p| get_file_icon(p)).collect()
 }
 
 /// 扫描开始菜单中的快捷方式 (用户 + 全局)，返回可导入的应用列表
