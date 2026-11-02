@@ -212,45 +212,55 @@ export component ItemSettingsWindow inherits Window {
                     vertical-alignment: center;
                 }
                 Rectangle {
-                    height: 24px;
                     width: 104px;
-                    border-radius: 4px;
-                    background: ThemeSettings.card-bg(root.theme-mode);
-                    border-width: 1px;
-                    border-color: ThemeSettings.border-c(root.theme-mode);
+                    height: 100%;
 
-                    class-text := Text {
-                        text: "分类: " + root.class-name;
-                        font-size: ThemeSettings.font-size-small;
-                        color: ThemeSettings.text-sec(root.theme-mode);
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        overflow: elide;
-                        x: 8px;
-                        y: 0px;
-                        width: parent.width - 16px;
-                        height: 100%;
+                    Rectangle {
+                        y: (parent.height - 24px) / 2;
+                        width: parent.width;
+                        height: 24px;
+                        border-radius: 4px;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        Text {
+                            text: "分类: " + root.class-name;
+                            font-size: ThemeSettings.font-size-small;
+                            color: ThemeSettings.text-sec(root.theme-mode);
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            x: 8px;
+                            width: parent.width - 16px;
+                            height: 100%;
+                        }
                     }
                 }
                 Rectangle { horizontal-stretch: 1; }
                 Rectangle {
                     width: 32px;
-                    height: 32px;
-                    border-radius: 4px;
-                    background: close-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                    height: 100%;
 
-                    Text {
-                        text: "✕";
-                        font-size: ThemeSettings.font-size-normal;
-                        color: ThemeSettings.text-c(root.theme-mode);
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        width: 100%;
-                        height: 100%;
-                    }
-                    close-touch := TouchArea {
-                        width: 100%;
-                        height: 100%;
+                    Rectangle {
+                        y: (parent.height - 32px) / 2;
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 4px;
+                        background: close-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+
+                        Text {
+                            text: "✕";
+                            font-size: ThemeSettings.font-size-normal;
+                            color: ThemeSettings.text-c(root.theme-mode);
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            width: 100%;
+                            height: 100%;
+                        }
+                        close-touch := TouchArea {
+                            width: 100%;
+                            height: 100%;
                         clicked => { root.cancel-requested(); }
                     }
                 }

@@ -267,47 +267,59 @@ export component NewItemWindow inherits Window {
                     color: ThemeSettings.text-c(root.theme-mode);
                     vertical-alignment: center;
                 }
+                // 分类徽章：外层撑满行高，内层在垂直方向居中
                 Rectangle {
-                    height: 24px;
-                    width: max(90px, class-text.preferred-width + 20px);
-                    border-radius: 4px;
-                    background: ThemeSettings.card-bg(root.theme-mode);
-                    border-width: 1px;
-                    border-color: ThemeSettings.border-c(root.theme-mode);
+                    width: 104px;
+                    height: 100%;
 
-                    class-text := Text {
-                        text: "分类: " + root.class-name;
-                        font-size: ThemeSettings.font-size-small;
-                        color: ThemeSettings.text-sec(root.theme-mode);
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        x: 0px;
-                        y: 0px;
-                        width: 100%;
-                        height: 100%;
+                    Rectangle {
+                        y: (parent.height - 24px) / 2;
+                        width: parent.width;
+                        height: 24px;
+                        border-radius: 4px;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        Text {
+                            text: "分类: " + root.class-name;
+                            font-size: ThemeSettings.font-size-small;
+                            color: ThemeSettings.text-sec(root.theme-mode);
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            width: 100%;
+                            height: 100%;
+                        }
                     }
                 }
                 Rectangle { horizontal-stretch: 1; }
 
                 Rectangle {
                     width: 32px;
-                    height: 32px;
-                    border-radius: 4px;
-                    background: close-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                    height: 100%;
 
-                    Text {
-                        text: "✕";
-                        font-size: ThemeSettings.font-size-normal;
-                        color: ThemeSettings.text-c(root.theme-mode);
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        width: 100%;
-                        height: 100%;
-                    }
-                    close-touch := TouchArea {
-                        width: 100%;
-                        height: 100%;
-                        clicked => { root.cancel-requested(); }
+                    Rectangle {
+                        y: (parent.height - 32px) / 2;
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 4px;
+                        background: close-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+
+                        Text {
+                            text: "✕";
+                            font-size: ThemeSettings.font-size-normal;
+                            color: ThemeSettings.text-c(root.theme-mode);
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            width: 100%;
+                            height: 100%;
+                        }
+                        close-touch := TouchArea {
+                            width: 100%;
+                            height: 100%;
+                            clicked => { root.cancel-requested(); }
+                        }
                     }
                 }
             }
