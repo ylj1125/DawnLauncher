@@ -8,6 +8,7 @@ export { DragHelper } from "components/drag_helper.slint";
 import { ClassificationTab } from "components/classification_tab.slint";
 import { SettingsPanel } from "components/settings_panel.slint";
 import { ContextMenu, MenuItem } from "components/context_menu.slint";
+import { MultiPick as EditPick } from "components/new_item_window.slint";
 export { NewItemWindow, CatalogEntry, MultiPick, NewItemPayload } from "components/new_item_window.slint";
 export { ItemSettingsWindow, ItemSettingsPayload } from "components/item_settings_window.slint";
 export { InputDialog, MultilineInputDialog, ActionDialog } from "components/dialogs.slint";
@@ -1395,24 +1396,28 @@ export component ItemEditWindow inherits Window {
     background: ThemeSettings.bg-color(root.theme-mode);
     default-font-family: ThemeSettings.font-family;
     preferred-width: 560px;
-    preferred-height: 500px;
+    preferred-height: root.is-multi ? 700px : 500px;
     min-width: 480px;
     min-height: 440px;
 
     in property <string> theme-mode: "light";
     in property <string> kind-label: "";
     in property <image> icon-preview;
+    in property <bool> is-multi: false;
 
     in-out property <string> item-name: "";
     in-out property <string> item-target: "";
     in-out property <string> item-params: "";
     in-out property <string> item-remark: "";
     in-out property <bool> run-as-admin: false;
+    in-out property <[EditPick]> picks: [];
+    in-out property <int> multi-interval: 200;
 
     callback save-requested(string, string, string, string, bool);
     callback cancel-requested();
     callback pick-icon-requested();
     callback refresh-icon-requested();
+    callback pick-toggled(int);
 
     VerticalLayout {
         // 标题栏

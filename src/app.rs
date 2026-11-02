@@ -89,6 +89,8 @@ impl App {
         // 编辑窗口当前编辑的项目 id 与待保存图标
         let editing_item_id = Arc::new(Mutex::new(0i64));
         let editing_icon: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        // 编辑多项目时的可勾选项目列表
+        let editing_picks: Arc<Mutex<Vec<PickRaw>>> = Arc::new(Mutex::new(Vec::new()));
         // 「新建项目」窗口当前目标分类
         let new_item_class_id: Arc<Mutex<i64>> = Arc::new(Mutex::new(0i64));
         // 「项目设置」窗口当前目标分类
@@ -1855,6 +1857,7 @@ impl App {
             let edit_weak_for_ctx = item_edit_window.as_weak();
             let editing_item_id_for_ctx = editing_item_id.clone();
             let editing_icon_for_ctx = editing_icon.clone();
+            let editing_picks_for_ctx = editing_picks.clone();
             let gil_for_ctx = global_item_layout.clone();
             let ni_window_ctx = new_item_window.as_weak();
             let ni_class_ctx = new_item_class_id.clone();
@@ -2769,6 +2772,7 @@ impl App {
                             &window_for_ctx,
                             item_id,
                             &editing_icon_for_ctx,
+                            &editing_picks_for_ctx,
                         );
                     }
                     ("item", "copy-path") => {
@@ -3124,6 +3128,24 @@ impl App {
             });
         }
 
+        // 18.1 项目编辑窗口: 多项目勾选
+        {
+            let edit_weak_toggle = item_edit_window.as_weak();
+            let edit_picks_toggle = editing_picks.clone();
+            item_edit_window.on_pick_toggled(move |idx| {
+                if let Some(ew) = edit_weak_toggle.upgrade() {
+                    {
+                        let mut list = edit_picks_toggle.lock().unwrap();
+                        if let Some(p) = list.get_mut(idx.max(0) as usize) {
+                            p.selected = !p.selected;
+                        }
+                    }
+                    let list = edit_picks_toggle.lock().unwrap().clone();
+                    ew.set_picks(build_pick_model(&list));
+                }
+            });
+        }
+
         // 18.1 项目编辑窗口: 保存
         {
             let db_for_edit = db.clone();
@@ -3131,6 +3153,7 @@ impl App {
             let main_weak_save = main_window.as_weak();
             let editing_id_save = editing_item_id.clone();
             let editing_icon_save = editing_icon.clone();
+            let editing_picks_save = editing_picks.clone();
             item_edit_window.on_save_requested(move |name, target, params, remark, admin| {
                 let item_id = *editing_id_save.lock().unwrap();
                 if item_id == 0 {
@@ -3139,14 +3162,42 @@ impl App {
                 let Some(mut item) = db_for_edit.get_item(item_id) else {
                     return;
                 };
+                let Some(ew) = edit_weak_save.upgrade() else {
+                    return;
+                };
                 let trimmed = name.trim();
                 if !trimmed.is_empty() {
                     item.name = trimmed.to_string();
                 }
-                let t = target.trim().to_string();
-                item.data.target = if t.is_empty() { None } else { Some(t) };
-                let p = params.trim().to_string();
-                item.data.params = if p.is_empty() { None } else { Some(p) };
+                if item.kind == 5 {
+                    // 多项目：以勾选列表为准重建子项
+                    let picks = editing_picks_save.lock().unwrap().clone();
+                    let children: Vec<crate::models::MultiItem> = picks
+                        .iter()
+                        .filter(|p| p.selected)
+                        .map(|p| crate::models::MultiItem {
+                            target: p.target.clone(),
+                            params: p.params.clone(),
+                            start_location: None,
+                            run_as_admin: false,
+                            name: None,
+                        })
+                        .filter(|c| !c.target.is_empty())
+                        .collect();
+                    if children.is_empty() {
+                        show_info_dialog("提示", "请至少勾选一个要依次启动的项目");
+                        return;
+                    }
+                    item.data.multi_items = children;
+                    item.data.multi_items_time_interval = ew.get_multi_interval() as i64;
+                    item.data.target = None;
+                    item.data.params = None;
+                } else {
+                    let t = target.trim().to_string();
+                    item.data.target = if t.is_empty() { None } else { Some(t) };
+                    let p = params.trim().to_string();
+                    item.data.params = if p.is_empty() { None } else { Some(p) };
+                }
                 let r = remark.trim().to_string();
                 item.data.remark = if r.is_empty() { None } else { Some(r) };
                 item.data.run_as_admin = admin;
@@ -3206,6 +3257,12 @@ impl App {
                 let Some(ew) = edit_weak_refresh.upgrade() else {
                     return;
                 };
+                // 多项目恢复内置列表图标
+                if ew.get_is_multi() {
+                    *editing_icon_refresh.lock().unwrap() = None;
+                    ew.set_icon_preview(default_multi_icon());
+                    return;
+                }
                 let target = ew.get_item_target().trim().to_string();
                 if target.is_empty() {
                     show_info_dialog("提示", "请先填写目标路径或网址");
@@ -3950,6 +4007,7 @@ fn open_item_editor(
     main_window: &slint::Weak<MainWindow>,
     item_id: i64,
     editing_icon: &Arc<Mutex<Option<String>>>,
+    editing_picks: &Arc<Mutex<Vec<PickRaw>>>,
 ) {
     let Some(mw) = main_window.upgrade() else {
         return;
@@ -3989,13 +4047,50 @@ fn open_item_editor(
         item.data.remark.clone().unwrap_or_default(),
     ));
     ew.set_run_as_admin(item.data.run_as_admin);
-    ew.set_icon_preview(
-        item.data
-            .icon
-            .as_deref()
-            .and_then(parse_icon_data_url)
-            .unwrap_or_default(),
-    );
+    let preview = match item.data.icon.as_deref().and_then(parse_icon_data_url) {
+        Some(icon) => icon,
+        None if item.kind == 5 => default_multi_icon(),
+        None => slint::Image::default(),
+    };
+    ew.set_icon_preview(preview);
+
+    // 多项目：载入可勾选的项目列表，按当前子项标记已选
+    let is_multi = item.kind == 5;
+    ew.set_is_multi(is_multi);
+    if is_multi {
+        ew.set_multi_interval(item.data.multi_items_time_interval.max(0) as i32);
+        let mut picks: Vec<PickRaw> = Vec::new();
+        for c in db.list_all_classifications() {
+            for it in db.list_items(c.id) {
+                if it.kind == 5 || it.kind == 4 {
+                    continue;
+                }
+                picks.push(PickRaw {
+                    id: it.id,
+                    name: format!("{} · {}", c.name, it.name),
+                    icon: it.data.icon.clone(),
+                    selected: false,
+                    target: it.data.target.clone().unwrap_or_default(),
+                    params: it.data.params.clone(),
+                });
+            }
+        }
+        let mut remaining = item.data.multi_items.clone();
+        for p in picks.iter_mut() {
+            if let Some(pos) = remaining.iter().position(|m| {
+                m.target == p.target
+                    && m.params.as_deref().unwrap_or("") == p.params.as_deref().unwrap_or("")
+            }) {
+                p.selected = true;
+                remaining.remove(pos);
+            }
+        }
+        *editing_picks.lock().unwrap() = picks.clone();
+        ew.set_picks(build_pick_model(&picks));
+    } else {
+        *editing_picks.lock().unwrap() = Vec::new();
+        ew.set_picks(build_pick_model(&[]));
+    }
 
     ew.window().show().ok();
     center_window_on_screen(&ew);
@@ -4930,28 +5025,33 @@ fn rebuild_catalog(
 
 /// 写回多项目勾选列表
 fn rebuild_picks(window: &NewItemWindow, picks: &[PickRaw]) {
-    let entries: Vec<MultiPick> = picks
-        .iter()
-        .map(|p| MultiPick {
-            id: p.id as i32,
-            name: SharedString::from(p.name.as_str()),
-            icon: p.icon.as_deref().and_then(parse_icon_data_url).unwrap_or_default(),
-            selected: p.selected,
-        })
-        .collect();
-    window.set_picks(ModelRc::from(Rc::new(slint::VecModel::from(entries))));
+    window.set_picks(build_pick_model(picks));
+}
+
+/// 把勾选列表转换为 Slint 模型（新建/编辑窗口共用）
+fn build_pick_model(picks: &[PickRaw]) -> ModelRc<MultiPick> {
+    ModelRc::from(Rc::new(slint::VecModel::from(
+        picks
+            .iter()
+            .map(|p| MultiPick {
+                id: p.id as i32,
+                name: SharedString::from(p.name.as_str()),
+                icon: p.icon.as_deref().and_then(parse_icon_data_url).unwrap_or_default(),
+                selected: p.selected,
+            })
+            .collect::<Vec<_>>(),
+    )))
 }
 
 fn to_item_model(list: &[Item], selected_id: i64) -> ModelRc<ItemInfo> {
     let model = slint::VecModel::from(
         list.iter()
             .map(|item| {
-                let icon = item
-                    .data
-                    .icon
-                    .as_deref()
-                    .and_then(parse_icon_data_url)
-                    .unwrap_or_default();
+                let icon = match item.data.icon.as_deref().and_then(parse_icon_data_url) {
+                    Some(icon) => icon,
+                    None if item.kind == 5 => default_multi_icon(),
+                    None => slint::Image::default(),
+                };
                 let invalid = (item.is_file() || item.is_folder())
                     && item
                         .data
@@ -4970,6 +5070,12 @@ fn to_item_model(list: &[Item], selected_id: i64) -> ModelRc<ItemInfo> {
             .collect::<Vec<_>>(),
     );
     ModelRc::from(Rc::new(model))
+}
+
+/// 多项目默认图标（内置 SVG）
+fn default_multi_icon() -> slint::Image {
+    slint::Image::load_from_svg_data(include_bytes!("../ui/assets/multi.svg"))
+        .unwrap_or_default()
 }
 
 /// 解析 data:image/...;base64,... 格式的图标为 Slint Image
