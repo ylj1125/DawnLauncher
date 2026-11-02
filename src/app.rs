@@ -1998,7 +1998,7 @@ impl App {
                         // 新建系统项目：弹出常见系统项清单让用户选择
                         drop(w);
                         // 内置常见系统项 (名称 / target 协议)
-                        let systems: &[(&str, &str)] = &[
+                        const SYSTEMS: &[(&str, &str)] = &[
                             ("此电脑", "shell:MyComputerFolder"),
                             ("回收站", "shell:RecycleBinFolder"),
                             ("控制面板", "shell:ControlPanelFolder"),
@@ -2021,59 +2021,61 @@ impl App {
                             ("Windows 更新", "ms-settings:windowsupdate"),
                         ];
                         let mut prompt = String::from("请输入编号选择系统项目:\n");
-                        for (i, (n, _)) in systems.iter().enumerate() {
+                        for (i, (n, _)) in SYSTEMS.iter().enumerate() {
                             prompt.push_str(&format!("{}: {}\n", i + 1, n));
                         }
                         prompt.push_str("或直接输入 shell:/程序名 (手动添加)");
-                        let db_ctx = db_for_ctx.clone();
+                        let db_c = db_for_ctx.clone();
                         let class_id_clone = class_id;
-                        let win_ctx = window_for_ctx.clone();
-                        if let Some(input) = show_input_dialog("新建系统项目", &prompt) {
-                            let trimmed = input.trim();
-                            let (name, target) = if let Ok(num) = trimmed.parse::<usize>() {
-                                if num >= 1 && num <= systems.len() {
-                                    let (n, t) = systems[num - 1];
-                                    (n.to_string(), t.to_string())
+                        let win_c = window_for_ctx.clone();
+                        dlg_ctx.ask_input("新建系统项目", &prompt, "", move |input| {
+                            if let Some(input) = input {
+                                let trimmed = input.trim();
+                                let (name, target) = if let Ok(num) = trimmed.parse::<usize>() {
+                                    if num >= 1 && num <= SYSTEMS.len() {
+                                        let (n, t) = SYSTEMS[num - 1];
+                                        (n.to_string(), t.to_string())
+                                    } else {
+                                        (trimmed.to_string(), trimmed.to_string())
+                                    }
+                                } else if let Some(colon) = trimmed.find(':') {
+                                    // 允许 "名称=target" 格式手动输入
+                                    let n = trimmed[..colon].trim().to_string();
+                                    let t = trimmed[colon + 1..].trim().to_string();
+                                    (if n.is_empty() { t.clone() } else { n }, t)
                                 } else {
                                     (trimmed.to_string(), trimmed.to_string())
-                                }
-                            } else if let Some(colon) = trimmed.find(':') {
-                                // 允许 "名称=target" 格式手动输入
-                                let n = trimmed[..colon].trim().to_string();
-                                let t = trimmed[colon + 1..].trim().to_string();
-                                (if n.is_empty() { t.clone() } else { n }, t)
-                            } else {
-                                (trimmed.to_string(), trimmed.to_string())
-                            };
-                            if !target.is_empty() {
-                                let order = db_ctx.max_item_order(class_id_clone) + 1;
-                                let icon = native::get_file_icon(&target);
-                                let item = crate::models::Item {
-                                    id: 0,
-                                    classification_id: class_id_clone,
-                                    name,
-                                    kind: 3,
-                                    data: crate::models::ItemData {
-                                        target: Some(target),
-                                        icon,
-                                        ..Default::default()
-                                    },
-                                    shortcut_key: None,
-                                    global_shortcut_key: false,
-                                    order,
                                 };
-                                if db_ctx.insert_item(&item).is_ok() {
-                                    let items = db_ctx.list_items(class_id_clone);
-                                    if let Some(w) = win_ctx.upgrade() {
-                                        w.set_items(to_item_model(&items, 0));
-                                        w.set_status_text(SharedString::from(format!(
-                                            "共 {} 个项目",
-                                            items.len()
-                                        )));
+                                if !target.is_empty() {
+                                    let order = db_c.max_item_order(class_id_clone) + 1;
+                                    let icon = native::get_file_icon(&target);
+                                    let item = crate::models::Item {
+                                        id: 0,
+                                        classification_id: class_id_clone,
+                                        name,
+                                        kind: 3,
+                                        data: crate::models::ItemData {
+                                            target: Some(target),
+                                            icon,
+                                            ..Default::default()
+                                        },
+                                        shortcut_key: None,
+                                        global_shortcut_key: false,
+                                        order,
+                                    };
+                                    if db_c.insert_item(&item).is_ok() {
+                                        let items = db_c.list_items(class_id_clone);
+                                        if let Some(w) = win_c.upgrade() {
+                                            w.set_items(to_item_model(&items, 0));
+                                            w.set_status_text(SharedString::from(format!(
+                                                "共 {} 个项目",
+                                                items.len()
+                                            )));
+                                        }
                                     }
                                 }
                             }
-                        }
+                        });
                     }
                     ("item-area", "new-multi-item") => {
                         // 多行输入：第一行是名称，之后每行一个子项（路径可选 ;参数）
@@ -2081,7 +2083,11 @@ impl App {
                         let db_ctx = db_for_ctx.clone();
                         let class_id_clone = class_id;
                         let win_ctx = window_for_ctx.clone();
-                        if let Some(text) = show_multiline_input_dialog("新建多项目", prompt) {
+                        dlg_ctx.ask_multiline("新建多项目", prompt, move |text| {
+                            let text = match text {
+                                Some(t) => t,
+                                None => return,
+                            };
                             let mut lines = text.lines().filter(|l| !l.trim().is_empty());
                             let name = lines.next().unwrap_or("").trim().to_string();
                             let children: Vec<crate::models::MultiItem> = lines
@@ -2156,7 +2162,7 @@ impl App {
                                     show_error_dialog("创建失败", &format!("数据库写入失败: {}", e));
                                 }
                             }
-                        }
+                        });
                     }
                     ("item-area", "batch-mode") => {
                         w.set_batch_mode(true);
@@ -2257,18 +2263,24 @@ impl App {
                     // ===== 分类区空白右键 =====
                     ("classification-area", "new-classification") => {
                         drop(w);
-                        if let Some(name) = show_input_dialog("新建分类", "请输入分类名称") {
-                            if let Ok(id) = db_for_ctx.insert_parent_classification(&name) {
-                                *current_id_for_ctx.lock().unwrap() = id;
-                                let classifications = db_for_ctx.list_all_classifications();
-                                expanded_for_ctx.lock().unwrap().insert(id);
-                                if let Some(w) = window_for_ctx.upgrade() {
-                                    w.set_classifications(to_classification_model(&classifications, id, &expanded_for_ctx.lock().unwrap()));
-                                    w.set_items(to_item_model(&[], 0));
-                                    w.set_status_text(SharedString::from("0 个项目"));
+                        let db_c = db_for_ctx.clone();
+                        let win_c = window_for_ctx.clone();
+                        let cur_c = current_id_for_ctx.clone();
+                        let exp_c = expanded_for_ctx.clone();
+                        dlg_ctx.ask_input("新建分类", "请输入分类名称", "", move |name| {
+                            if let Some(name) = name {
+                                if let Ok(id) = db_c.insert_parent_classification(&name) {
+                                    *cur_c.lock().unwrap() = id;
+                                    let classifications = db_c.list_all_classifications();
+                                    exp_c.lock().unwrap().insert(id);
+                                    if let Some(w) = win_c.upgrade() {
+                                        w.set_classifications(to_classification_model(&classifications, id, &exp_c.lock().unwrap()));
+                                        w.set_items(to_item_model(&[], 0));
+                                        w.set_status_text(SharedString::from("0 个项目"));
+                                    }
                                 }
                             }
-                        }
+                        });
                     }
                     ("classification-area", "new-folder-classification") => {
                         // 新建关联文件夹分类: 选择文件夹后自动同步其内容
@@ -2322,28 +2334,38 @@ impl App {
                     ("classification-item", "rename") => {
                         let cid = *right_class_id.lock().unwrap();
                         drop(w);
-                        if let Some(new_name) = show_input_dialog("重命名分类", "请输入新名称") {
-                            let _ = db_for_ctx.rename_classification(cid, &new_name);
-                            let classifications = db_for_ctx.list_all_classifications();
-                            if let Some(w) = window_for_ctx.upgrade() {
-                                w.set_classifications(to_classification_model(&classifications, cid, &expanded_for_ctx.lock().unwrap()));
+                        let db_c = db_for_ctx.clone();
+                        let win_c = window_for_ctx.clone();
+                        let exp_c = expanded_for_ctx.clone();
+                        dlg_ctx.ask_input("重命名分类", "请输入新名称", "", move |new_name| {
+                            if let Some(new_name) = new_name {
+                                let _ = db_c.rename_classification(cid, &new_name);
+                                let classifications = db_c.list_all_classifications();
+                                if let Some(w) = win_c.upgrade() {
+                                    w.set_classifications(to_classification_model(&classifications, cid, &exp_c.lock().unwrap()));
+                                }
                             }
-                        }
+                        });
                     }
                     ("classification-item", "add-child") => {
                         let cid = *right_class_id.lock().unwrap();
                         drop(w);
-                        if let Some(name) = show_input_dialog("新建子分类", "请输入子分类名称") {
-                            if let Ok(_id) = db_for_ctx.insert_child_classification(cid, &name) {
-                                // 确保父分类展开以显示新子分类
-                                expanded_for_ctx.lock().unwrap().insert(cid);
-                                let classifications = db_for_ctx.list_all_classifications();
-                                if let Some(w) = window_for_ctx.upgrade() {
-                                    w.set_classifications(to_classification_model(&classifications, cid, &expanded_for_ctx.lock().unwrap()));
+                        let db_c = db_for_ctx.clone();
+                        let win_c = window_for_ctx.clone();
+                        let exp_c = expanded_for_ctx.clone();
+                        dlg_ctx.ask_input("新建子分类", "请输入子分类名称", "", move |name| {
+                            if let Some(name) = name {
+                                if let Ok(_id) = db_c.insert_child_classification(cid, &name) {
+                                    // 确保父分类展开以显示新子分类
+                                    exp_c.lock().unwrap().insert(cid);
+                                    let classifications = db_c.list_all_classifications();
+                                    if let Some(w) = win_c.upgrade() {
+                                        w.set_classifications(to_classification_model(&classifications, cid, &exp_c.lock().unwrap()));
+                                    }
+                                    show_info_dialog("成功", "子分类已创建");
                                 }
-                                show_info_dialog("成功", "子分类已创建");
                             }
-                        }
+                        });
                     }
                     ("classification-item", "associate-folder") => {
                         // 将分类关联到磁盘文件夹 (type=1)，随后同步内容
@@ -2395,46 +2417,66 @@ impl App {
                         drop(w);
                         if db_for_ctx.has_child_classification(cid) {
                             show_error_dialog("聚合分类", "当前分类是父级分类，不能设置为聚合分类。");
-                        } else if let Some(choice) = show_action_dialog(
-                            "聚合分类 - 排序方式",
-                            &["按名称", "按打开次数", "按最近打开"],
-                        ) {
-                            let sort_mode = match choice.as_str() {
-                                "按名称" => "initial",
-                                "按打开次数" => "openNumber",
-                                "按最近打开" => "lastOpen",
-                                _ => "default",
-                            };
-                            let count_text = show_input_dialog(
-                                "聚合分类",
-                                "设置显示项目数量（默认 50）",
-                            )
-                            .unwrap_or_else(|| "50".to_string());
-                            let count = count_text.trim().parse::<i64>().unwrap_or(50).max(1);
-                            match db_for_ctx.set_classification_aggregate(cid, sort_mode, count) {
-                                Ok(_) => {
-                                    *current_id_for_ctx.lock().unwrap() = cid;
-                                    let classes = db_for_ctx.list_all_classifications();
-                                    let items = load_class_items(&db_for_ctx, cid);
-                                    if let Some(w) = window_for_ctx.upgrade() {
-                                        w.set_classifications(to_classification_model(
-                                            &classes,
-                                            cid,
-                                            &expanded_for_ctx.lock().unwrap(),
-                                        ));
-                                        w.set_items(to_item_model(&items, 0));
-                                        w.set_status_text(SharedString::from(format!(
-                                            "聚合 {} 个项目",
-                                            items.len()
-                                        )));
-                                        w.set_context_menu_visible(false);
-                                    }
-                                }
-                                Err(e) => show_error_dialog(
-                                    "聚合分类",
-                                    &format!("设置失败: {}", e),
-                                ),
-                            }
+                        } else {
+                            let db_c = db_for_ctx.clone();
+                            let win_c = window_for_ctx.clone();
+                            let cur_c = current_id_for_ctx.clone();
+                            let exp_c = expanded_for_ctx.clone();
+                            let dlg_c = dlg_ctx.clone();
+                            dlg_ctx.ask_action(
+                                "聚合分类 - 排序方式",
+                                "请选择聚合项目的排序方式",
+                                &["按名称", "按打开次数", "按最近打开"],
+                                move |choice| {
+                                    let choice = match choice {
+                                        Some(c) => c,
+                                        None => return,
+                                    };
+                                    let sort_mode = match choice.as_str() {
+                                        "按名称" => "initial",
+                                        "按打开次数" => "openNumber",
+                                        "按最近打开" => "lastOpen",
+                                        _ => "default",
+                                    };
+                                    dlg_c.ask_input(
+                                        "聚合分类",
+                                        "设置显示项目数量（默认 50）",
+                                        "50",
+                                        move |count_text| {
+                                            let count = count_text
+                                                .unwrap_or_else(|| "50".to_string())
+                                                .trim()
+                                                .parse::<i64>()
+                                                .unwrap_or(50)
+                                                .max(1);
+                                            match db_c.set_classification_aggregate(cid, sort_mode, count) {
+                                                Ok(_) => {
+                                                    *cur_c.lock().unwrap() = cid;
+                                                    let classes = db_c.list_all_classifications();
+                                                    let items = load_class_items(&db_c, cid);
+                                                    if let Some(w) = win_c.upgrade() {
+                                                        w.set_classifications(to_classification_model(
+                                                            &classes,
+                                                            cid,
+                                                            &exp_c.lock().unwrap(),
+                                                        ));
+                                                        w.set_items(to_item_model(&items, 0));
+                                                        w.set_status_text(SharedString::from(format!(
+                                                            "聚合 {} 个项目",
+                                                            items.len()
+                                                        )));
+                                                        w.set_context_menu_visible(false);
+                                                    }
+                                                }
+                                                Err(e) => show_error_dialog(
+                                                    "聚合分类",
+                                                    &format!("设置失败: {}", e),
+                                                ),
+                                            }
+                                        },
+                                    );
+                                },
+                            );
                         }
                     }
                     ("classification-item", "toggle-layout") => {
@@ -2463,20 +2505,27 @@ impl App {
                         let cid = *right_class_id.lock().unwrap();
                         drop(w);
                         let prompt = "请输入图标大小 (整数, 16~128)\n建议: 32 小 / 48 默认 / 64 大";
-                        if let Some(input) = show_input_dialog("图标大小", prompt) {
-                            let size = input.trim().parse::<i64>().unwrap_or(48).clamp(16, 128);
-                            match db_for_ctx.set_classification_item_icon_size(cid, Some(size)) {
-                                Ok(_) => {
-                                    let items = load_class_items(&db_for_ctx, cid);
-                                    if let Some(w) = window_for_ctx.upgrade() {
-                                        w.set_items(to_item_model(&items, 0));
-                                        apply_class_settings(&w, &db_for_ctx.get_classification(cid).unwrap().data, &gil_for_ctx);
+                        let db_c = db_for_ctx.clone();
+                        let win_c = window_for_ctx.clone();
+                        let gil_c = gil_for_ctx.clone();
+                        dlg_ctx.ask_input("图标大小", prompt, "48", move |input| {
+                            if let Some(input) = input {
+                                let size = input.trim().parse::<i64>().unwrap_or(48).clamp(16, 128);
+                                match db_c.set_classification_item_icon_size(cid, Some(size)) {
+                                    Ok(_) => {
+                                        let items = load_class_items(&db_c, cid);
+                                        if let Some(w) = win_c.upgrade() {
+                                            w.set_items(to_item_model(&items, 0));
+                                            if let Some(c) = db_c.get_classification(cid) {
+                                                apply_class_settings(&w, &c.data, &gil_c);
+                                            }
+                                        }
+                                        show_info_dialog("完成", &format!("图标大小已设为 {}", size));
                                     }
-                                    show_info_dialog("完成", &format!("图标大小已设为 {}", size));
+                                    Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
                                 }
-                                Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
                             }
-                        }
+                        });
                     }
                     ("classification-item", "toggle-show-only") => {
                         let cid = *right_class_id.lock().unwrap();
@@ -2545,14 +2594,17 @@ impl App {
                             "当前快捷键：{}\n\n请输入快捷键（如 Ctrl+Alt+1），留空则清除\n修饰键: Ctrl / Alt / Shift / Win\n按键: A-Z / 0-9 / F1-F12 等",
                             cur_label
                         );
-                        if let Some(input) = show_input_dialog("设置分类快捷键", &prompt) {
-                            let val = input.trim().to_string();
-                            let new_key = if val.is_empty() { None } else { Some(val.as_str()) };
-                            match db_for_ctx.set_classification_shortcut(cid, new_key) {
-                                Ok(_) => show_info_dialog("完成", "快捷键已保存，重启应用后生效"),
-                                Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
+                        let db_c = db_for_ctx.clone();
+                        dlg_ctx.ask_input("设置分类快捷键", &prompt, "", move |input| {
+                            if let Some(input) = input {
+                                let val = input.trim().to_string();
+                                let new_key = if val.is_empty() { None } else { Some(val.as_str()) };
+                                match db_c.set_classification_shortcut(cid, new_key) {
+                                    Ok(_) => show_info_dialog("完成", "快捷键已保存，重启应用后生效"),
+                                    Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
+                                }
                             }
-                        }
+                        });
                     }
                     ("classification-item", "set-default") => {
                         let cid = *right_class_id.lock().unwrap();
@@ -2695,13 +2747,17 @@ impl App {
                     ("item", "rename") => {
                         let item_id = *right_item_id.lock().unwrap();
                         drop(w);
-                        if let Some(new_name) = show_input_dialog("重命名项目", "请输入新名称") {
-                            let _ = db_for_ctx.rename_item(item_id, &new_name);
-                            let items = db_for_ctx.list_items(class_id);
-                            if let Some(w) = window_for_ctx.upgrade() {
-                                w.set_items(to_item_model(&items, 0));
+                        let db_c = db_for_ctx.clone();
+                        let win_c = window_for_ctx.clone();
+                        dlg_ctx.ask_input("重命名项目", "请输入新名称", "", move |new_name| {
+                            if let Some(new_name) = new_name {
+                                let _ = db_c.rename_item(item_id, &new_name);
+                                let items = db_c.list_items(class_id);
+                                if let Some(w) = win_c.upgrade() {
+                                    w.set_items(to_item_model(&items, 0));
+                                }
                             }
-                        }
+                        });
                     }
                     ("item", "edit") => {
                         let item_id = *right_item_id.lock().unwrap();
@@ -2783,14 +2839,17 @@ impl App {
                             "当前快捷键：{}\n\n请输入快捷键（如 Ctrl+Alt+A），留空则清除\n修饰键: Ctrl / Alt / Shift / Win\n按键: A-Z / 0-9 / F1-F12 / Space / Enter 等",
                             cur_label
                         );
-                        if let Some(input) = show_input_dialog("设置项目快捷键", &prompt) {
-                            let val = input.trim().to_string();
-                            let new_key = if val.is_empty() { None } else { Some(val.as_str()) };
-                            match db_for_ctx.set_item_shortcut(item_id, new_key) {
-                                Ok(_) => show_info_dialog("完成", "快捷键已保存，重启应用后生效"),
-                                Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
+                        let db_c = db_for_ctx.clone();
+                        dlg_ctx.ask_input("设置项目快捷键", &prompt, "", move |input| {
+                            if let Some(input) = input {
+                                let val = input.trim().to_string();
+                                let new_key = if val.is_empty() { None } else { Some(val.as_str()) };
+                                match db_c.set_item_shortcut(item_id, new_key) {
+                                    Ok(_) => show_info_dialog("完成", "快捷键已保存，重启应用后生效"),
+                                    Err(e) => show_error_dialog("设置失败", &format!("{}", e)),
+                                }
                             }
-                        }
+                        });
                     }
                     ("item", "move-to") | ("item", "copy-to") => {
                         let item_id = *right_item_id.lock().unwrap();
@@ -2804,27 +2863,31 @@ impl App {
                             class_names.join("\n")
                         );
                         drop(w);
-                        if let Some(input) = show_input_dialog("选择目标分类", &prompt) {
-                            if let Ok(target_id) = input.trim().parse::<i64>() {
-                                let is_move = action_str == "move-to";
-                                let result = if is_move {
-                                    db_for_ctx.batch_move_items(&[item_id], target_id)
-                                } else {
-                                    db_for_ctx.batch_copy_items(&[item_id], target_id)
-                                };
-                                match result {
-                                    Ok(_) => {
-                                        let items = db_for_ctx.list_items(class_id);
-                                        if let Some(w) = window_for_ctx.upgrade() {
-                                            w.set_items(to_item_model(&items, 0));
+                        let db_c = db_for_ctx.clone();
+                        let win_c = window_for_ctx.clone();
+                        let is_move = action_str == "move-to";
+                        dlg_ctx.ask_input("选择目标分类", &prompt, "", move |input| {
+                            if let Some(input) = input {
+                                if let Ok(target_id) = input.trim().parse::<i64>() {
+                                    let result = if is_move {
+                                        db_c.batch_move_items(&[item_id], target_id)
+                                    } else {
+                                        db_c.batch_copy_items(&[item_id], target_id)
+                                    };
+                                    match result {
+                                        Ok(_) => {
+                                            let items = db_c.list_items(class_id);
+                                            if let Some(w) = win_c.upgrade() {
+                                                w.set_items(to_item_model(&items, 0));
+                                            }
+                                            let op = if is_move { "移动" } else { "复制" };
+                                            show_info_dialog("完成", &format!("{} 成功", op));
                                         }
-                                        let op = if is_move { "移动" } else { "复制" };
-                                        show_info_dialog("完成", &format!("{} 成功", op));
+                                        Err(e) => show_error_dialog("错误", &format!("操作失败: {}", e)),
                                     }
-                                    Err(e) => show_error_dialog("错误", &format!("操作失败: {}", e)),
                                 }
                             }
-                        }
+                        });
                     }
                     ("item", "refresh-icon") => {
                         let item_id = *right_item_id.lock().unwrap();
@@ -3018,26 +3081,32 @@ impl App {
                             class_names.join("\n")
                         );
                         drop(w);
-                        if let Some(input) = show_input_dialog("选择目标分类", &prompt) {
-                            if let Ok(target_id) = input.trim().parse::<i64>() {
-                                let result = if action_str == "batch-move" {
-                                    db_for_ctx.batch_move_items(&selected_ids, target_id)
-                                } else {
-                                    db_for_ctx.batch_copy_items(&selected_ids, target_id)
-                                };
-                                match result {
-                                    Ok(_) => {
-                                        let items = db_for_ctx.list_items(class_id);
-                                        if let Some(w) = window_for_ctx.upgrade() {
-                                            w.set_items(to_item_model(&items, 0));
-                                            w.set_batch_mode(false);
+                        let db_c = db_for_ctx.clone();
+                        let win_c = window_for_ctx.clone();
+                        let is_move = action_str == "batch-move";
+                        let action_label = action_str.clone();
+                        dlg_ctx.ask_input("选择目标分类", &prompt, "", move |input| {
+                            if let Some(input) = input {
+                                if let Ok(target_id) = input.trim().parse::<i64>() {
+                                    let result = if is_move {
+                                        db_c.batch_move_items(&selected_ids, target_id)
+                                    } else {
+                                        db_c.batch_copy_items(&selected_ids, target_id)
+                                    };
+                                    match result {
+                                        Ok(_) => {
+                                            let items = db_c.list_items(class_id);
+                                            if let Some(w) = win_c.upgrade() {
+                                                w.set_items(to_item_model(&items, 0));
+                                                w.set_batch_mode(false);
+                                            }
+                                            show_info_dialog("完成", &format!("{} 操作成功", action_label));
                                         }
-                                        show_info_dialog("完成", &format!("{} 操作成功", action_str));
+                                        Err(e) => show_error_dialog("错误", &format!("操作失败: {}", e)),
                                     }
-                                    Err(e) => show_error_dialog("错误", &format!("操作失败: {}", e)),
                                 }
                             }
-                        }
+                        });
                     }
                     ("batch", "batch-cancel") => {
                         if let Some(w) = window_for_ctx.upgrade() {
@@ -5472,16 +5541,18 @@ impl DialogController {
         action.window().hide().ok();
 
         // --- InputDialog ---
-        let pending_input = Rc::new(std::cell::RefCell::new(None));
+        let pending_input: Rc<std::cell::RefCell<Option<Box<dyn FnOnce(Option<String>)>>>> =
+            Rc::new(std::cell::RefCell::new(None));
         {
             let p = pending_input.clone();
             let dlg = input.as_weak();
             input.on_accepted(move |text| {
-                if let Some(cb) = p.borrow_mut().take() {
-                    cb(Some(text.to_string()));
-                }
                 if let Some(d) = dlg.upgrade() {
                     d.window().hide().ok();
+                }
+                let taken = p.borrow_mut().take();
+                if let Some(cb) = taken {
+                    cb(Some(text.to_string()));
                 }
             });
         }
@@ -5489,26 +5560,29 @@ impl DialogController {
             let p = pending_input.clone();
             let dlg = input.as_weak();
             input.on_cancelled(move || {
-                if let Some(cb) = p.borrow_mut().take() {
-                    cb(None);
-                }
                 if let Some(d) = dlg.upgrade() {
                     d.window().hide().ok();
+                }
+                let taken = p.borrow_mut().take();
+                if let Some(cb) = taken {
+                    cb(None);
                 }
             });
         }
 
         // --- MultilineInputDialog ---
-        let pending_multiline = Rc::new(std::cell::RefCell::new(None));
+        let pending_multiline: Rc<std::cell::RefCell<Option<Box<dyn FnOnce(Option<String>)>>>> =
+            Rc::new(std::cell::RefCell::new(None));
         {
             let p = pending_multiline.clone();
             let dlg = multiline.as_weak();
             multiline.on_accepted(move |text| {
-                if let Some(cb) = p.borrow_mut().take() {
-                    cb(Some(text.to_string()));
-                }
                 if let Some(d) = dlg.upgrade() {
                     d.window().hide().ok();
+                }
+                let taken = p.borrow_mut().take();
+                if let Some(cb) = taken {
+                    cb(Some(text.to_string()));
                 }
             });
         }
@@ -5516,26 +5590,29 @@ impl DialogController {
             let p = pending_multiline.clone();
             let dlg = multiline.as_weak();
             multiline.on_cancelled(move || {
-                if let Some(cb) = p.borrow_mut().take() {
-                    cb(None);
-                }
                 if let Some(d) = dlg.upgrade() {
                     d.window().hide().ok();
+                }
+                let taken = p.borrow_mut().take();
+                if let Some(cb) = taken {
+                    cb(None);
                 }
             });
         }
 
         // --- ActionDialog ---
-        let pending_action = Rc::new(std::cell::RefCell::new(None));
+        let pending_action: Rc<std::cell::RefCell<Option<Box<dyn FnOnce(Option<String>)>>>> =
+            Rc::new(std::cell::RefCell::new(None));
         {
             let p = pending_action.clone();
             let dlg = action.as_weak();
             action.on_selected(move |act| {
-                if let Some(cb) = p.borrow_mut().take() {
-                    cb(Some(act.to_string()));
-                }
                 if let Some(d) = dlg.upgrade() {
                     d.window().hide().ok();
+                }
+                let taken = p.borrow_mut().take();
+                if let Some(cb) = taken {
+                    cb(Some(act.to_string()));
                 }
             });
         }
@@ -5543,11 +5620,12 @@ impl DialogController {
             let p = pending_action.clone();
             let dlg = action.as_weak();
             action.on_cancelled(move || {
-                if let Some(cb) = p.borrow_mut().take() {
-                    cb(None);
-                }
                 if let Some(d) = dlg.upgrade() {
                     d.window().hide().ok();
+                }
+                let taken = p.borrow_mut().take();
+                if let Some(cb) = taken {
+                    cb(None);
                 }
             });
         }
@@ -5576,7 +5654,6 @@ impl DialogController {
         self.input.set_input_text(SharedString::from(default));
         *self.pending_input.borrow_mut() = Some(Box::new(cb));
         self.input.window().show().ok();
-        self.input.window().raise().ok();
     }
 
     /// 显示多行输入对话框
@@ -5591,7 +5668,6 @@ impl DialogController {
         self.multiline.set_input_text(SharedString::from(""));
         *self.pending_multiline.borrow_mut() = Some(Box::new(cb));
         self.multiline.window().show().ok();
-        self.multiline.window().raise().ok();
     }
 
     /// 显示动作选择对话框
@@ -5610,7 +5686,6 @@ impl DialogController {
         self.action.set_actions(ModelRc::from(Rc::new(model)));
         *self.pending_action.borrow_mut() = Some(Box::new(cb));
         self.action.window().show().ok();
-        self.action.window().raise().ok();
     }
 
     /// 同步主题模式到三个对话框窗口
@@ -5638,196 +5713,6 @@ impl DialogController {
 
 #[cfg(not(target_os = "windows"))]
 fn show_info_dialog(_title: &str, _message: &str) {}
-
-/// 显示输入对话框 (Windows 上通过 PowerShell + WinForms 实现，控制窗口大小)
-/// 返回 Some(输入内容) 表示用户确认，None 表示取消
-#[cfg(target_os = "windows")]
-fn show_input_dialog(title: &str, prompt: &str) -> Option<String> {
-    // 使用 WinForms 创建固定大小的输入框，避免默认 InputBox 过宽
-    // 重点：去掉 -NonInteractive（它会阻止 WinForms 正常显示），且不用 CREATE_NO_WINDOW
-    let script = format!(
-        r#"
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-$form = New-Object System.Windows.Forms.Form
-$form.Text = '{}'
-$form.Size = New-Object System.Drawing.Size(460, 240)
-$form.StartPosition = 'CenterScreen'
-$form.FormBorderStyle = 'FixedDialog'
-$form.MaximizeBox = $false
-$form.MinimizeBox = $false
-$form.BackColor = '#ffffff'
-$form.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
-$form.TopMost = $true
-
-$label = New-Object System.Windows.Forms.Label
-$label.Text = '{}'
-$label.Location = New-Object System.Drawing.Point(20, 20)
-$label.Size = New-Object System.Drawing.Size(400, 25)
-$form.Controls.Add($label)
-
-$textbox = New-Object System.Windows.Forms.TextBox
-$textbox.Location = New-Object System.Drawing.Point(20, 52)
-$textbox.Size = New-Object System.Drawing.Size(400, 25)
-$textbox.Focus() | Out-Null
-$form.Controls.Add($textbox)
-
-$okBtn = New-Object System.Windows.Forms.Button
-$okBtn.Text = '确定'
-$okBtn.Location = New-Object System.Drawing.Point(230, 110)
-$okBtn.Size = New-Object System.Drawing.Size(80, 32)
-$okBtn.DialogResult = [System.Windows.Forms.DialogResult]::OK
-$form.AcceptButton = $okBtn
-$form.Controls.Add($okBtn)
-
-$cancelBtn = New-Object System.Windows.Forms.Button
-$cancelBtn.Text = '取消'
-$cancelBtn.Location = New-Object System.Drawing.Point(320, 110)
-$cancelBtn.Size = New-Object System.Drawing.Size(80, 32)
-$cancelBtn.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-$form.CancelButton = $cancelBtn
-$form.Controls.Add($cancelBtn)
-
-$form.Load += {{ $form.Activate(); $textbox.Select(); }}
-$result = $form.ShowDialog()
-if ($result -eq [System.Windows.Forms.DialogResult]::OK) {{ Write-Output $textbox.Text }} else {{ Write-Output '' }}
-"#,
-        title.replace('\'', "''"),
-        prompt.replace('\'', "''")
-    );
-    let output = crate::native::run_dialog("powershell", &["-NoProfile", "-Command", &script])?;
-    let stdout = String::from_utf8_lossy(&output).trim().to_string();
-    if stdout.is_empty() {
-        None
-    } else {
-        Some(stdout)
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn show_input_dialog(_title: &str, _prompt: &str) -> Option<String> {
-    None
-}
-
-/// 多行文本输入对话框（每行一个子项，用 | 或 ; 分隔 target 与 params）
-#[cfg(target_os = "windows")]
-fn show_multiline_input_dialog(title: &str, prompt: &str) -> Option<String> {
-    let script = format!(
-        r#"
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-$form = New-Object System.Windows.Forms.Form
-$form.Text = '{}'
-$form.Size = New-Object System.Drawing.Size(600, 520)
-$form.StartPosition = 'CenterScreen'
-$form.FormBorderStyle = 'FixedDialog'
-$form.MaximizeBox = $false
-$form.MinimizeBox = $false
-$form.BackColor = '#ffffff'
-$form.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
-$form.TopMost = $true
-
-$label = New-Object System.Windows.Forms.Label
-$label.Text = '{}'
-$label.Location = New-Object System.Drawing.Point(20, 12)
-$label.Size = New-Object System.Drawing.Size(555, 92)
-$form.Controls.Add($label)
-
-$tb = New-Object System.Windows.Forms.TextBox
-$tb.Location = New-Object System.Drawing.Point(20, 108)
-$tb.Size = New-Object System.Drawing.Size(555, 340)
-$tb.Multiline = $true
-$tb.ScrollBars = 'Vertical'
-$tb.AcceptsReturn = $true
-$tb.AcceptsTab = $false
-$tb.WordWrap = $false
-$tb.Font = New-Object System.Drawing.Font('Consolas', 10)
-$form.Controls.Add($tb)
-
-$okBtn = New-Object System.Windows.Forms.Button
-$okBtn.Text = '确定'
-$okBtn.Location = New-Object System.Drawing.Point(380, 458)
-$okBtn.Size = New-Object System.Drawing.Size(90, 32)
-$okBtn.DialogResult = [System.Windows.Forms.DialogResult]::OK
-$form.AcceptButton = $okBtn
-$form.Controls.Add($okBtn)
-
-$cancelBtn = New-Object System.Windows.Forms.Button
-$cancelBtn.Text = '取消'
-$cancelBtn.Location = New-Object System.Drawing.Point(485, 458)
-$cancelBtn.Size = New-Object System.Drawing.Size(90, 32)
-$cancelBtn.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-$form.CancelButton = $cancelBtn
-$form.Controls.Add($cancelBtn)
-
-$form.Load += {{ $form.Activate(); $tb.Select(); }}
-$result = $form.ShowDialog()
-if ($result -eq [System.Windows.Forms.DialogResult]::OK) {{ Write-Output $tb.Text }} else {{ Write-Output '' }}
-"#,
-        title.replace('\'', "''"),
-        prompt.replace('\'', "''")
-    );
-    let output = crate::native::run_dialog("powershell", &["-NoProfile", "-Command", &script])?;
-    let stdout = String::from_utf8_lossy(&output).trim_end().to_string();
-    if stdout.trim().is_empty() { None } else { Some(stdout) }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn show_multiline_input_dialog(_title: &str, _prompt: &str) -> Option<String> {
-    None
-}
-
-/// 显示动作选择对话框，返回用户选择的动作名称
-/// 返回 None 表示取消
-#[cfg(target_os = "windows")]
-fn show_action_dialog(title: &str, actions: &[&str]) -> Option<String> {
-    if actions.is_empty() {
-        return None;
-    }
-    if actions.len() == 1 {
-        return Some(actions[0].to_string());
-    }
-
-    // 构建 PowerShell 菜单
-    let menu_items: Vec<String> = actions
-        .iter()
-        .enumerate()
-        .map(|(i, a)| format!("{} - {}", i + 1, a))
-        .collect();
-    let menu_text = menu_items.join("\n");
-    let script = format!(
-        r#"
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
-Add-Type -AssemblyName Microsoft.VisualBasic
-$msg = '请选择操作编号：' + [Environment]::NewLine + '{}'
-$result = [Microsoft.VisualBasic.Interaction]::InputBox($msg, '{}', '1')
-Write-Output $result
-"#,
-        menu_text.replace('\'', "''"),
-        title.replace('\'', "''")
-    );
-    let output = crate::native::run_dialog("powershell", &["-NoProfile", "-Command", &script])?;
-    let stdout = String::from_utf8_lossy(&output).trim().to_string();
-    if stdout.is_empty() {
-        return None;
-    }
-    let idx: usize = stdout.parse().ok()?;
-    if idx >= 1 && idx <= actions.len() {
-        Some(actions[idx - 1].to_string())
-    } else {
-        None
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn show_action_dialog(_title: &str, _actions: &[&str]) -> Option<String> {
-    None
-}
 
 /// 隐藏窗口执行命令的统一入口在 native 模块
 /// (避免重复实现，统一使用 CREATE_NO_WINDOW 标志)

@@ -3,7 +3,6 @@
 // - MultilineInputDialog: 多行文本输入
 // - ActionDialog: 动作选择（按钮列表）
 
-import { LineEdit, TextEdit } from "std-widgets.slint";
 import { ThemeSettings } from "../theme.slint";
 
 // 对话框按钮
@@ -42,14 +41,13 @@ component dialog-btn inherits Rectangle {
 
 // 单行输入对话框
 export component InputDialog inherits Window {
-    title: "输入";
+    title: root.dlg-title;
     background: ThemeSettings.bg-color(root.theme-mode);
     default-font-family: ThemeSettings.font-family;
     preferred-width: 440px;
     preferred-height: 200px;
     min-width: 360px;
     min-height: 180px;
-    no-frame: false;
 
     in property <string> theme-mode: "light";
     in property <string> dlg-title: "输入";
@@ -62,7 +60,7 @@ export component InputDialog inherits Window {
 
     VerticalLayout {
         padding: 18px;
-        spacing: 14px;
+        spacing: 12px;
 
         Text {
             text: root.prompt;
@@ -71,16 +69,28 @@ export component InputDialog inherits Window {
             wrap: word-wrap;
         }
 
-        input := LineEdit {
-            text: root.input-text;
-            font-size: ThemeSettings.font-size-normal;
-            color: ThemeSettings.text-c(root.theme-mode);
-            placeholder-text: "";
-            edited => { root.input-text = self.text; }
-            accepted => { root.accepted(root.input-text); }
+        Rectangle {
+            height: 34px;
+            border-radius: 6px;
+            background: ThemeSettings.card-bg(root.theme-mode);
+            border-width: 1px;
+            border-color: ThemeSettings.border-c(root.theme-mode);
+
+            input := TextInput {
+                x: 10px;
+                width: parent.width - 20px;
+                height: parent.height;
+                single-line: true;
+                text: root.input-text;
+                font-size: ThemeSettings.font-size-normal;
+                color: ThemeSettings.text-c(root.theme-mode);
+                vertical-alignment: center;
+                edited => { root.input-text = self.text; }
+                accepted => { root.accepted(root.input-text); }
+            }
         }
 
-        Rectangle { height: 1px; }
+        Rectangle { vertical-stretch: 1; }
 
         HorizontalLayout {
             spacing: 10px;
@@ -99,18 +109,19 @@ export component InputDialog inherits Window {
             }
         }
     }
+
+    init => { input.focus(); }
 }
 
 // 多行输入对话框
 export component MultilineInputDialog inherits Window {
-    title: "输入";
+    title: root.dlg-title;
     background: ThemeSettings.bg-color(root.theme-mode);
     default-font-family: ThemeSettings.font-family;
     preferred-width: 580px;
     preferred-height: 500px;
     min-width: 400px;
     min-height: 360px;
-    no-frame: false;
 
     in property <string> theme-mode: "light";
     in property <string> dlg-title: "输入";
@@ -131,18 +142,26 @@ export component MultilineInputDialog inherits Window {
             wrap: word-wrap;
         }
 
-        input := TextEdit {
+        Rectangle {
             vertical-stretch: 1;
-            horizontal-stretch: 1;
-            text: root.input-text;
-            font-size: 13px;
-            font-family: "Consolas, monospace";
-            color: ThemeSettings.text-c(root.theme-mode);
-            background: ThemeSettings.card-bg(root.theme-mode);
             border-radius: 6px;
+            background: ThemeSettings.card-bg(root.theme-mode);
             border-width: 1px;
             border-color: ThemeSettings.border-c(root.theme-mode);
-            edited => { root.input-text = self.text; }
+
+            input := TextInput {
+                x: 8px;
+                y: 6px;
+                width: parent.width - 16px;
+                height: parent.height - 12px;
+                single-line: false;
+                wrap: no-wrap;
+                text: root.input-text;
+                font-size: 13px;
+                font-family: "Consolas, monospace";
+                color: ThemeSettings.text-c(root.theme-mode);
+                edited => { root.input-text = self.text; }
+            }
         }
 
         HorizontalLayout {
@@ -162,17 +181,18 @@ export component MultilineInputDialog inherits Window {
             }
         }
     }
+
+    init => { input.focus(); }
 }
 
 // 动作选择对话框（按钮列表）
 export component ActionDialog inherits Window {
-    title: "选择";
+    title: root.dlg-title;
     background: ThemeSettings.bg-color(root.theme-mode);
     default-font-family: ThemeSettings.font-family;
     preferred-width: 360px;
     preferred-height: 280px;
     min-width: 280px;
-    no-frame: false;
 
     in property <string> theme-mode: "light";
     in property <string> dlg-title: "选择操作";
@@ -190,37 +210,33 @@ export component ActionDialog inherits Window {
             text: root.prompt;
             font-size: ThemeSettings.font-size-small;
             color: ThemeSettings.text-sec(root.theme-mode);
+            wrap: word-wrap;
         }
 
-        ScrollView {
+        VerticalLayout {
             vertical-stretch: 1;
-            horizontal-stretch: 1;
+            spacing: 8px;
 
-            VerticalLayout {
-                spacing: 8px;
-                padding: 4px;
+            for action in root.actions : Rectangle {
+                height: 40px;
+                horizontal-stretch: 1;
+                border-radius: 6px;
+                background: action-hover.has-hover ? ThemeSettings.hover-c(root.theme-mode) : ThemeSettings.card-bg(root.theme-mode);
+                border-width: 1px;
+                border-color: ThemeSettings.border-c(root.theme-mode);
 
-                for action in root.actions : Rectangle {
-                    height: 40px;
-                    horizontal-stretch: 1;
-                    border-radius: 6px;
-                    background: action-hover.has-hover ? ThemeSettings.hover-c(root.theme-mode) : ThemeSettings.card-bg(root.theme-mode);
-                    border-width: 1px;
-                    border-color: ThemeSettings.border-c(root.theme-mode);
+                Text {
+                    text: action;
+                    font-size: ThemeSettings.font-size-normal;
+                    color: ThemeSettings.text-c(root.theme-mode);
+                    vertical-alignment: center;
+                    x: 14px;
+                }
 
-                    Text {
-                        text: action;
-                        font-size: ThemeSettings.font-size-normal;
-                        color: ThemeSettings.text-c(root.theme-mode);
-                        vertical-alignment: center;
-                        padding-left: 14px;
-                    }
-
-                    action-hover := TouchArea {
-                        width: 100%;
-                        height: 100%;
-                        clicked => { root.selected(action); }
-                    }
+                action-hover := TouchArea {
+                    width: 100%;
+                    height: 100%;
+                    clicked => { root.selected(action); }
                 }
             }
         }

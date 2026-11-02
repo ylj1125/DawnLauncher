@@ -535,18 +535,18 @@ pub fn is_fullscreen() -> bool {
 /// 将当前线程的键盘布局切换为英文（美式 0409），关闭 IME 中文输入状态
 /// 用于快速搜索窗口打开时，保证用户可以直接输入英文字符
 pub fn switch_english() {
-    use windows::Win32::UI::WindowsAndMessaging::{LoadKeyboardLayoutW, KLF_ACTIVATE};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{LoadKeyboardLayoutW, KLF_ACTIVATE};
     // 00000409 = 美式英语键盘布局
     let klid = HSTRING::from("00000409");
     unsafe {
-        LoadKeyboardLayoutW(PCWSTR(klid.as_ptr()), KLF_ACTIVATE);
+        LoadKeyboardLayoutW(PCWSTR(klid.as_ptr()), KLF_ACTIVATE).ok();
     }
     // 向前台窗口发送 IMC_SETOPENSTATUS(FALSE)，关闭输入法
     unsafe {
         use windows::Win32::UI::WindowsAndMessaging::{
             GetForegroundWindow, SendMessageW, WM_IME_CONTROL,
         };
-        use windows::Win32::Foundation::LPARAM;
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
         const IMC_SETOPENSTATUS: u32 = 0x0028;
         let hwnd = GetForegroundWindow();
         if hwnd.0 != 0 {
