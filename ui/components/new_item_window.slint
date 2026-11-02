@@ -451,7 +451,7 @@ export component NewItemWindow inherits Window {
                                 color: ThemeSettings.text-c(root.theme-mode);
                             }
                             Rectangle {
-                                height: 76px;
+                                height: 44px;
                                 border-radius: 6px;
                                 background: ThemeSettings.card-bg(root.theme-mode);
                                 border-width: 1px;
@@ -514,7 +514,7 @@ export component NewItemWindow inherits Window {
                             font-size: ThemeSettings.font-size-normal;
                         }
 
-                        Rectangle { height: 4px; }
+                        Rectangle { height: 16px; }
                     }
                 }
 
@@ -608,8 +608,17 @@ export component NewItemWindow inherits Window {
                                 border-radius: 6px;
                                 background: pick-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
 
+                                // 交互层放在下面，避免遮挡 CheckBox 的点击
+                                pick-touch := TouchArea {
+                                    width: 100%; height: 100%;
+                                    clicked => { root.pick-toggled(i); }
+                                }
+
                                 HorizontalLayout {
-                                    padding-left: 8px;
+                                    x: 8px;
+                                    y: (parent.height - 24px) / 2;
+                                    width: parent.width - 16px;
+                                    height: 24px;
                                     spacing: 8px;
                                     alignment: start;
 
@@ -639,9 +648,6 @@ export component NewItemWindow inherits Window {
                                         vertical-alignment: center;
                                         horizontal-alignment: center;
                                     }
-                                }
-                                pick-touch := TouchArea {
-                                    width: 100%; height: 100%;
                                 }
                             }
                         }

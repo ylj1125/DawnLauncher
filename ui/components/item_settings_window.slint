@@ -23,6 +23,7 @@ component setting-row inherits Rectangle {
     Text {
         text: root.label;
         width: 96px;
+        height: 100%;
         font-size: ThemeSettings.font-size-normal;
         color: ThemeSettings.text-c(root.theme-mode);
         vertical-alignment: center;
@@ -38,6 +39,7 @@ component segment-btn inherits Rectangle {
     callback clicked;
 
     height: 30px;
+    width: max(60px, seg-label.preferred-width + 20px);
     border-radius: 4px;
     background: root.active
         ? ThemeSettings.accent-color
@@ -47,7 +49,7 @@ component segment-btn inherits Rectangle {
         ? ThemeSettings.accent-color
         : ThemeSettings.border-c(root.theme-mode);
 
-    Text {
+    seg-label := Text {
         text: root.label;
         font-size: ThemeSettings.font-size-small;
         color: root.active ? #ffffff : ThemeSettings.text-c(root.theme-mode);
@@ -72,7 +74,7 @@ component size-btn inherits Rectangle {
 
     callback clicked;
 
-    width: 52px;
+    width: max(48px, size-label.preferred-width + 18px);
     height: 30px;
     border-radius: 4px;
     background: root.active
@@ -83,7 +85,7 @@ component size-btn inherits Rectangle {
         ? ThemeSettings.accent-color
         : ThemeSettings.border-c(root.theme-mode);
 
-    Text {
+    size-label := Text {
         text: root.label;
         font-size: ThemeSettings.font-size-small;
         color: root.active ? #ffffff : ThemeSettings.text-c(root.theme-mode);
@@ -211,7 +213,7 @@ export component ItemSettingsWindow inherits Window {
                 }
                 Rectangle {
                     height: 24px;
-                    width: max(90px, class-text.preferred-width + 20px);
+                    width: 104px;
                     border-radius: 4px;
                     background: ThemeSettings.card-bg(root.theme-mode);
                     border-width: 1px;
@@ -223,9 +225,10 @@ export component ItemSettingsWindow inherits Window {
                         color: ThemeSettings.text-sec(root.theme-mode);
                         horizontal-alignment: center;
                         vertical-alignment: center;
-                        x: 0px;
+                        overflow: elide;
+                        x: 8px;
                         y: 0px;
-                        width: 100%;
+                        width: parent.width - 16px;
                         height: 100%;
                     }
                 }

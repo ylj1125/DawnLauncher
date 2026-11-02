@@ -3296,21 +3296,26 @@ impl App {
                             let all = catalog_type.lock().unwrap().clone();
                             let cat = w.get_system_category().to_string();
                             rebuild_catalog(&w, &all, "", &cat, "");
-                            // 后台批量提取图标
+                            // 后台批量提取图标（先把目标解析为真实路径）
                             let all2 = catalog_type.clone();
                             let weak_icons = ni_weak_type.clone();
                             let search_icons = search_type.clone();
                             std::thread::spawn(move || {
-                                let targets: Vec<String> = all2
+                                let pairs: Vec<(usize, String)> = all2
                                     .lock()
                                     .unwrap()
                                     .iter()
-                                    .map(|c| c.target.clone())
+                                    .enumerate()
+                                    .filter_map(|(i, c)| {
+                                        system_icon_path(&c.target).map(|p| (i, p))
+                                    })
                                     .collect();
-                                let icons = native::get_icons_batch(&targets);
+                                let paths: Vec<String> =
+                                    pairs.iter().map(|(_, p)| p.clone()).collect();
+                                let icons = native::get_icons_batch(&paths);
                                 {
                                     let mut list = all2.lock().unwrap();
-                                    for (i, ic) in icons.into_iter().enumerate() {
+                                    for ((i, _), ic) in pairs.into_iter().zip(icons.into_iter()) {
                                         if let Some(slot) = list.get_mut(i) {
                                             slot.icon = ic;
                                         }
@@ -4856,6 +4861,38 @@ fn system_catalog() -> Vec<CatalogRaw> {
             category: c.to_string(),
         })
         .collect()
+}
+
+/// 把系统项目目标解析为可用于提取图标的真实路径
+fn system_icon_path(target: &str) -> Option<String> {
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+    let sys32 = format!("{root}\\System32");
+    if target.starts_with("ms-settings:") {
+        return Some(format!("{sys32}\\SystemSettings.exe"));
+    }
+    if let Some(folder) = target.strip_prefix("shell:") {
+        let user = std::env::var("USERPROFILE").unwrap_or_default();
+        let p = match folder {
+            "DownloadsFolder" => format!("{user}\\Downloads"),
+            "Personal" => format!("{user}\\Documents"),
+            "MyPictures" => format!("{user}\\Pictures"),
+            "MyMusic" => format!("{user}\\Music"),
+            "MyVideo" => format!("{user}\\Videos"),
+            _ => format!("{root}\\explorer.exe"),
+        };
+        return Some(p);
+    }
+    let direct = format!("{sys32}\\{target}");
+    if std::path::Path::new(&direct).exists() {
+        return Some(direct);
+    }
+    for ext in [".exe", ".msc", ".cpl"] {
+        let p = format!("{direct}{ext}");
+        if std::path::Path::new(&p).exists() {
+            return Some(p);
+        }
+    }
+    None
 }
 
 /// 按分类与关键字过滤目录并写回窗口
