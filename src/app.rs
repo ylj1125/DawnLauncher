@@ -437,12 +437,22 @@ impl App {
         // 记录当前右键的项目 id（供菜单项选中时使用）
         let right_clicked_item_id = Arc::new(Mutex::new(0i64));
         let right_clicked_item_id_for_menu = right_clicked_item_id.clone();
+        let db_for_item_menu = db.clone();
         main_window.on_item_right_clicked(move |item_id| {
             *right_clicked_item_id_for_menu.lock().unwrap() = item_id as i64;
             // 右键菜单位置: Slint 1.5 的 item-right-clicked 不传坐标，
             // 用内容区近似位置（后续可通过扩展回调传坐标）
             if let Some(w) = _window_for_item_menu.upgrade() {
-                show_item_context_menu(&w, 300, 200);
+                // 多项目只提供「转到来源分类 / 复制名称」，普通项目菜单不适用
+                let is_multi = db_for_item_menu
+                    .get_item(item_id as i64)
+                    .map(|i| i.kind == 5)
+                    .unwrap_or(false);
+                if is_multi {
+                    show_multi_item_context_menu(&w, 300, 200);
+                } else {
+                    show_item_context_menu(&w, 300, 200);
+                }
             }
         });
 
@@ -2793,6 +2803,60 @@ impl App {
                                 let _ = copy_to_clipboard(&item.name);
                                 show_info_dialog("已复制", "名称已复制到剪贴板");
                             }
+                        }
+                    }
+                    ("item", "goto-source") => {
+                        // 多项目: 依据第一个子项找到其来源分类并跳转
+                        let item_id = *right_item_id.lock().unwrap();
+                        let first_child = db_for_ctx.get_item(item_id).and_then(|it| {
+                            it.data
+                                .multi_items
+                                .iter()
+                                .find(|m| !m.target.trim().is_empty())
+                                .map(|m| (m.target.clone(), m.params.clone()))
+                        });
+                        let source_class = first_child.and_then(|(target, params)| {
+                            db_for_ctx
+                                .list_all_classifications()
+                                .into_iter()
+                                .find_map(|c| {
+                                    db_for_ctx
+                                        .list_items(c.id)
+                                        .into_iter()
+                                        .find(|it| {
+                                            it.kind != 5
+                                                && it.data.target.as_deref() == Some(target.as_str())
+                                                && params.as_deref().unwrap_or("")
+                                                    == it.data.params.as_deref().unwrap_or("")
+                                        })
+                                        .map(|_| c.id)
+                                })
+                        });
+                        match source_class {
+                            Some(cid) => {
+                                let classes = db_for_ctx.list_all_classifications();
+                                let items = load_class_items(&db_for_ctx, cid);
+                                *current_id_for_ctx.lock().unwrap() = cid;
+                                w.set_classifications(to_classification_model(
+                                    &classes,
+                                    cid,
+                                    &expanded_for_ctx.lock().unwrap(),
+                                ));
+                                w.set_search_text(SharedString::from(""));
+                                w.set_items(to_item_model(&items, 0));
+                                w.set_status_text(SharedString::from(format!(
+                                    "共 {} 个分类，{} 个项目",
+                                    classes.len(),
+                                    items.len()
+                                )));
+                                if let Some(c) = db_for_ctx.get_classification(cid) {
+                                    apply_class_settings(&w, &c.data, &gil_for_ctx);
+                                }
+                            }
+                            None => show_info_dialog(
+                                "提示",
+                                "未找到该多项目的来源分类（子项可能是手动填写的路径）。",
+                            ),
                         }
                     }
                     ("item", "copy-remark") => {
@@ -5933,6 +5997,16 @@ fn show_item_context_menu(window: &MainWindow, x: i32, y: i32) {
         ("to-absolute", "转为绝对路径", "↻", false, false),
         ("", "", "", true, false),
         ("delete", "删除", "🗑", false, false),
+    ];
+    show_context_menu(window, "item", x, y, &items);
+}
+
+/// 显示多项目右键菜单
+/// 多项目不是具体文件，打开/定位/路径类操作无意义，只保留来源跳转与复制名称
+fn show_multi_item_context_menu(window: &MainWindow, x: i32, y: i32) {
+    let items = [
+        ("goto-source", "转到来源分类", "→", false, false),
+        ("copy-name", "复制名称", "⧉", false, false),
     ];
     show_context_menu(window, "item", x, y, &items);
 }
