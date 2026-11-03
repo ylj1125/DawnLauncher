@@ -118,14 +118,17 @@ component catalog-card inherits Rectangle {
     border-color: root.entry.selected ? ThemeSettings.accent-color : transparent;
 
     VerticalLayout {
+        width: 100%;
+        height: 100%;
         alignment: center;
         spacing: 4px;
 
         Image {
             source: root.entry.icon;
-            width: 32px;
-            height: 32px;
+            width: 36px;
+            height: 36px;
             image-fit: contain;
+            horizontal-alignment: center;
         }
         Text {
             text: root.entry.name;
@@ -133,8 +136,8 @@ component catalog-card inherits Rectangle {
             color: ThemeSettings.text-c(root.theme-mode);
             horizontal-alignment: center;
             overflow: elide;
-            width: 84px;
-            height: 30px;
+            width: parent.width - 8px;
+            height: 28px;
         }
     }
 
