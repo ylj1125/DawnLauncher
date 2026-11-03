@@ -11,7 +11,7 @@ import { ContextMenu, MenuItem } from "components/context_menu.slint";
 import { MultiPick as EditPick } from "components/new_item_window.slint";
 export { NewItemWindow, CatalogEntry, MultiPick, NewItemPayload } from "components/new_item_window.slint";
 export { ItemSettingsWindow, ItemSettingsPayload } from "components/item_settings_window.slint";
-export { InputDialog, MultilineInputDialog, ActionDialog } from "components/dialogs.slint";
+export { InputDialog, MultilineInputDialog, ActionDialog, PickListDialog } from "components/dialogs.slint";
 
 // 分类数据模型
 export struct ClassificationInfo {
@@ -1417,9 +1417,8 @@ export component ItemEditWindow inherits Window {
     callback cancel-requested();
     callback pick-icon-requested();
     callback refresh-icon-requested();
-    callback pick-toggled(int);
     callback add-child-requested();
-    callback remove-selected-requested();
+    callback remove-pick(int);
 
     VerticalLayout {
         // 标题栏
@@ -1496,65 +1495,118 @@ export component ItemEditWindow inherits Window {
                 theme-mode: root.theme-mode;
             }
 
-            // 多项目: 子项勾选列表
+            // 多项目: 子项列表（只显示已加入的子项，可拖动排序 / 移除 / 从库添加）
             if root.is-multi : VerticalLayout {
                 spacing: 8px;
 
                 Text {
-                    text: "子项列表（勾选要依次启动的项目；也可直接添加新路径）";
+                    text: "子项列表（拖动左侧手柄调整启动顺序，✕ 移除）";
                     font-size: ThemeSettings.font-size-normal;
                     font-weight: 600;
                     color: ThemeSettings.text-c(root.theme-mode);
                 }
 
-                ScrollView {
-                    height: 260px;
-                    VerticalLayout {
-                        spacing: 2px;
-                        for p[i] in root.picks : Rectangle {
-                            height: 38px;
-                            horizontal-stretch: 1;
-                            border-radius: 6px;
-                            background: pick-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                Rectangle {
+                    height: 280px;
+                    border-radius: 6px;
+                    background: ThemeSettings.card-bg(root.theme-mode);
+                    border-width: 1px;
+                    border-color: ThemeSettings.border-c(root.theme-mode);
 
-                            pick-touch := TouchArea {
-                                width: 100%; height: 100%;
-                                clicked => { root.pick-toggled(i); }
-                            }
+                    ScrollView {
+                        VerticalLayout {
+                            padding: 4px;
+                            spacing: 2px;
 
-                            HorizontalLayout {
-                                x: 8px;
-                                y: (parent.height - 24px) / 2;
-                                width: parent.width - 16px;
-                                height: 24px;
-                                spacing: 8px;
-                                alignment: start;
+                            for p[i] in root.picks : Rectangle {
+                                height: 38px;
+                                horizontal-stretch: 1;
+                                border-radius: 4px;
+                                background: transparent;
 
-                                Text {
-                                    text: "•";
-                                    width: 22px;
-                                    font-size: ThemeSettings.font-size-small;
-                                    color: ThemeSettings.text-sec(root.theme-mode);
-                                    vertical-alignment: center;
-                                    horizontal-alignment: center;
+                                HorizontalLayout {
+                                    x: 6px;
+                                    y: (parent.height - 24px) / 2;
+                                    width: parent.width - 12px;
+                                    height: 24px;
+                                    spacing: 6px;
+                                    alignment: start;
+
+                                    // 拖动手柄
+                                    Rectangle {
+                                        width: 20px;
+                                        height: 24px;
+                                        background: transparent;
+
+                                        VerticalLayout {
+                                            width: 100%;
+                                            height: 100%;
+                                            spacing: 2px;
+                                            alignment: center;
+                                            Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.55; }
+                                            Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.55; }
+                                            Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.55; }
+                                        }
+
+                                        DragArea {
+                                            width: 100%;
+                                            height: 100%;
+                                            allow-move: true;
+                                            data: DragHelper.make-pick(1, i);
+                                        }
+                                    }
+
+                                    Image {
+                                        source: p.icon;
+                                        width: 22px;
+                                        height: 22px;
+                                        image-fit: contain;
+                                    }
+                                    Text {
+                                        text: p.name;
+                                        font-size: ThemeSettings.font-size-normal;
+                                        color: ThemeSettings.text-c(root.theme-mode);
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
+                                    }
+
+                                    // 移除
+                                    Rectangle {
+                                        width: 24px;
+                                        height: 24px;
+                                        background: transparent;
+
+                                        Text {
+                                            text: "✕";
+                                            width: 100%;
+                                            height: 100%;
+                                            font-size: ThemeSettings.font-size-small;
+                                            color: ThemeSettings.text-sec(root.theme-mode);
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                        remove-touch := TouchArea {
+                                            width: 100%;
+                                            height: 100%;
+                                            clicked => { root.remove-pick(i); }
+                                        }
+                                    }
                                 }
-                                CheckBox {
-                                    checked: p.selected;
-                                    toggled => { root.pick-toggled(i); }
-                                }
-                                Image {
-                                    source: p.icon;
-                                    width: 22px;
-                                    height: 22px;
-                                    image-fit: contain;
-                                }
-                                Text {
-                                    text: p.name;
-                                    font-size: ThemeSettings.font-size-normal;
-                                    color: ThemeSettings.text-c(root.theme-mode);
-                                    vertical-alignment: center;
-                                    horizontal-stretch: 1;
-                                    overflow: elide;
+
+                                DropArea {
+                                    width: 100%;
+                                    height: 100%;
+                                    can-drop(event) => {
+                                        DragHelper.kind-of(event.data) == "pick"
+                                            ? DragAction.move : DragAction.none
+                                    }
+                                    dropped(event) => {
+                                        if (DragHelper.kind-of(event.data) == "pick") {
+                                            DragHelper.move-pick(1, DragHelper.id-of(event.data), i);
+                                        }
+                                        return DragAction.move;
+                                    }
                                 }
                             }
                         }
@@ -1566,14 +1618,9 @@ export component ItemEditWindow inherits Window {
                     alignment: start;
 
                     editor-btn {
-                        label: "添加路径...";
+                        label: "添加项目...";
                         theme-mode: root.theme-mode;
                         clicked => { root.add-child-requested(); }
-                    }
-                    editor-btn {
-                        label: "移除已选";
-                        theme-mode: root.theme-mode;
-                        clicked => { root.remove-selected-requested(); }
                     }
                 }
             }

@@ -3,6 +3,7 @@
 import { ScrollView, LineEdit, CheckBox } from "std-widgets.slint";
 import { ThemeSettings } from "../theme.slint";
 import { SettingSwitch } from "./setting_widgets.slint";
+import { DragHelper } from "./drag_helper.slint";
 
 // 目录条目（系统 / 开始菜单 / Appx 共用）
 export struct CatalogEntry {
@@ -246,7 +247,8 @@ export component NewItemWindow inherits Window {
     callback catalog-search-changed(string);
     callback system-category-changed(string);
     callback catalog-picked(int);
-    callback pick-toggled(int);
+    callback add-child-requested();
+    callback remove-pick(int);
     callback browse-requested();
     callback pick-icon-requested();
 
@@ -608,63 +610,139 @@ export component NewItemWindow inherits Window {
                     }
 
                     Text {
-                        text: "项目列表（勾选要依次启动的项目，可跨分类选择）";
+                        text: "子项列表（拖动左侧手柄调整启动顺序，✕ 移除）";
                         font-size: ThemeSettings.font-size-normal;
                         font-weight: 600;
                         color: ThemeSettings.text-c(root.theme-mode);
                     }
 
-                    ScrollView {
-                        VerticalLayout {
-                            spacing: 2px;
-                            for p[i] in root.picks : Rectangle {
-                                height: 38px;
-                                horizontal-stretch: 1;
-                                border-radius: 6px;
-                                background: pick-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                    Rectangle {
+                        vertical-stretch: 1;
+                        border-radius: 6px;
+                        background: ThemeSettings.card-bg(root.theme-mode);
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
 
-                                // 交互层放在下面，避免遮挡 CheckBox 的点击
-                                pick-touch := TouchArea {
-                                    width: 100%; height: 100%;
-                                    clicked => { root.pick-toggled(i); }
-                                }
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 4px;
+                                spacing: 2px;
+                                for p[i] in root.picks : Rectangle {
+                                    height: 38px;
+                                    horizontal-stretch: 1;
+                                    border-radius: 4px;
+                                    background: transparent;
 
-                                HorizontalLayout {
-                                    x: 8px;
-                                    y: (parent.height - 24px) / 2;
-                                    width: parent.width - 16px;
-                                    height: 24px;
-                                    spacing: 8px;
-                                    alignment: start;
+                                    HorizontalLayout {
+                                        x: 6px;
+                                        y: (parent.height - 24px) / 2;
+                                        width: parent.width - 12px;
+                                        height: 24px;
+                                        spacing: 6px;
+                                        alignment: start;
 
-                                    Text {
-                                        text: "•";
-                                        width: 22px;
-                                        font-size: ThemeSettings.font-size-small;
-                                        color: ThemeSettings.text-sec(root.theme-mode);
-                                        vertical-alignment: center;
-                                        horizontal-alignment: center;
+                                        // 拖动手柄
+                                        Rectangle {
+                                            width: 20px;
+                                            height: 24px;
+                                            background: transparent;
+
+                                            VerticalLayout {
+                                                width: 100%;
+                                                height: 100%;
+                                                spacing: 2px;
+                                                alignment: center;
+                                                Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.55; }
+                                                Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.55; }
+                                                Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.55; }
+                                            }
+
+                                            DragArea {
+                                                width: 100%;
+                                                height: 100%;
+                                                allow-move: true;
+                                                data: DragHelper.make-pick(0, i);
+                                            }
+                                        }
+
+                                        Image {
+                                            source: p.icon;
+                                            width: 22px;
+                                            height: 22px;
+                                            image-fit: contain;
+                                        }
+                                        Text {
+                                            text: p.name;
+                                            font-size: ThemeSettings.font-size-normal;
+                                            color: ThemeSettings.text-c(root.theme-mode);
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 1;
+                                            overflow: elide;
+                                        }
+
+                                        // 移除
+                                        Rectangle {
+                                            width: 24px;
+                                            height: 24px;
+                                            background: transparent;
+
+                                            Text {
+                                                text: "✕";
+                                                width: 100%;
+                                                height: 100%;
+                                                font-size: ThemeSettings.font-size-small;
+                                                color: ThemeSettings.text-sec(root.theme-mode);
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            remove-touch := TouchArea {
+                                                width: 100%;
+                                                height: 100%;
+                                                clicked => { root.remove-pick(i); }
+                                            }
+                                        }
                                     }
-                                    CheckBox {
-                                        checked: p.selected;
-                                        toggled => { root.pick-toggled(i); }
-                                    }
-                                    Image {
-                                        source: p.icon;
-                                        width: 22px;
-                                        height: 22px;
-                                        image-fit: contain;
-                                    }
-                                    Text {
-                                        text: p.name;
-                                        font-size: ThemeSettings.font-size-normal;
-                                        color: ThemeSettings.text-c(root.theme-mode);
-                                        vertical-alignment: center;
-                                        horizontal-stretch: 1;
-                                        overflow: elide;
+
+                                    DropArea {
+                                        width: 100%;
+                                        height: 100%;
+                                        can-drop(event) => {
+                                            DragHelper.kind-of(event.data) == "pick"
+                                                ? DragAction.move : DragAction.none
+                                        }
+                                        dropped(event) => {
+                                            if (DragHelper.kind-of(event.data) == "pick") {
+                                                DragHelper.move-pick(0, DragHelper.id-of(event.data), i);
+                                            }
+                                            return DragAction.move;
+                                        }
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 32px;
+                        horizontal-stretch: 1;
+                        border-radius: 6px;
+                        background: add-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : ThemeSettings.card-bg(root.theme-mode);
+                        border-width: 1px;
+                        border-color: ThemeSettings.border-c(root.theme-mode);
+
+                        Text {
+                            text: "+ 添加项目";
+                            width: 100%;
+                            height: 100%;
+                            font-size: ThemeSettings.font-size-normal;
+                            color: ThemeSettings.accent-color;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        add-touch := TouchArea {
+                            width: 100%;
+                            height: 100%;
+                            clicked => { root.add-child-requested(); }
                         }
                     }
 

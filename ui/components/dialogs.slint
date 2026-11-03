@@ -4,6 +4,7 @@
 // - ActionDialog: 动作选择（按钮列表）
 
 import { ThemeSettings } from "../theme.slint";
+import { MultiPick } from "./new_item_window.slint";
 
 // 对话框按钮
 component dialog-btn inherits Rectangle {
@@ -247,6 +248,118 @@ export component ActionDialog inherits Window {
                 label: "取消";
                 theme-mode: root.theme-mode;
                 clicked => { root.cancelled(); }
+            }
+        }
+    }
+}
+
+// 候选项目多选对话框（用于「添加子项」）
+export component PickListDialog inherits Window {
+    title: root.dlg-title;
+    background: ThemeSettings.bg-color(root.theme-mode);
+    default-font-family: ThemeSettings.font-family;
+    preferred-width: 520px;
+    preferred-height: 560px;
+    min-width: 400px;
+    min-height: 360px;
+
+    in property <string> theme-mode: "light";
+    in property <string> dlg-title: "选择项目";
+    in property <string> prompt: "";
+    in property <[MultiPick]> candidates: [];
+
+    callback toggled(int);
+    callback accepted();
+    callback cancelled();
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+
+        Text {
+            text: root.prompt;
+            font-size: ThemeSettings.font-size-small;
+            color: ThemeSettings.text-sec(root.theme-mode);
+            wrap: word-wrap;
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            border-radius: 6px;
+            background: ThemeSettings.card-bg(root.theme-mode);
+            border-width: 1px;
+            border-color: ThemeSettings.border-c(root.theme-mode);
+
+            ScrollView {
+                VerticalLayout {
+                    padding: 6px;
+                    spacing: 2px;
+
+                    for c[i] in root.candidates : Rectangle {
+                        height: 36px;
+                        horizontal-stretch: 1;
+                        border-radius: 4px;
+                        background: row-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+
+                        HorizontalLayout {
+                            x: 8px;
+                            y: 6px;
+                            width: parent.width - 16px;
+                            height: 24px;
+                            spacing: 8px;
+                            alignment: start;
+
+                            CheckBox {
+                                checked: c.selected;
+                                toggled => { root.toggled(i); }
+                            }
+                            Image {
+                                source: c.icon;
+                                width: 20px;
+                                height: 20px;
+                                image-fit: contain;
+                            }
+                            Text {
+                                text: c.name;
+                                font-size: ThemeSettings.font-size-normal;
+                                color: ThemeSettings.text-c(root.theme-mode);
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                overflow: elide;
+                            }
+                        }
+
+                        row-touch := TouchArea {
+                            width: 100%;
+                            height: 100%;
+                            clicked => { root.toggled(i); }
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: end;
+
+            Text {
+                text: "共 " + root.candidates.length + " 项可选";
+                font-size: ThemeSettings.font-size-small;
+                color: ThemeSettings.text-sec(root.theme-mode);
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            dialog-btn {
+                label: "取消";
+                theme-mode: root.theme-mode;
+                clicked => { root.cancelled(); }
+            }
+            dialog-btn {
+                label: "添加";
+                primary: true;
+                theme-mode: root.theme-mode;
+                clicked => { root.accepted(); }
             }
         }
     }

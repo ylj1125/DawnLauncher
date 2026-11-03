@@ -13,7 +13,8 @@ use crate::native;
 use crate::{
     ActionDialog, CatalogEntry, ClassificationInfo, DragHelper, InputDialog, ItemEditWindow,
     ItemInfo, ItemSettingsPayload, ItemSettingsWindow, MainWindow, MenuItem, MultiPick,
-    MultilineInputDialog, NewItemPayload, NewItemWindow, QuickSearchWindow, SettingsWindow,
+    MultilineInputDialog, NewItemPayload, NewItemWindow, PickListDialog, QuickSearchWindow,
+    SettingsWindow,
 };
 
 pub struct App {
@@ -29,6 +30,10 @@ pub struct App {
     hotkey_rx: std::sync::Arc<std::sync::Mutex<std::sync::mpsc::Receiver<()>>>,
     tray_icon_enabled: Arc<Mutex<bool>>,
     minimize_to_tray: Arc<Mutex<bool>>,
+    // 编辑多项目时已加入的子项（按启动顺序）
+    editing_picks: Arc<Mutex<Vec<PickRaw>>>,
+    // 新建多项目时已加入的子项（按启动顺序）
+    new_item_picks: Arc<Mutex<Vec<PickRaw>>>,
     dialogs: Rc<DialogController>,
 }
 
@@ -89,8 +94,10 @@ impl App {
         // 编辑窗口当前编辑的项目 id 与待保存图标
         let editing_item_id = Arc::new(Mutex::new(0i64));
         let editing_icon: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        // 编辑多项目时的可勾选项目列表
+        // 编辑多项目时的已加入子项列表
         let editing_picks: Arc<Mutex<Vec<PickRaw>>> = Arc::new(Mutex::new(Vec::new()));
+        // 新建多项目时的已加入子项列表
+        let new_item_picks: Arc<Mutex<Vec<PickRaw>>> = Arc::new(Mutex::new(Vec::new()));
         // 「新建项目」窗口当前目标分类
         let new_item_class_id: Arc<Mutex<i64>> = Arc::new(Mutex::new(0i64));
         // 「项目设置」窗口当前目标分类
@@ -3213,109 +3220,91 @@ impl App {
             });
         }
 
-        // 18.1 项目编辑窗口: 多项目勾选
-        {
-            let edit_weak_toggle = item_edit_window.as_weak();
-            let edit_picks_toggle = editing_picks.clone();
-            item_edit_window.on_pick_toggled(move |idx| {
-                if let Some(ew) = edit_weak_toggle.upgrade() {
-                    {
-                        let mut list = edit_picks_toggle.lock().unwrap();
-                        if let Some(p) = list.get_mut(idx.max(0) as usize) {
-                            p.selected = !p.selected;
-                        }
+        // 18.1 项目编辑窗口: 多项目子项拖拽排序
+        install_pick_drag(
+            &item_edit_window.global::<DragHelper>(),
+            1,
+            editing_picks.clone(),
+            {
+                let w = item_edit_window.as_weak();
+                move |list: &[PickRaw]| {
+                    if let Some(ew) = w.upgrade() {
+                        ew.set_picks(build_pick_model(list));
                     }
-                    let list = edit_picks_toggle.lock().unwrap().clone();
-                    ew.set_picks(build_pick_model(&list));
                 }
-            });
-        }
+            },
+        );
 
-        // 18.1 项目编辑窗口: 添加路径
+        // 18.1 项目编辑窗口: 从库中添加子项（只列出尚未加入的项目）
         {
             let edit_weak_add = item_edit_window.as_weak();
             let edit_picks_add = editing_picks.clone();
             let dlg_add = dialogs.clone();
+            let db_add = db.clone();
             item_edit_window.on_add_child_requested(move || {
-                let edit_weak_add = edit_weak_add.clone();
-                let edit_picks_add = edit_picks_add.clone();
-                dlg_add.ask_input(
+                let all = collect_library_picks(&db_add);
+                let existing = edit_picks_add.lock().unwrap().clone();
+                let candidates: Vec<PickRaw> = all
+                    .into_iter()
+                    .filter(|c| {
+                        !existing.iter().any(|p| {
+                            p.target == c.target
+                                && p.params.as_deref().unwrap_or("") == c.params.as_deref().unwrap_or("")
+                        })
+                    })
+                    .map(|mut c| {
+                        c.selected = false;
+                        c
+                    })
+                    .collect();
+                if candidates.is_empty() {
+                    show_info_dialog("提示", "没有可添加的项目了");
+                    return;
+                }
+                let picks_ref = edit_picks_add.clone();
+                let weak = edit_weak_add.clone();
+                dlg_add.ask_pick(
                     "添加子项",
-                    "请输入要依次启动的路径（可跟 ; 加参数）",
-                    "",
-                    move |text| {
-                        let Some(text) = text else { return };
-                        let text = text.trim();
-                        if text.is_empty() {
+                    "勾选要加入该多项目的项目（按勾选顺序加入列表末尾）",
+                    candidates,
+                    move |chosen| {
+                        if chosen.is_empty() {
                             return;
                         }
-                        let (target, params) = if let Some(idx) = text.find(';') {
-                            (text[..idx].trim().to_string(), Some(text[idx + 1..].trim().to_string()))
-                        } else {
-                            (text.to_string(), None)
-                        };
-                        if target.is_empty() {
-                            show_info_dialog("提示", "路径不能为空");
-                            return;
-                        }
-                        let mut list = edit_picks_add.lock().unwrap();
-                        // 检查是否已存在相同 target+params
-                        if list.iter().any(|p| {
-                            p.target == target
-                                && p.params.as_deref().unwrap_or("") == params.as_deref().unwrap_or("")
-                        }) {
-                            show_info_dialog("提示", "该路径已在子项列表中");
-                            return;
-                        }
-                        // 尝试提取图标
-                        let icon = native::get_file_icon(&target);
-                        let icon_data_url = icon.or_else(|| {
-                            if target.starts_with("ms-settings:") {
-                                native::get_file_icon(&format!(
-                                    "{}\\System32\\SystemSettings.exe",
-                                    std::env::var("SystemRoot")
-                                        .unwrap_or_else(|_| "C:\\Windows".to_string())
-                                ))
-                            } else if !target.contains('\\') && !target.contains('/') {
-                                if let Some(p) = native::search_path(&target) {
-                                    native::get_file_icon(&p)
-                                } else {
-                                    None
+                        {
+                            let mut list = picks_ref.lock().unwrap();
+                            for mut c in chosen {
+                                c.selected = true;
+                                if !list.iter().any(|p| {
+                                    p.target == c.target
+                                        && p.params.as_deref().unwrap_or("")
+                                            == c.params.as_deref().unwrap_or("")
+                                }) {
+                                    list.push(c);
                                 }
-                            } else {
-                                None
                             }
-                        });
-                        let new_id = -((list.len() as i64) + 1);
-                        list.push(PickRaw {
-                            id: new_id, // 负数表示手动添加、不在分类项目表里
-                            name: target.clone(),
-                            icon: icon_data_url,
-                            selected: true,
-                            target,
-                            params,
-                        });
-                        drop(list);
-                        let Some(ew) = edit_weak_add.upgrade() else { return };
-                        let list = edit_picks_add.lock().unwrap().clone();
-                        ew.set_picks(build_pick_model(&list));
+                        }
+                        if let Some(ew) = weak.upgrade() {
+                            let list = picks_ref.lock().unwrap().clone();
+                            ew.set_picks(build_pick_model(&list));
+                        }
                     },
                 );
             });
         }
 
-        // 18.1 项目编辑窗口: 移除已选子项
+        // 18.1 项目编辑窗口: 移除单个子项
         {
             let edit_weak_rm = item_edit_window.as_weak();
             let edit_picks_rm = editing_picks.clone();
-            item_edit_window.on_remove_selected_requested(move || {
+            item_edit_window.on_remove_pick(move |idx| {
                 {
                     let mut list = edit_picks_rm.lock().unwrap();
-                    if !list.iter().any(|p| p.selected) {
-                        show_info_dialog("提示", "当前没有勾选的子项");
+                    let i = idx.max(0) as usize;
+                    if i >= list.len() {
                         return;
                     }
-                    list.retain(|p| !p.selected);
+                    list.remove(i);
                 }
                 let Some(ew) = edit_weak_rm.upgrade() else { return };
                 let list = edit_picks_rm.lock().unwrap().clone();
@@ -3485,10 +3474,25 @@ impl App {
             let db_ni = db.clone();
             let ni_class = new_item_class_id.clone();
             let catalog_all: Arc<Mutex<Vec<CatalogRaw>>> = Arc::new(Mutex::new(Vec::new()));
-            let picks_all: Arc<Mutex<Vec<PickRaw>>> = Arc::new(Mutex::new(Vec::new()));
+            let picks_all: Arc<Mutex<Vec<PickRaw>>> = new_item_picks.clone();
             let selected_icon: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
             let search_arc: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
             let main_weak_ni = main_window.as_weak();
+
+            // 多项目子项拖拽排序
+            install_pick_drag(
+                &new_item_window.global::<DragHelper>(),
+                0,
+                picks_all.clone(),
+                {
+                    let w = ni_weak.clone();
+                    move |list: &[PickRaw]| {
+                        if let Some(nw) = w.upgrade() {
+                            nw.set_picks(build_pick_model(list));
+                        }
+                    }
+                },
+            );
 
             // 取消
             {
@@ -3496,6 +3500,85 @@ impl App {
                 new_item_window.on_cancel_requested(move || {
                     if let Some(w) = ni_weak_cancel.upgrade() {
                         w.window().hide().ok();
+                    }
+                });
+            }
+
+            // 多项目: 从库中添加子项（只列出尚未加入的项目）
+            {
+                let ni_weak_add = ni_weak.clone();
+                let picks_add = picks_all.clone();
+                let dlg_add = dialogs.clone();
+                let db_add = db_ni.clone();
+                new_item_window.on_add_child_requested(move || {
+                    let all = collect_library_picks(&db_add);
+                    let existing = picks_add.lock().unwrap().clone();
+                    let candidates: Vec<PickRaw> = all
+                        .into_iter()
+                        .filter(|c| {
+                            !existing.iter().any(|p| {
+                                p.target == c.target
+                                    && p.params.as_deref().unwrap_or("")
+                                        == c.params.as_deref().unwrap_or("")
+                            })
+                        })
+                        .map(|mut c| {
+                            c.selected = false;
+                            c
+                        })
+                        .collect();
+                    if candidates.is_empty() {
+                        show_info_dialog("提示", "没有可添加的项目了");
+                        return;
+                    }
+                    let picks_ref = picks_add.clone();
+                    let weak = ni_weak_add.clone();
+                    dlg_add.ask_pick(
+                        "添加子项",
+                        "勾选要加入该多项目的项目（按勾选顺序加入列表末尾）",
+                        candidates,
+                        move |chosen| {
+                            if chosen.is_empty() {
+                                return;
+                            }
+                            {
+                                let mut list = picks_ref.lock().unwrap();
+                                for mut c in chosen {
+                                    c.selected = true;
+                                    if !list.iter().any(|p| {
+                                        p.target == c.target
+                                            && p.params.as_deref().unwrap_or("")
+                                                == c.params.as_deref().unwrap_or("")
+                                    }) {
+                                        list.push(c);
+                                    }
+                                }
+                            }
+                            if let Some(nw) = weak.upgrade() {
+                                let list = picks_ref.lock().unwrap().clone();
+                                nw.set_picks(build_pick_model(&list));
+                            }
+                        },
+                    );
+                });
+            }
+
+            // 多项目: 移除单个子项
+            {
+                let ni_weak_rm = ni_weak.clone();
+                let picks_rm = picks_all.clone();
+                new_item_window.on_remove_pick(move |idx| {
+                    {
+                        let mut list = picks_rm.lock().unwrap();
+                        let i = idx.max(0) as usize;
+                        if i >= list.len() {
+                            return;
+                        }
+                        list.remove(i);
+                    }
+                    if let Some(nw) = ni_weak_rm.upgrade() {
+                        let list = picks_rm.lock().unwrap().clone();
+                        nw.set_picks(build_pick_model(&list));
                     }
                 });
             }
@@ -4043,6 +4126,8 @@ impl App {
             hotkey_rx,
             tray_icon_enabled,
             minimize_to_tray,
+            editing_picks,
+            new_item_picks,
             dialogs,
         })
     }
@@ -5140,28 +5225,41 @@ fn system_icon_path(target: &str) -> Option<String> {
     let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
     let sys32 = format!("{root}\\System32");
     if target.starts_with("ms-settings:") {
-        return Some(format!("{sys32}\\SystemSettings.exe"));
+        // Win10/11 的设置中心位于 ImmersiveControlPanel，部分版本在 System32
+        for p in [
+            format!("{root}\\ImmersiveControlPanel\\SystemSettings.exe"),
+            format!("{sys32}\\SystemSettings.exe"),
+        ] {
+            if std::path::Path::new(&p).exists() {
+                return Some(p);
+            }
+        }
+        return Some(format!("{root}\\ImmersiveControlPanel\\SystemSettings.exe"));
     }
     if let Some(folder) = target.strip_prefix("shell:") {
         let user = std::env::var("USERPROFILE").unwrap_or_default();
-        let p = match folder {
+        return Some(match folder {
+            "ControlPanelFolder" => format!("{sys32}\\control.exe"),
             "DownloadsFolder" => format!("{user}\\Downloads"),
             "Personal" => format!("{user}\\Documents"),
             "MyPictures" => format!("{user}\\Pictures"),
             "MyMusic" => format!("{user}\\Music"),
             "MyVideo" => format!("{user}\\Videos"),
+            "RecycleBinFolder" => format!("{sys32}\\shell32.dll"),
             _ => format!("{root}\\explorer.exe"),
-        };
-        return Some(p);
+        });
     }
-    let direct = format!("{sys32}\\{target}");
-    if std::path::Path::new(&direct).exists() {
-        return Some(direct);
-    }
-    for ext in [".exe", ".msc", ".cpl"] {
-        let p = format!("{direct}{ext}");
-        if std::path::Path::new(&p).exists() {
-            return Some(p);
+    // 先 System32，再 SystemRoot（regedit.exe / notepad.exe 等位于 SystemRoot）
+    for dir in [&sys32, &root] {
+        let direct = format!("{dir}\\{target}");
+        if std::path::Path::new(&direct).exists() {
+            return Some(direct);
+        }
+        for ext in [".exe", ".msc", ".cpl"] {
+            let p = format!("{direct}{ext}");
+            if std::path::Path::new(&p).exists() {
+                return Some(p);
+            }
         }
     }
     None
@@ -5845,9 +5943,13 @@ pub struct DialogController {
     input: InputDialog,
     multiline: MultilineInputDialog,
     action: ActionDialog,
+    pick_list: PickListDialog,
     pending_input: Rc<std::cell::RefCell<Option<Box<dyn FnOnce(Option<String>)>>>>,
     pending_multiline: Rc<std::cell::RefCell<Option<Box<dyn FnOnce(Option<String>)>>>>,
     pending_action: Rc<std::cell::RefCell<Option<Box<dyn FnOnce(Option<String>)>>>>,
+    // 候选项目多选
+    pick_candidates: Rc<std::cell::RefCell<Vec<PickRaw>>>,
+    pending_pick: Rc<std::cell::RefCell<Option<Box<dyn FnOnce(Vec<PickRaw>)>>>>,
 }
 
 impl DialogController {
@@ -5856,9 +5958,11 @@ impl DialogController {
         let input = InputDialog::new()?;
         let multiline = MultilineInputDialog::new()?;
         let action = ActionDialog::new()?;
+        let pick_list = PickListDialog::new()?;
         input.window().hide().ok();
         multiline.window().hide().ok();
         action.window().hide().ok();
+        pick_list.window().hide().ok();
 
         // --- InputDialog ---
         let pending_input: Rc<std::cell::RefCell<Option<Box<dyn FnOnce(Option<String>)>>>> =
@@ -5950,14 +6054,84 @@ impl DialogController {
             });
         }
 
+        // --- PickListDialog ---
+        let pick_candidates: Rc<std::cell::RefCell<Vec<PickRaw>>> =
+            Rc::new(std::cell::RefCell::new(Vec::new()));
+        let pending_pick: Rc<std::cell::RefCell<Option<Box<dyn FnOnce(Vec<PickRaw>)>>>> =
+            Rc::new(std::cell::RefCell::new(None));
+        {
+            let cands = pick_candidates.clone();
+            let dlg = pick_list.as_weak();
+            pick_list.on_toggled(move |idx| {
+                let mut list = cands.borrow_mut();
+                if let Some(c) = list.get_mut(idx.max(0) as usize) {
+                    c.selected = !c.selected;
+                }
+                let model = build_pick_model(&list);
+                if let Some(d) = dlg.upgrade() {
+                    d.set_candidates(model);
+                }
+            });
+        }
+        {
+            let cands = pick_candidates.clone();
+            let pending = pending_pick.clone();
+            let dlg = pick_list.as_weak();
+            pick_list.on_accepted(move || {
+                if let Some(d) = dlg.upgrade() {
+                    d.window().hide().ok();
+                }
+                let chosen: Vec<PickRaw> = cands
+                    .borrow()
+                    .iter()
+                    .filter(|c| c.selected)
+                    .cloned()
+                    .collect();
+                let taken = pending.borrow_mut().take();
+                if let Some(cb) = taken {
+                    cb(chosen);
+                }
+            });
+        }
+        {
+            let pending = pending_pick.clone();
+            let dlg = pick_list.as_weak();
+            pick_list.on_cancelled(move || {
+                if let Some(d) = dlg.upgrade() {
+                    d.window().hide().ok();
+                }
+                pending.borrow_mut().take();
+            });
+        }
+
         Ok(Self {
             input,
             multiline,
             action,
+            pick_list,
             pending_input,
             pending_multiline,
             pending_action,
+            pick_candidates,
+            pending_pick,
         })
+    }
+
+    /// 显示候选项目多选对话框，确认后回调返回勾选的条目
+    pub fn ask_pick<F: FnOnce(Vec<PickRaw>) + 'static>(
+        &self,
+        title: &str,
+        prompt: &str,
+        items: Vec<PickRaw>,
+        cb: F,
+    ) {
+        self.pick_list.set_dlg_title(SharedString::from(title));
+        self.pick_list.set_prompt(SharedString::from(prompt));
+        *self.pick_candidates.borrow_mut() = items;
+        let model = build_pick_model(&self.pick_candidates.borrow());
+        self.pick_list.set_candidates(model);
+        *self.pending_pick.borrow_mut() = Some(Box::new(cb));
+        self.pick_list.window().show().ok();
     }
 
     /// 显示单行输入对话框，确认后回调返回 Some(输入)，取消返回 None

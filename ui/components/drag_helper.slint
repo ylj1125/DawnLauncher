@@ -6,10 +6,14 @@ export global DragHelper {
     pure callback make-item(int) -> data-transfer;
     // 构造分类拖拽数据
     pure callback make-class(int) -> data-transfer;
-    // 解析拖拽数据类型: "item" / "class"
+    // 构造子项列表拖拽数据: source(0=新建窗口 / 1=编辑窗口), 行索引
+    pure callback make-pick(int, int) -> data-transfer;
+    // 解析拖拽数据类型: "item" / "class" / "pick"
     pure callback kind-of(data-transfer) -> string;
-    // 解析拖拽数据 id
+    // 解析拖拽数据 id（pick 类型返回行索引）
     pure callback id-of(data-transfer) -> int;
     // 拖放完成: kind, 源 id, 目标 id
     callback drop-on(string, int, int);
+    // 子项列表内部排序: source, 源索引, 目标索引
+    callback move-pick(int, int, int);
 }
