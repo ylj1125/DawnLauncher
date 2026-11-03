@@ -637,6 +637,14 @@ export component NewItemWindow inherits Window {
                                     spacing: 8px;
                                     alignment: start;
 
+                                    Text {
+                                        text: "•";
+                                        width: 22px;
+                                        font-size: ThemeSettings.font-size-small;
+                                        color: ThemeSettings.text-sec(root.theme-mode);
+                                        vertical-alignment: center;
+                                        horizontal-alignment: center;
+                                    }
                                     CheckBox {
                                         checked: p.selected;
                                         toggled => { root.pick-toggled(i); }
@@ -654,14 +662,6 @@ export component NewItemWindow inherits Window {
                                         vertical-alignment: center;
                                         horizontal-stretch: 1;
                                         overflow: elide;
-                                    }
-                                    Text {
-                                        text: "≡";
-                                        width: 20px;
-                                        font-size: ThemeSettings.font-size-small;
-                                        color: ThemeSettings.text-sec(root.theme-mode);
-                                        vertical-alignment: center;
-                                        horizontal-alignment: center;
                                     }
                                 }
                             }

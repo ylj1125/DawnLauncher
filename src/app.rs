@@ -2787,11 +2787,32 @@ impl App {
                     }
                     ("item", "copy-path") => {
                         let item_id = *right_item_id.lock().unwrap();
-                        if let Some(target) = db_for_ctx.get_item_target(item_id) {
-                            #[cfg(target_os = "windows")]
-                            {
-                                let _ = copy_to_clipboard(&target);
-                                show_info_dialog("已复制", "路径已复制到剪贴板");
+                        if let Some(item) = db_for_ctx.get_item(item_id) {
+                            let text = if item.kind == 5 {
+                                item.data
+                                    .multi_items
+                                    .iter()
+                                    .map(|m| {
+                                        if let Some(p) = m.params.as_deref().filter(|p| !p.is_empty()) {
+                                            format!("{};{}", m.target, p)
+                                        } else {
+                                            m.target.clone()
+                                        }
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            } else {
+                                item.data.target.clone().unwrap_or_default()
+                            };
+                            if text.is_empty() {
+                                show_info_dialog("提示", "该项目没有可复制的路径");
+                            } else {
+                                #[cfg(target_os = "windows")]
+                                {
+                                    let _ = copy_to_clipboard(&text);
+                                    let label = if item.kind == 5 { "所有子项路径" } else { "路径" };
+                                    show_info_dialog("已复制", &format!("{}已复制到剪贴板", label));
+                                }
                             }
                         }
                     }
@@ -3207,6 +3228,98 @@ impl App {
                     let list = edit_picks_toggle.lock().unwrap().clone();
                     ew.set_picks(build_pick_model(&list));
                 }
+            });
+        }
+
+        // 18.1 项目编辑窗口: 添加路径
+        {
+            let edit_weak_add = item_edit_window.as_weak();
+            let edit_picks_add = editing_picks.clone();
+            let dlg_add = dialogs.clone();
+            item_edit_window.on_add_child_requested(move || {
+                let edit_weak_add = edit_weak_add.clone();
+                let edit_picks_add = edit_picks_add.clone();
+                dlg_add.ask_input(
+                    "添加子项",
+                    "请输入要依次启动的路径（可跟 ; 加参数）",
+                    "",
+                    move |text| {
+                        let Some(text) = text else { return };
+                        let text = text.trim();
+                        if text.is_empty() {
+                            return;
+                        }
+                        let (target, params) = if let Some(idx) = text.find(';') {
+                            (text[..idx].trim().to_string(), Some(text[idx + 1..].trim().to_string()))
+                        } else {
+                            (text.to_string(), None)
+                        };
+                        if target.is_empty() {
+                            show_info_dialog("提示", "路径不能为空");
+                            return;
+                        }
+                        let mut list = edit_picks_add.lock().unwrap();
+                        // 检查是否已存在相同 target+params
+                        if list.iter().any(|p| {
+                            p.target == target
+                                && p.params.as_deref().unwrap_or("") == params.as_deref().unwrap_or("")
+                        }) {
+                            show_info_dialog("提示", "该路径已在子项列表中");
+                            return;
+                        }
+                        // 尝试提取图标
+                        let icon = native::get_file_icon(&target);
+                        let icon_data_url = icon.or_else(|| {
+                            if target.starts_with("ms-settings:") {
+                                native::get_file_icon(&format!(
+                                    "{}\\System32\\SystemSettings.exe",
+                                    std::env::var("SystemRoot")
+                                        .unwrap_or_else(|_| "C:\\Windows".to_string())
+                                ))
+                            } else if !target.contains('\\') && !target.contains('/') {
+                                if let Some(p) = native::search_path(&target) {
+                                    native::get_file_icon(&p)
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        });
+                        let new_id = -((list.len() as i64) + 1);
+                        list.push(PickRaw {
+                            id: new_id, // 负数表示手动添加、不在分类项目表里
+                            name: target.clone(),
+                            icon: icon_data_url,
+                            selected: true,
+                            target,
+                            params,
+                        });
+                        drop(list);
+                        let Some(ew) = edit_weak_add.upgrade() else { return };
+                        let list = edit_picks_add.lock().unwrap().clone();
+                        ew.set_picks(build_pick_model(&list));
+                    },
+                );
+            });
+        }
+
+        // 18.1 项目编辑窗口: 移除已选子项
+        {
+            let edit_weak_rm = item_edit_window.as_weak();
+            let edit_picks_rm = editing_picks.clone();
+            item_edit_window.on_remove_selected_requested(move || {
+                {
+                    let mut list = edit_picks_rm.lock().unwrap();
+                    if !list.iter().any(|p| p.selected) {
+                        show_info_dialog("提示", "当前没有勾选的子项");
+                        return;
+                    }
+                    list.retain(|p| !p.selected);
+                }
+                let Some(ew) = edit_weak_rm.upgrade() else { return };
+                let list = edit_picks_rm.lock().unwrap().clone();
+                ew.set_picks(build_pick_model(&list));
             });
         }
 
@@ -6002,11 +6115,21 @@ fn show_item_context_menu(window: &MainWindow, x: i32, y: i32) {
 }
 
 /// 显示多项目右键菜单
-/// 多项目不是具体文件，打开/定位/路径类操作无意义，只保留来源跳转与复制名称
+/// 多项目不是具体文件，但仍保留对项目本体的常见操作：编辑/重命名/删除/快捷键/复制名称等
 fn show_multi_item_context_menu(window: &MainWindow, x: i32, y: i32) {
     let items = [
+        ("edit", "编辑子项...", "⚙", false, false),
+        ("", "", "", true, false),
+        ("rename", "重命名", "✏", false, false),
+        ("set-shortcut", "设置快捷键...", "⌨", false, false),
         ("goto-source", "转到来源分类", "→", false, false),
         ("copy-name", "复制名称", "⧉", false, false),
+        ("copy-path", "复制路径(全部子项)", "📋", false, false),
+        ("copy-remark", "复制备注", "📋", false, false),
+        ("move-to", "移动到...", "↪", false, false),
+        ("copy-to", "复制到...", "📋", false, false),
+        ("", "", "", true, false),
+        ("delete", "删除", "🗑", false, false),
     ];
     show_context_menu(window, "item", x, y, &items);
 }

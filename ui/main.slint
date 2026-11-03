@@ -1418,6 +1418,8 @@ export component ItemEditWindow inherits Window {
     callback pick-icon-requested();
     callback refresh-icon-requested();
     callback pick-toggled(int);
+    callback add-child-requested();
+    callback remove-selected-requested();
 
     VerticalLayout {
         // 标题栏
@@ -1494,25 +1496,107 @@ export component ItemEditWindow inherits Window {
                 theme-mode: root.theme-mode;
             }
 
-            editor-field {
+            // 多项目: 子项勾选列表
+            if root.is-multi : VerticalLayout {
+                spacing: 8px;
+
+                Text {
+                    text: "子项列表（勾选要依次启动的项目；也可直接添加新路径）";
+                    font-size: ThemeSettings.font-size-normal;
+                    font-weight: 600;
+                    color: ThemeSettings.text-c(root.theme-mode);
+                }
+
+                ScrollView {
+                    height: 260px;
+                    VerticalLayout {
+                        spacing: 2px;
+                        for p[i] in root.picks : Rectangle {
+                            height: 38px;
+                            horizontal-stretch: 1;
+                            border-radius: 6px;
+                            background: pick-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+
+                            pick-touch := TouchArea {
+                                width: 100%; height: 100%;
+                                clicked => { root.pick-toggled(i); }
+                            }
+
+                            HorizontalLayout {
+                                x: 8px;
+                                y: (parent.height - 24px) / 2;
+                                width: parent.width - 16px;
+                                height: 24px;
+                                spacing: 8px;
+                                alignment: start;
+
+                                Text {
+                                    text: "•";
+                                    width: 22px;
+                                    font-size: ThemeSettings.font-size-small;
+                                    color: ThemeSettings.text-sec(root.theme-mode);
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                }
+                                CheckBox {
+                                    checked: p.selected;
+                                    toggled => { root.pick-toggled(i); }
+                                }
+                                Image {
+                                    source: p.icon;
+                                    width: 22px;
+                                    height: 22px;
+                                    image-fit: contain;
+                                }
+                                Text {
+                                    text: p.name;
+                                    font-size: ThemeSettings.font-size-normal;
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+
+                    editor-btn {
+                        label: "添加路径...";
+                        theme-mode: root.theme-mode;
+                        clicked => { root.add-child-requested(); }
+                    }
+                    editor-btn {
+                        label: "移除已选";
+                        theme-mode: root.theme-mode;
+                        clicked => { root.remove-selected-requested(); }
+                    }
+                }
+            }
+
+            if !root.is-multi : editor-field {
                 label: "目标";
                 value <=> root.item-target;
                 theme-mode: root.theme-mode;
             }
 
-            editor-field {
+            if !root.is-multi : editor-field {
                 label: "启动参数";
                 value <=> root.item-params;
                 theme-mode: root.theme-mode;
             }
 
-            editor-field {
+            if !root.is-multi : editor-field {
                 label: "备注";
                 value <=> root.item-remark;
                 theme-mode: root.theme-mode;
             }
 
-            CheckBox {
+            if !root.is-multi : CheckBox {
                 text: "以管理员身份运行";
                 checked <=> root.run-as-admin;
                 font-size: ThemeSettings.font-size-normal;
