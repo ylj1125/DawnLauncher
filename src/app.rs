@@ -3586,7 +3586,6 @@ impl App {
             // 切换类型
             {
                 let ni_weak_type = ni_weak.clone();
-                let db_type = db_ni.clone();
                 let catalog_type = catalog_all.clone();
                 let picks_type = picks_all.clone();
                 let search_type = search_arc.clone();
@@ -3707,26 +3706,9 @@ impl App {
                             });
                         }
                         "multi" => {
-                            // 跨分类列出全部项目，供勾选
-                            let classes = db_type.list_all_classifications();
-                            let mut list: Vec<PickRaw> = Vec::new();
-                            for c in classes {
-                                for it in db_type.list_items(c.id) {
-                                    if it.kind == 5 || it.kind == 4 {
-                                        continue;
-                                    }
-                                    list.push(PickRaw {
-                                        id: it.id,
-                                        name: format!("{} · {}", c.name, it.name),
-                                        icon: it.data.icon.clone(),
-                                        selected: false,
-                                        target: it.data.target.clone().unwrap_or_default(),
-                                        params: it.data.params.clone(),
-                                    });
-                                }
-                            }
-                            *picks_type.lock().unwrap() = list.clone();
-                            rebuild_picks(&w, &list);
+                            // 多项目改为「子项列表」模式：初始为空，通过「添加项目」从库中选取
+                            *picks_type.lock().unwrap() = Vec::new();
+                            rebuild_picks(&w, &[]);
                         }
                         _ => {}
                     }
@@ -3792,23 +3774,7 @@ impl App {
                 });
             }
 
-            // 多项目勾选
-            {
-                let ni_weak_m = ni_weak.clone();
-                let picks_m = picks_all.clone();
-                new_item_window.on_pick_toggled(move |idx| {
-                    if let Some(w) = ni_weak_m.upgrade() {
-                        {
-                            let mut list = picks_m.lock().unwrap();
-                            if let Some(p) = list.get_mut(idx.max(0) as usize) {
-                                p.selected = !p.selected;
-                            }
-                        }
-                        let list = picks_m.lock().unwrap().clone();
-                        rebuild_picks(&w, &list);
-                    }
-                });
-            }
+            // 多项目子项（添加/移除通过 add-child-requested / remove-pick 回调处理）
 
             // 选择路径
             {
@@ -3964,6 +3930,8 @@ impl App {
                                 )));
                             }
                             log::info!("新建项目成功: {} (kind={})", item.name, kind);
+                            // 清空多项目子项列表，避免下次打开时残留
+                            picks_create.lock().unwrap().clear();
                             w.window().hide().ok();
                         }
                         Err(e) => {
@@ -4316,37 +4284,46 @@ fn open_item_editor(
     };
     ew.set_icon_preview(preview);
 
-    // 多项目：载入可勾选的项目列表，按当前子项标记已选
+    // 多项目：只载入已加入的子项（按启动顺序）
     let is_multi = item.kind == 5;
     ew.set_is_multi(is_multi);
     if is_multi {
         ew.set_multi_interval(item.data.multi_items_time_interval.max(0) as i32);
-        let mut picks: Vec<PickRaw> = Vec::new();
+        // 建立 target→(name,icon) 索引用于回填显示
+        let mut lib_index: std::collections::HashMap<(String, String), (String, Option<String>)> =
+            std::collections::HashMap::new();
         for c in db.list_all_classifications() {
             for it in db.list_items(c.id) {
                 if it.kind == 5 || it.kind == 4 {
                     continue;
                 }
-                picks.push(PickRaw {
-                    id: it.id,
-                    name: format!("{} · {}", c.name, it.name),
-                    icon: it.data.icon.clone(),
-                    selected: false,
-                    target: it.data.target.clone().unwrap_or_default(),
-                    params: it.data.params.clone(),
-                });
+                let key = (
+                    it.data.target.clone().unwrap_or_default(),
+                    it.data.params.clone().unwrap_or_default(),
+                );
+                lib_index.insert(key, (it.name.clone(), it.data.icon.clone()));
             }
         }
-        let mut remaining = item.data.multi_items.clone();
-        for p in picks.iter_mut() {
-            if let Some(pos) = remaining.iter().position(|m| {
-                m.target == p.target
-                    && m.params.as_deref().unwrap_or("") == p.params.as_deref().unwrap_or("")
-            }) {
-                p.selected = true;
-                remaining.remove(pos);
-            }
-        }
+        let picks: Vec<PickRaw> = item
+            .data
+            .multi_items
+            .iter()
+            .map(|m| {
+                let key = (m.target.clone(), m.params.clone().unwrap_or_default());
+                let (name, icon) = lib_index
+                    .get(&key)
+                    .map(|(n, i)| (n.clone(), i.clone()))
+                    .unwrap_or_else(|| (strip_path_to_name(&m.target), None));
+                PickRaw {
+                    id: -1,
+                    name,
+                    icon,
+                    selected: true,
+                    target: m.target.clone(),
+                    params: m.params.clone(),
+                }
+            })
+            .collect();
         *editing_picks.lock().unwrap() = picks.clone();
         ew.set_picks(build_pick_model(&picks));
     } else {
@@ -5345,6 +5322,87 @@ fn to_item_model(list: &[Item], selected_id: i64) -> ModelRc<ItemInfo> {
             .collect::<Vec<_>>(),
     );
     ModelRc::from(Rc::new(model))
+}
+
+/// 从完整路径提取文件名作为显示名称
+fn strip_path_to_name(path: &str) -> String {
+    if path.is_empty() {
+        return String::new();
+    }
+    std::path::Path::new(path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string())
+}
+
+/// 收集全库可加入多项目的条目（排除多项目/Appx 本身）
+fn collect_library_picks(db: &Database) -> Vec<PickRaw> {
+    let mut list = Vec::new();
+    for c in db.list_all_classifications() {
+        for it in db.list_items(c.id) {
+            if it.kind == 5 || it.kind == 4 {
+                continue;
+            }
+            list.push(PickRaw {
+                id: it.id,
+                name: format!("{} · {}", c.name, it.name),
+                icon: it.data.icon.clone(),
+                selected: false,
+                target: it.data.target.clone().unwrap_or_default(),
+                params: it.data.params.clone(),
+            });
+        }
+    }
+    list
+}
+
+/// 为某个窗口的 DragHelper 全局注册「子项拖拽排序」回调
+fn install_pick_drag<F: Fn(&[PickRaw]) + 'static>(
+    g: &crate::DragHelper,
+    source: i32,
+    list: Arc<Mutex<Vec<PickRaw>>>,
+    apply: F,
+) {
+    g.on_make_pick(move |src, idx| {
+        slint::DataTransfer::from(SharedString::from(format!("pick:{}:{}", src, idx)))
+    });
+    g.on_kind_of(|data| {
+        SharedString::from(
+            data.plain_text()
+                .ok()
+                .and_then(|t| t.split(':').next().map(|s| s.to_string()))
+                .unwrap_or_default(),
+        )
+    });
+    g.on_id_of(|data| {
+        data.plain_text()
+            .ok()
+            .and_then(|t| t.rsplit(':').next().and_then(|n| n.parse::<i32>().ok()))
+            .unwrap_or(0)
+    });
+    let apply = std::rc::Rc::new(apply);
+    g.on_move_pick(move |src, from, to| {
+        if src != source {
+            return;
+        }
+        let snapshot = {
+            let mut l = list.lock().unwrap();
+            let len = l.len();
+            if from < 0 || to < 0 || from as usize >= len || to as usize >= len {
+                return;
+            }
+            let item = l.remove(from as usize);
+            let insert = if (to as usize) > (from as usize) {
+                to as usize - 1
+            } else {
+                to as usize
+            };
+            let insert = insert.min(l.len());
+            l.insert(insert, item);
+            l.clone()
+        };
+        apply(&snapshot);
+    });
 }
 
 /// 多项目默认图标（内置 SVG）
