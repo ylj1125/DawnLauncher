@@ -626,6 +626,9 @@ export component NewItemWindow inherits Window {
                         border-color: ThemeSettings.border-c(root.theme-mode);
 
                         ScrollView {
+                            // 内容宽度跟随可视区，使行内按钮能靠右对齐
+                            viewport-width: self.width;
+
                             VerticalLayout {
                                 padding: 4px;
                                 spacing: 2px;
@@ -636,9 +639,9 @@ export component NewItemWindow inherits Window {
                                     background: transparent;
 
                                     HorizontalLayout {
-                                        x: 6px;
+                                        x: 10px;
                                         y: (parent.height - 24px) / 2;
-                                        width: parent.width - 12px;
+                                        width: parent.width - 20px;
                                         height: 24px;
                                         spacing: 6px;
                                         alignment: start;
