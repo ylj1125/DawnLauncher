@@ -3312,6 +3312,26 @@ impl App {
             });
         }
 
+        // 18.1 项目编辑窗口: 上移 / 下移子项
+        {
+            let edit_weak_ord = item_edit_window.as_weak();
+            let edit_picks_ord = editing_picks.clone();
+            let w_up = edit_weak_ord.clone();
+            let l_up = edit_picks_ord.clone();
+            item_edit_window.on_move_pick_up(move |idx| {
+                let Some(list) = shift_pick(&l_up, idx, -1) else { return };
+                if let Some(ew) = w_up.upgrade() {
+                    ew.set_picks(build_pick_model(&list));
+                }
+            });
+            item_edit_window.on_move_pick_down(move |idx| {
+                let Some(list) = shift_pick(&edit_picks_ord, idx, 1) else { return };
+                if let Some(ew) = edit_weak_ord.upgrade() {
+                    ew.set_picks(build_pick_model(&list));
+                }
+            });
+        }
+
         // 18.1 项目编辑窗口: 保存
         {
             let db_for_edit = db.clone();
@@ -3458,10 +3478,12 @@ impl App {
             });
         }
 
-        // 18.4 项目编辑窗口: 取消
+        // 18.4 项目编辑窗口: 取消（丢弃本次对子项顺序/增删的所有修改）
         {
             let edit_weak_cancel = item_edit_window.as_weak();
+            let edit_picks_cancel = editing_picks.clone();
             item_edit_window.on_cancel_requested(move || {
+                edit_picks_cancel.lock().unwrap().clear();
                 if let Some(ew) = edit_weak_cancel.upgrade() {
                     ew.window().hide().ok();
                 }
@@ -3578,6 +3600,26 @@ impl App {
                     }
                     if let Some(nw) = ni_weak_rm.upgrade() {
                         let list = picks_rm.lock().unwrap().clone();
+                        nw.set_picks(build_pick_model(&list));
+                    }
+                });
+            }
+
+            // 多项目: 上移 / 下移子项
+            {
+                let ni_weak_ord = ni_weak.clone();
+                let picks_ord = picks_all.clone();
+                let w_up = ni_weak_ord.clone();
+                let l_up = picks_ord.clone();
+                new_item_window.on_move_pick_up(move |idx| {
+                    let Some(list) = shift_pick(&l_up, idx, -1) else { return };
+                    if let Some(nw) = w_up.upgrade() {
+                        nw.set_picks(build_pick_model(&list));
+                    }
+                });
+                new_item_window.on_move_pick_down(move |idx| {
+                    let Some(list) = shift_pick(&picks_ord, idx, 1) else { return };
+                    if let Some(nw) = ni_weak_ord.upgrade() {
                         nw.set_picks(build_pick_model(&list));
                     }
                 });
@@ -5354,6 +5396,19 @@ fn collect_library_picks(db: &Database) -> Vec<PickRaw> {
         }
     }
     list
+}
+
+/// 把子项列表中的第 idx 项上移(-1)/下移(+1)，返回重排后的快照（越界返回 None）
+fn shift_pick(list: &Arc<Mutex<Vec<PickRaw>>>, idx: i32, delta: i32) -> Option<Vec<PickRaw>> {
+    let mut l = list.lock().unwrap();
+    let len = l.len();
+    let i = idx.max(0) as usize;
+    let j = i as i32 + delta;
+    if i >= len || j < 0 || j as usize >= len {
+        return None;
+    }
+    l.swap(i, j as usize);
+    Some(l.clone())
 }
 
 /// 为某个窗口的 DragHelper 全局注册「子项拖拽排序」回调

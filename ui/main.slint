@@ -1419,6 +1419,8 @@ export component ItemEditWindow inherits Window {
     callback refresh-icon-requested();
     callback add-child-requested();
     callback remove-pick(int);
+    callback move-pick-up(int);
+    callback move-pick-down(int);
 
     VerticalLayout {
         // 标题栏
@@ -1500,7 +1502,7 @@ export component ItemEditWindow inherits Window {
                 spacing: 8px;
 
                 Text {
-                    text: "子项列表（拖动左侧手柄调整启动顺序，✕ 移除）";
+                    text: "子项列表（拖动左侧手柄或使用 ↑↓ 调整启动顺序，✕ 移除）";
                     font-size: ThemeSettings.font-size-normal;
                     font-weight: 600;
                     color: ThemeSettings.text-c(root.theme-mode);
@@ -1534,18 +1536,24 @@ export component ItemEditWindow inherits Window {
 
                                     // 拖动手柄
                                     Rectangle {
-                                        width: 20px;
+                                        width: 22px;
                                         height: 24px;
-                                        background: transparent;
+                                        background: handle-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                                        border-radius: 3px;
 
                                         VerticalLayout {
                                             width: 100%;
                                             height: 100%;
                                             spacing: 2px;
                                             alignment: center;
-                                            Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.55; }
-                                            Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.55; }
-                                            Rectangle { width: 10px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.55; }
+                                            Rectangle { width: 12px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.7; }
+                                            Rectangle { width: 12px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.7; }
+                                            Rectangle { width: 12px; height: 2px; background: ThemeSettings.text-sec(root.theme-mode); opacity: 0.7; }
+                                        }
+
+                                        handle-touch := TouchArea {
+                                            width: 100%;
+                                            height: 100%;
                                         }
 
                                         DragArea {
@@ -1569,6 +1577,52 @@ export component ItemEditWindow inherits Window {
                                         vertical-alignment: center;
                                         horizontal-stretch: 1;
                                         overflow: elide;
+                                    }
+
+                                    // 上移
+                                    Rectangle {
+                                        width: 22px;
+                                        height: 24px;
+                                        background: up-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                                        border-radius: 3px;
+
+                                        Text {
+                                            text: "↑";
+                                            width: 100%;
+                                            height: 100%;
+                                            font-size: ThemeSettings.font-size-normal;
+                                            color: ThemeSettings.text-sec(root.theme-mode);
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                        up-touch := TouchArea {
+                                            width: 100%;
+                                            height: 100%;
+                                            clicked => { root.move-pick-up(i); }
+                                        }
+                                    }
+
+                                    // 下移
+                                    Rectangle {
+                                        width: 22px;
+                                        height: 24px;
+                                        background: down-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                                        border-radius: 3px;
+
+                                        Text {
+                                            text: "↓";
+                                            width: 100%;
+                                            height: 100%;
+                                            font-size: ThemeSettings.font-size-normal;
+                                            color: ThemeSettings.text-sec(root.theme-mode);
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                        down-touch := TouchArea {
+                                            width: 100%;
+                                            height: 100%;
+                                            clicked => { root.move-pick-down(i); }
+                                        }
                                     }
 
                                     // 移除
