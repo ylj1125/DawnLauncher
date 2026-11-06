@@ -205,7 +205,7 @@ export component MainWindow inherits Window {
                         alignment: start;
 
                         Text {
-                            text: "Dawn Launcher v0.23.2";
+                            text: "Dawn Launcher v0.23.3";
                             color: ThemeSettings.text-c(root.theme-mode);
                             font-size: ThemeSettings.font-size-normal;
                             font-weight: 700;
@@ -1531,26 +1531,25 @@ export component ItemEditWindow inherits Window {
                     }
 
                     ScrollView {
-                        // 内容宽度跟随可视区，使行内按钮能靠右对齐
-                        viewport-width: self.width;
-
                         VerticalLayout {
+                            // 关键：内容宽度撑满可视区，行内按钮才能稳定靠右
+                            width: parent.width;
                             padding: 4px;
                             spacing: 2px;
 
-                            for p[i] in root.picks : Rectangle {
-                                height: 38px;
-                                horizontal-stretch: 1;
-                                border-radius: 4px;
-                                background: transparent;
+                        for p[i] in root.picks : Rectangle {
+                            width: 100%;
+                            height: 38px;
+                            border-radius: 4px;
+                            background: transparent;
 
-                                HorizontalLayout {
-                                    x: 10px;
-                                    y: (parent.height - 24px) / 2;
-                                    width: parent.width - 20px;
-                                    height: 24px;
-                                    spacing: 6px;
-                                    alignment: start;
+                            HorizontalLayout {
+                                x: 10px;
+                                y: (parent.height - 24px) / 2;
+                                width: parent.width - 20px;
+                                height: 24px;
+                                spacing: 6px;
+                                alignment: start;
 
                                     // 拖动手柄
                                     Rectangle {
