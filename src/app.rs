@@ -2367,6 +2367,40 @@ impl App {
                             }
                         });
                     }
+                    ("classification-item", "move-up") | ("classification-item", "move-down") => {
+                        let cid = *right_class_id.lock().unwrap();
+                        let up = action_str == "move-up";
+                        drop(w);
+                        if let Some(c) = db_for_ctx.get_classification(cid) {
+                            let parent = c.parent_id;
+                            let siblings: Vec<i64> = db_for_ctx
+                                .list_all_classifications()
+                                .iter()
+                                .filter(|x| x.parent_id == parent)
+                                .map(|x| x.id)
+                                .collect();
+                            if let Some(pos) = siblings.iter().position(|&id| id == cid) {
+                                let target = if up {
+                                    if pos == 0 { None } else { Some(siblings[pos - 1]) }
+                                } else if pos + 2 < siblings.len() {
+                                    Some(siblings[pos + 2])
+                                } else {
+                                    None
+                                };
+                                if let Some(to) = target {
+                                    let _ = db_for_ctx.move_classification_before(cid, to);
+                                    let classifications = db_for_ctx.list_all_classifications();
+                                    if let Some(w) = window_for_ctx.upgrade() {
+                                        w.set_classifications(to_classification_model(
+                                            &classifications,
+                                            cid,
+                                            &expanded_for_ctx.lock().unwrap(),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
                     ("classification-item", "add-child") => {
                         let cid = *right_class_id.lock().unwrap();
                         drop(w);
@@ -2778,6 +2812,36 @@ impl App {
                                 }
                             }
                         });
+                    }
+                    ("item", "move-up") | ("item", "move-down") => {
+                        let item_id = *right_item_id.lock().unwrap();
+                        let up = action_str == "move-up";
+                        drop(w);
+                        let effect_class = db_for_ctx
+                            .get_item(item_id)
+                            .map(|i| i.classification_id)
+                            .unwrap_or(class_id);
+                        let ids: Vec<i64> = db_for_ctx
+                            .list_items(effect_class)
+                            .iter()
+                            .map(|i| i.id)
+                            .collect();
+                        if let Some(pos) = ids.iter().position(|&id| id == item_id) {
+                            let target = if up {
+                                if pos == 0 { None } else { Some(ids[pos - 1]) }
+                            } else if pos + 2 < ids.len() {
+                                Some(ids[pos + 2])
+                            } else {
+                                None
+                            };
+                            if let Some(to) = target {
+                                let _ = db_for_ctx.move_item_before(item_id, to);
+                                let items = db_for_ctx.list_items(effect_class);
+                                if let Some(w) = window_for_ctx.upgrade() {
+                                    w.set_items(to_item_model(&items, 0));
+                                }
+                            }
+                        }
                     }
                     ("item", "edit") => {
                         let item_id = *right_item_id.lock().unwrap();
@@ -3312,6 +3376,28 @@ impl App {
             });
         }
 
+        // 18.1 项目编辑窗口: 子项上移 / 下移
+        {
+            let edit_weak_order = item_edit_window.as_weak();
+            let edit_picks_order = editing_picks.clone();
+            item_edit_window.on_move_pick_up({
+                let w = edit_weak_order.clone();
+                let l = edit_picks_order.clone();
+                move |idx| {
+                    let Some(list) = shift_pick(&l, idx, -1) else { return };
+                    if let Some(ew) = w.upgrade() {
+                        ew.set_picks(build_pick_model(&list));
+                    }
+                }
+            });
+            item_edit_window.on_move_pick_down(move |idx| {
+                let Some(list) = shift_pick(&edit_picks_order, idx, 1) else { return };
+                if let Some(ew) = edit_weak_order.upgrade() {
+                    ew.set_picks(build_pick_model(&list));
+                }
+            });
+        }
+
         // 18.1 项目编辑窗口: 保存
         {
             let db_for_edit = db.clone();
@@ -3493,6 +3579,28 @@ impl App {
                     }
                 },
             );
+
+            // 多项目子项: 上移 / 下移
+            {
+                let ni_weak_order = ni_weak.clone();
+                let picks_order = picks_all.clone();
+                new_item_window.on_move_pick_up({
+                    let w = ni_weak_order.clone();
+                    let l = picks_order.clone();
+                    move |idx| {
+                        let Some(list) = shift_pick(&l, idx, -1) else { return };
+                        if let Some(nw) = w.upgrade() {
+                            nw.set_picks(build_pick_model(&list));
+                        }
+                    }
+                });
+                new_item_window.on_move_pick_down(move |idx| {
+                    let Some(list) = shift_pick(&picks_order, idx, 1) else { return };
+                    if let Some(nw) = ni_weak_order.upgrade() {
+                        nw.set_picks(build_pick_model(&list));
+                    }
+                });
+            }
 
             // 取消
             {
@@ -5335,6 +5443,19 @@ fn strip_path_to_name(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
+/// 子项列表内交换位置（delta=-1 上移 / +1 下移），越界返回 None
+fn shift_pick(list: &Arc<Mutex<Vec<PickRaw>>>, idx: i32, delta: i32) -> Option<Vec<PickRaw>> {
+    let mut l = list.lock().unwrap();
+    let len = l.len();
+    let i = idx.max(0) as usize;
+    let j = i as i32 + delta;
+    if i >= len || j < 0 || j as usize >= len {
+        return None;
+    }
+    l.swap(i, j as usize);
+    Some(l.clone())
+}
+
 /// 收集全库可加入多项目的条目（排除多项目/Appx 本身）
 fn collect_library_picks(db: &Database) -> Vec<PickRaw> {
     let mut list = Vec::new();
@@ -6327,6 +6448,8 @@ fn show_item_context_menu(window: &MainWindow, x: i32, y: i32) {
         ("explorer-menu", "资源管理器菜单", "🗂", false, false),
         ("", "", "", true, false), // 分隔线
         ("rename", "重命名", "✏", false, false),
+        ("move-up", "上移", "↑", false, false),
+        ("move-down", "下移", "↓", false, false),
         ("edit", "编辑项目", "⚙", false, false),
         ("set-shortcut", "设置快捷键...", "⌨", false, false),
         ("copy-name", "复制名称", "🏷", false, false),
@@ -6353,6 +6476,8 @@ fn show_multi_item_context_menu(window: &MainWindow, x: i32, y: i32) {
         ("edit", "编辑子项...", "⚙", false, false),
         ("", "", "", true, false),
         ("rename", "重命名", "✏", false, false),
+        ("move-up", "上移", "↑", false, false),
+        ("move-down", "下移", "↓", false, false),
         ("set-shortcut", "设置快捷键...", "⌨", false, false),
         ("goto-source", "转到来源分类", "→", false, false),
         ("copy-name", "复制名称", "⧉", false, false),
@@ -6400,6 +6525,8 @@ fn show_classification_item_menu(
     };
     let items = [
         ("rename", "重命名", "✏", false, false),
+        ("move-up", "上移", "↑", false, false),
+        ("move-down", "下移", "↓", false, false),
         ("add-child", "新建子分类", "+", false, false),
         ("", "", "", true, false),
         ("toggle-layout", layout_tip, "▦", false, false),

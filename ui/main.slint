@@ -205,7 +205,7 @@ export component MainWindow inherits Window {
                         alignment: start;
 
                         Text {
-                            text: "Dawn Launcher v0.22";
+                            text: "Dawn Launcher v0.23.2";
                             color: ThemeSettings.text-c(root.theme-mode);
                             font-size: ThemeSettings.font-size-normal;
                             font-weight: 700;
@@ -1419,6 +1419,8 @@ export component ItemEditWindow inherits Window {
     callback refresh-icon-requested();
     callback add-child-requested();
     callback remove-pick(int);
+    callback move-pick-up(int);
+    callback move-pick-down(int);
 
     VerticalLayout {
         // 标题栏
@@ -1435,10 +1437,14 @@ export component ItemEditWindow inherits Window {
             }
         }
 
-        // 表单
-        VerticalLayout {
-            padding: 18px;
-            spacing: ThemeSettings.spacing-large;
+        // 表单（可滚动，保证底部按钮在任何窗口高度下都可见）
+        ScrollView {
+            vertical-stretch: 1;
+            horizontal-stretch: 1;
+
+            VerticalLayout {
+                padding: 18px;
+                spacing: ThemeSettings.spacing-large;
 
             HorizontalLayout {
                 spacing: 14px;
@@ -1500,20 +1506,34 @@ export component ItemEditWindow inherits Window {
                 spacing: 8px;
 
                 Text {
-                    text: "子项列表（拖动左侧手柄调整启动顺序，✕ 移除）";
+                    text: "子项列表（可用 ↑↓ 调整启动顺序，× 移除）";
                     font-size: ThemeSettings.font-size-normal;
                     font-weight: 600;
                     color: ThemeSettings.text-c(root.theme-mode);
                 }
 
                 Rectangle {
-                    height: 280px;
+                    // 空列表时收缩，内容多时最高 280px 并在内部滚动
+                    height: max(96px, min(280px, root.picks.length * 40px + 12px));
                     border-radius: 6px;
                     background: ThemeSettings.card-bg(root.theme-mode);
                     border-width: 1px;
                     border-color: ThemeSettings.border-c(root.theme-mode);
 
+                    if root.picks.length == 0 : Text {
+                        width: 100%;
+                        height: 100%;
+                        text: "尚未添加子项，点击下方「添加项目...」从项目库中选择";
+                        font-size: ThemeSettings.font-size-normal;
+                        color: ThemeSettings.text-sec(root.theme-mode);
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
                     ScrollView {
+                        // 内容宽度跟随可视区，使行内按钮能靠右对齐
+                        viewport-width: self.width;
+
                         VerticalLayout {
                             padding: 4px;
                             spacing: 2px;
@@ -1525,9 +1545,9 @@ export component ItemEditWindow inherits Window {
                                 background: transparent;
 
                                 HorizontalLayout {
-                                    x: 6px;
+                                    x: 10px;
                                     y: (parent.height - 24px) / 2;
-                                    width: parent.width - 12px;
+                                    width: parent.width - 20px;
                                     height: 24px;
                                     spacing: 6px;
                                     alignment: start;
@@ -1571,6 +1591,50 @@ export component ItemEditWindow inherits Window {
                                         overflow: elide;
                                     }
 
+                                    // 上移 / 下移
+                                    Rectangle {
+                                        width: 22px;
+                                        height: 24px;
+                                        border-radius: 4px;
+                                        background: up-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+
+                                        Text {
+                                            text: "↑";
+                                            width: 100%;
+                                            height: 100%;
+                                            font-size: ThemeSettings.font-size-normal;
+                                            color: ThemeSettings.text-sec(root.theme-mode);
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                        up-touch := TouchArea {
+                                            width: 100%;
+                                            height: 100%;
+                                            clicked => { root.move-pick-up(i); }
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 22px;
+                                        height: 24px;
+                                        border-radius: 4px;
+                                        background: down-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+
+                                        Text {
+                                            text: "↓";
+                                            width: 100%;
+                                            height: 100%;
+                                            font-size: ThemeSettings.font-size-normal;
+                                            color: ThemeSettings.text-sec(root.theme-mode);
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                        down-touch := TouchArea {
+                                            width: 100%;
+                                            height: 100%;
+                                            clicked => { root.move-pick-down(i); }
+                                        }
+                                    }
+
                                     // 移除
                                     Rectangle {
                                         width: 24px;
@@ -1578,10 +1642,10 @@ export component ItemEditWindow inherits Window {
                                         background: transparent;
 
                                         Text {
-                                            text: "✕";
+                                            text: "×";
                                             width: 100%;
                                             height: 100%;
-                                            font-size: ThemeSettings.font-size-small;
+                                            font-size: ThemeSettings.font-size-normal;
                                             color: ThemeSettings.text-sec(root.theme-mode);
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
@@ -1649,8 +1713,23 @@ export component ItemEditWindow inherits Window {
                 font-size: ThemeSettings.font-size-normal;
             }
 
-            // 底部按钮
+            }
+        }
+
+        // 底部按钮栏（固定在窗口底部，不随表单滚动）
+        Rectangle {
+            height: 56px;
+            background: ThemeSettings.sidebar-bg(root.theme-mode);
+
+            Rectangle {
+                height: 1px;
+                width: parent.width;
+                background: ThemeSettings.border-c(root.theme-mode);
+            }
+
             HorizontalLayout {
+                padding-left: 18px;
+                padding-right: 18px;
                 spacing: ThemeSettings.spacing-normal;
                 alignment: end;
 

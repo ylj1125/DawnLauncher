@@ -249,6 +249,8 @@ export component NewItemWindow inherits Window {
     callback catalog-picked(int);
     callback add-child-requested();
     callback remove-pick(int);
+    callback move-pick-up(int);
+    callback move-pick-down(int);
     callback browse-requested();
     callback pick-icon-requested();
 
@@ -312,7 +314,7 @@ export component NewItemWindow inherits Window {
                         background: close-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
 
                         Text {
-                            text: "✕";
+                            text: "×";
                             font-size: ThemeSettings.font-size-normal;
                             color: ThemeSettings.text-c(root.theme-mode);
                             horizontal-alignment: center;
@@ -610,7 +612,7 @@ export component NewItemWindow inherits Window {
                     }
 
                     Text {
-                        text: "子项列表（拖动左侧手柄调整启动顺序，✕ 移除）";
+                        text: "子项列表（可用 ↑↓ 调整启动顺序，× 移除）";
                         font-size: ThemeSettings.font-size-normal;
                         font-weight: 600;
                         color: ThemeSettings.text-c(root.theme-mode);
@@ -623,7 +625,20 @@ export component NewItemWindow inherits Window {
                         border-width: 1px;
                         border-color: ThemeSettings.border-c(root.theme-mode);
 
+                        if root.picks.length == 0 : Text {
+                            width: 100%;
+                            height: 100%;
+                            text: "尚未添加子项，点击下方「添加项目...」从项目库中选择";
+                            font-size: ThemeSettings.font-size-normal;
+                            color: ThemeSettings.text-sec(root.theme-mode);
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
                         ScrollView {
+                            // 内容宽度跟随可视区，使行内按钮能靠右对齐
+                            viewport-width: self.width;
+
                             VerticalLayout {
                                 padding: 4px;
                                 spacing: 2px;
@@ -634,9 +649,9 @@ export component NewItemWindow inherits Window {
                                     background: transparent;
 
                                     HorizontalLayout {
-                                        x: 6px;
+                                        x: 10px;
                                         y: (parent.height - 24px) / 2;
-                                        width: parent.width - 12px;
+                                        width: parent.width - 20px;
                                         height: 24px;
                                         spacing: 6px;
                                         alignment: start;
@@ -680,6 +695,50 @@ export component NewItemWindow inherits Window {
                                             overflow: elide;
                                         }
 
+                                        // 上移 / 下移
+                                        Rectangle {
+                                            width: 22px;
+                                            height: 24px;
+                                            border-radius: 4px;
+                                            background: up-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+
+                                            Text {
+                                                text: "↑";
+                                                width: 100%;
+                                                height: 100%;
+                                                font-size: ThemeSettings.font-size-normal;
+                                                color: ThemeSettings.text-sec(root.theme-mode);
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            up-touch := TouchArea {
+                                                width: 100%;
+                                                height: 100%;
+                                                clicked => { root.move-pick-up(i); }
+                                            }
+                                        }
+                                        Rectangle {
+                                            width: 22px;
+                                            height: 24px;
+                                            border-radius: 4px;
+                                            background: down-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+
+                                            Text {
+                                                text: "↓";
+                                                width: 100%;
+                                                height: 100%;
+                                                font-size: ThemeSettings.font-size-normal;
+                                                color: ThemeSettings.text-sec(root.theme-mode);
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+                                            down-touch := TouchArea {
+                                                width: 100%;
+                                                height: 100%;
+                                                clicked => { root.move-pick-down(i); }
+                                            }
+                                        }
+
                                         // 移除
                                         Rectangle {
                                             width: 24px;
@@ -687,10 +746,10 @@ export component NewItemWindow inherits Window {
                                             background: transparent;
 
                                             Text {
-                                                text: "✕";
+                                                text: "×";
                                                 width: 100%;
                                                 height: 100%;
-                                                font-size: ThemeSettings.font-size-small;
+                                                font-size: ThemeSettings.font-size-normal;
                                                 color: ThemeSettings.text-sec(root.theme-mode);
                                                 horizontal-alignment: center;
                                                 vertical-alignment: center;
