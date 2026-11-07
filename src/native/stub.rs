@@ -124,6 +124,69 @@ pub fn probe_foreground_window() -> String {
     "窗口探测仅支持 Windows 平台".to_string()
 }
 
+// ==================== 登录助手占位实现 ====================
+
+#[derive(Debug, Clone, Default)]
+pub struct WindowTarget {
+    pub hwnd: isize,
+    pub title: String,
+    pub class_name: String,
+    pub exe_name: String,
+    pub exe_path: String,
+    pub client_width: i32,
+    pub client_height: i32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CapturedClick {
+    pub x: i32,
+    pub y: i32,
+    pub rx: f64,
+    pub ry: f64,
+    pub inside_client: bool,
+    pub window: Option<WindowTarget>,
+}
+
+pub fn find_login_window(
+    _exe_name: &str,
+    _class_name: &str,
+    _title_keyword: &str,
+) -> Option<WindowTarget> {
+    None
+}
+
+pub fn activate_window(_hwnd: isize) -> bool {
+    false
+}
+
+pub fn window_client_rect(_hwnd: isize) -> Option<(i32, i32, i32, i32)> {
+    None
+}
+
+pub fn capture_clickpoint(_timeout_ms: u64) -> Option<CapturedClick> {
+    None
+}
+
+pub fn capture_window_info(_timeout_ms: u64) -> Option<WindowTarget> {
+    None
+}
+
+pub fn click_at(_x: i32, _y: i32) {}
+
+pub fn send_text(_text: &str) {}
+
+pub fn send_key(_key: &str) -> bool {
+    false
+}
+
+pub fn protect_secret(_plain: &str) -> Option<String> {
+    None
+}
+
+pub fn unprotect_secret(_enc: &str) -> Option<String> {
+    None
+}
+
 pub(crate) fn run_hidden(_cmd: &str, _args: &[&str]) -> Option<Vec<u8>> {
     None
 }

@@ -1,0 +1,410 @@
+// 登录助手
+// 针对自绘/Chromium 登录窗口：一次坐标校准，之后按相对坐标点击并注入账号密码
+// 密码使用 Windows DPAPI 加密后存入本地数据库
+
+import { ScrollView, LineEdit, CheckBox } from "std-widgets.slint";
+import { ThemeSettings } from "../theme.slint";
+
+// 可校准字段
+export struct LoginFieldInfo {
+    key: string,        // account / password / captcha / login / remember
+    label: string,
+    coord: string,      // 已校准坐标（百分比）或空
+    calibrated: bool,
+}
+
+component la-btn inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    in property <bool> enabled: true;
+    in property <string> theme-mode: "light";
+    callback clicked();
+
+    min-width: 84px;
+    height: 30px;
+    border-radius: ThemeSettings.border-radius;
+    background: !root.enabled
+        ? ThemeSettings.border-c(root.theme-mode)
+        : (root.primary ? ThemeSettings.accent-color
+            : (root.danger ? #dc2626 : ThemeSettings.card-bg(root.theme-mode)));
+    border-width: root.primary || root.danger ? 0px : 1px;
+    border-color: ThemeSettings.border-c(root.theme-mode);
+
+    Text {
+        text: root.label;
+        color: root.primary || root.danger ? #ffffff : ThemeSettings.text-c(root.theme-mode);
+        font-size: ThemeSettings.font-size-small;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// 表单输入行
+component la-field inherits VerticalLayout {
+    in property <string> label: "";
+    in property <string> placeholder: "";
+    in property <string> theme-mode: "light";
+    in property <bool> password: false;
+    in-out property <string> value: "";
+
+    spacing: 4px;
+
+    Text {
+        text: root.label;
+        font-size: ThemeSettings.font-size-normal;
+        font-weight: 600;
+        color: ThemeSettings.text-c(root.theme-mode);
+    }
+
+    LineEdit {
+        text <=> root.value;
+        placeholder-text: root.placeholder;
+        input-type: root.password ? InputType.password : InputType.text;
+        font-size: ThemeSettings.font-size-normal;
+        height: 32px;
+    }
+}
+
+// 字段校准行
+component la-field-row inherits Rectangle {
+    in property <LoginFieldInfo> field;
+    in property <string> theme-mode: "light";
+    in property <bool> enabled: true;
+    callback capture();
+
+    height: 36px;
+    border-radius: 4px;
+    background: transparent;
+
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+
+        Text {
+            text: root.field.label;
+            width: 90px;
+            font-size: ThemeSettings.font-size-normal;
+            color: ThemeSettings.text-c(root.theme-mode);
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.field.calibrated ? root.field.coord : "未校准";
+            horizontal-stretch: 1;
+            font-size: ThemeSettings.font-size-small;
+            color: root.field.calibrated ? ThemeSettings.text-c(root.theme-mode) : ThemeSettings.text-sec(root.theme-mode);
+            vertical-alignment: center;
+        }
+
+        la-btn {
+            label: root.field.calibrated ? "重新校准" : "校准";
+            enabled: root.enabled;
+            theme-mode: root.theme-mode;
+            clicked => { root.capture(); }
+        }
+    }
+}
+
+export component LoginAssistantWindow inherits Window {
+    title: "登录助手";
+    background: ThemeSettings.bg-color(root.theme-mode);
+    default-font-family: ThemeSettings.font-family;
+    preferred-width: 880px;
+    preferred-height: 640px;
+    min-width: 780px;
+    min-height: 540px;
+
+    in property <string> theme-mode: "light";
+    in property <string> status: "";
+    in property <bool> busy: false;
+    in property <[string]> profile-names: [];
+    in property <[LoginFieldInfo]> fields: [];
+
+    in-out property <int> selected-index: -1;
+    in-out property <string> profile-name: "";
+    in-out property <string> exe-path: "";
+    in-out property <string> title-keyword: "";
+    in-out property <string> window-class: "";
+    in-out property <string> account: "";
+    in-out property <string> password: "";
+    in-out property <bool> auto-login: false;
+    in-out property <bool> auto-start: false;
+    in-out property <bool> profile-enabled: true;
+
+    callback new-profile();
+    callback save-profile();
+    callback delete-profile();
+    callback select-profile(int);
+    callback capture-window();
+    callback capture-field(string);
+    callback run-profile();
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+
+        Text {
+            text: "为自绘/Chromium 登录窗口配置一次坐标，即可自动填入账号密码。\n用法：新建配置 → 捕获窗口 → 依次校准账号/密码/验证码/登录按钮 → 保存 → 执行填充。";
+            color: ThemeSettings.text-sec(root.theme-mode);
+            font-size: ThemeSettings.font-size-small;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            vertical-stretch: 1;
+
+            // ===== 左侧配置列表 =====
+            Rectangle {
+                width: 220px;
+                vertical-stretch: 1;
+                background: ThemeSettings.card-bg(root.theme-mode);
+                border-radius: ThemeSettings.border-radius;
+                border-width: 1px;
+                border-color: ThemeSettings.border-c(root.theme-mode);
+
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 6px;
+
+                    Text {
+                        text: "配置列表";
+                        font-size: ThemeSettings.font-size-normal;
+                        font-weight: 600;
+                        color: ThemeSettings.text-c(root.theme-mode);
+                    }
+
+                    ScrollView {
+                        vertical-stretch: 1;
+
+                        VerticalLayout {
+                            spacing: 2px;
+
+                            if root.profile-names.length == 0 : Text {
+                                text: "（暂无配置，点击下方「新建」）";
+                                font-size: ThemeSettings.font-size-small;
+                                color: ThemeSettings.text-sec(root.theme-mode);
+                                wrap: word-wrap;
+                            }
+
+                            for name[i] in root.profile-names : Rectangle {
+                                height: 34px;
+                                border-radius: 4px;
+                                background: i == root.selected-index
+                                    ? ThemeSettings.selected-c(root.theme-mode)
+                                    : (item-touch.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent);
+
+                                Text {
+                                    x: 8px;
+                                    width: parent.width - 16px;
+                                    text: name;
+                                    font-size: ThemeSettings.font-size-normal;
+                                    color: ThemeSettings.text-c(root.theme-mode);
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+
+                                item-touch := TouchArea {
+                                    width: 100%;
+                                    height: 100%;
+                                    clicked => { root.select-profile(i); }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 6px;
+                        alignment: start;
+
+                        la-btn {
+                            label: "新建";
+                            theme-mode: root.theme-mode;
+                            enabled: !root.busy;
+                            clicked => { root.new-profile(); }
+                        }
+                        la-btn {
+                            label: "删除";
+                            danger: true;
+                            enabled: !root.busy && root.selected-index >= 0;
+                            theme-mode: root.theme-mode;
+                            clicked => { root.delete-profile(); }
+                        }
+                    }
+                }
+            }
+
+            // ===== 右侧表单 =====
+            Rectangle {
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+                background: ThemeSettings.card-bg(root.theme-mode);
+                border-radius: ThemeSettings.border-radius;
+                border-width: 1px;
+                border-color: ThemeSettings.border-c(root.theme-mode);
+
+                ScrollView {
+                    width: 100%;
+                    height: 100%;
+
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 10px;
+
+                        Text {
+                            text: "目标窗口";
+                            font-size: ThemeSettings.font-size-large;
+                            font-weight: 600;
+                            color: ThemeSettings.text-c(root.theme-mode);
+                        }
+
+                        la-field {
+                            label: "配置名称";
+                            placeholder: "例如：粤开智能交易";
+                            value <=> root.profile-name;
+                            theme-mode: root.theme-mode;
+                        }
+
+                        la-field {
+                            label: "程序路径（找不到窗口时自动启动）";
+                            placeholder: "例如：D:\\ykznjy\\ykznjy.exe";
+                            value <=> root.exe-path;
+                            theme-mode: root.theme-mode;
+                        }
+
+                        la-field {
+                            label: "窗口标题关键字";
+                            placeholder: "例如：登录";
+                            value <=> root.title-keyword;
+                            theme-mode: root.theme-mode;
+                        }
+
+                        la-field {
+                            label: "窗口类名（可选，精确匹配）";
+                            placeholder: "留空则只按进程名/标题匹配";
+                            value <=> root.window-class;
+                            theme-mode: root.theme-mode;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
+                            la-btn {
+                                label: "捕获窗口（3 秒内点击目标登录窗）";
+                                primary: true;
+                                enabled: !root.busy;
+                                theme-mode: root.theme-mode;
+                                clicked => { root.capture-window(); }
+                            }
+                        }
+
+                        Rectangle { height: 1px; background: ThemeSettings.border-c(root.theme-mode); }
+
+                        Text {
+                            text: "账号与密码";
+                            font-size: ThemeSettings.font-size-large;
+                            font-weight: 600;
+                            color: ThemeSettings.text-c(root.theme-mode);
+                        }
+
+                        la-field {
+                            label: "账号";
+                            placeholder: "登录账号";
+                            value <=> root.account;
+                            theme-mode: root.theme-mode;
+                        }
+
+                        la-field {
+                            label: "密码（DPAPI 加密保存）";
+                            placeholder: "登录密码";
+                            password: true;
+                            value <=> root.password;
+                            theme-mode: root.theme-mode;
+                        }
+
+                        Rectangle { height: 1px; background: ThemeSettings.border-c(root.theme-mode); }
+
+                        Text {
+                            text: "字段坐标校准";
+                            font-size: ThemeSettings.font-size-large;
+                            font-weight: 600;
+                            color: ThemeSettings.text-c(root.theme-mode);
+                        }
+
+                        Text {
+                            text: "点击「校准」后助手窗口会隐藏，请在 8 秒内点击目标登录窗口中的对应位置。";
+                            font-size: ThemeSettings.font-size-small;
+                            color: ThemeSettings.text-sec(root.theme-mode);
+                            wrap: word-wrap;
+                        }
+
+                        for f in root.fields : la-field-row {
+                            field: f;
+                            theme-mode: root.theme-mode;
+                            enabled: !root.busy;
+                            capture => { root.capture-field(f.key); }
+                        }
+                        // 确保字段列表始终渲染（即使为空也保持高度）
+                        if root.fields.length == 0 : Text {
+                            text: "（保存配置后重新打开即可校准字段）";
+                            font-size: ThemeSettings.font-size-small;
+                            color: ThemeSettings.text-sec(root.theme-mode);
+                        }
+
+                        Rectangle { height: 1px; background: ThemeSettings.border-c(root.theme-mode); }
+
+                        CheckBox {
+                            text: "填充完成后自动点击登录（未校准验证码时生效）";
+                            checked <=> root.auto-login;
+                            font-size: ThemeSettings.font-size-normal;
+                        }
+                        CheckBox {
+                            text: "启动 Dawn Launcher 时自动执行";
+                            checked <=> root.auto-start;
+                            font-size: ThemeSettings.font-size-normal;
+                        }
+                        CheckBox {
+                            text: "启用此配置";
+                            checked <=> root.profile-enabled;
+                            font-size: ThemeSettings.font-size-normal;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
+
+                            la-btn {
+                                label: "保存配置";
+                                primary: true;
+                                enabled: !root.busy;
+                                theme-mode: root.theme-mode;
+                                clicked => { root.save-profile(); }
+                            }
+                            la-btn {
+                                label: "执行填充";
+                                enabled: !root.busy && root.selected-index >= 0;
+                                theme-mode: root.theme-mode;
+                                clicked => { root.run-profile(); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Text {
+            text: root.status;
+            color: ThemeSettings.accent-color;
+            font-size: ThemeSettings.font-size-small;
+            horizontal-stretch: 1;
+            visible: root.status != "";
+        }
+    }
+}

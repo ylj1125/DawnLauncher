@@ -2186,3 +2186,522 @@ pub fn probe_foreground_window() -> String {
     }
     out
 }
+
+// ==================== 登录助手 (坐标校准 + 键鼠注入) ====================
+
+/// 目标窗口信息
+#[derive(Debug, Clone, Default)]
+pub struct WindowTarget {
+    pub hwnd: isize,
+    pub title: String,
+    pub class_name: String,
+    pub exe_name: String,
+    pub exe_path: String,
+    pub client_width: i32,
+    pub client_height: i32,
+}
+
+/// 捕获到的一次点击（屏幕坐标 + 相对客户区比例）
+#[derive(Debug, Clone, Default)]
+pub struct CapturedClick {
+    pub x: i32,
+    pub y: i32,
+    pub rx: f64,
+    pub ry: f64,
+    /// 点击位置是否落在客户区内（标题栏/边框为 false）
+    pub inside_client: bool,
+    pub window: Option<WindowTarget>,
+}
+
+/// 由窗口句柄读取标题/类名/进程/客户区尺寸
+unsafe fn window_target_from_hwnd(hwnd: windows::Win32::Foundation::HWND) -> Option<WindowTarget> {
+    use windows::Win32::Foundation::{CloseHandle, RECT};
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, GetClientRect, GetWindowTextW, GetWindowThreadProcessId,
+    };
+
+    if hwnd.0 == 0 {
+        return None;
+    }
+
+    let mut pid: u32 = 0;
+    GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    // 忽略本进程自己的窗口
+    if pid == std::process::id() {
+        return None;
+    }
+
+    let mut title_buf = [0u16; 512];
+    let title_len = GetWindowTextW(hwnd, &mut title_buf);
+    let title = String::from_utf16_lossy(&title_buf[..title_len.max(0) as usize]);
+
+    let mut class_buf = [0u16; 256];
+    let class_len = GetClassNameW(hwnd, &mut class_buf);
+    let class_name = String::from_utf16_lossy(&class_buf[..class_len.max(0) as usize]);
+
+    let mut exe_path = String::new();
+    if let Ok(hproc) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+        let mut buf = [0u16; 1024];
+        let mut size = buf.len() as u32;
+        if QueryFullProcessImageNameW(
+            hproc,
+            PROCESS_NAME_WIN32,
+            windows::core::PWSTR(buf.as_mut_ptr()),
+            &mut size,
+        )
+        .is_ok()
+        {
+            exe_path = String::from_utf16_lossy(&buf[..size as usize]);
+        }
+        let _ = CloseHandle(hproc);
+    }
+    let exe_name = exe_path
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or("")
+        .to_string();
+
+    let mut crc = RECT::default();
+    let _ = GetClientRect(hwnd, &mut crc);
+
+    Some(WindowTarget {
+        hwnd: hwnd.0,
+        title,
+        class_name,
+        exe_name,
+        exe_path,
+        client_width: (crc.right - crc.left).max(0),
+        client_height: (crc.bottom - crc.top).max(0),
+    })
+}
+
+/// 校验窗口是否匹配给定的进程名 / 类名 / 标题关键字（空字符串表示忽略）
+fn window_matches(t: &WindowTarget, exe_name: &str, class_name: &str, title_keyword: &str) -> bool {
+    if !exe_name.is_empty() && !t.exe_name.eq_ignore_ascii_case(exe_name) {
+        return false;
+    }
+    if !class_name.is_empty() && !t.class_name.eq_ignore_ascii_case(class_name) {
+        return false;
+    }
+    if !title_keyword.is_empty() && !t.title.contains(title_keyword) {
+        return false;
+    }
+    true
+}
+
+unsafe extern "system" fn enum_login_windows(
+    hwnd: windows::Win32::Foundation::HWND,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::BOOL {
+    use windows::Win32::UI::WindowsAndMessaging::IsWindowVisible;
+    let list = &mut *(lparam.0 as *mut Vec<isize>);
+    if IsWindowVisible(hwnd).as_bool() {
+        list.push(hwnd.0);
+    }
+    windows::Win32::Foundation::TRUE
+}
+
+/// 查找登录窗口：按进程名 / 类名 / 标题关键字匹配（均为空则不匹配）
+pub fn find_login_window(
+    exe_name: &str,
+    class_name: &str,
+    title_keyword: &str,
+) -> Option<WindowTarget> {
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
+
+    if exe_name.is_empty() && class_name.is_empty() && title_keyword.is_empty() {
+        return None;
+    }
+
+    let mut handles: Vec<isize> = Vec::new();
+    unsafe {
+        let ptr = &mut handles as *mut Vec<isize>;
+        let _ = EnumWindows(Some(enum_login_windows), LPARAM(ptr as isize));
+    }
+
+    for h in handles {
+        unsafe {
+            if let Some(t) = window_target_from_hwnd(HWND(h)) {
+                if window_matches(&t, exe_name, class_name, title_keyword) {
+                    return Some(t);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 将目标窗口激活到前台（还原最小化 + 绕过前台锁定限制）
+pub fn activate_window(hwnd: isize) -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic,
+        SetForegroundWindow, ShowWindow, SW_RESTORE,
+    };
+
+    if hwnd == 0 {
+        return false;
+    }
+    let h = HWND(hwnd);
+    unsafe {
+        if IsIconic(h).as_bool() {
+            let _ = ShowWindow(h, SW_RESTORE);
+        }
+        let fg = GetForegroundWindow();
+        let fg_thread = if fg.0 != 0 {
+            GetWindowThreadProcessId(fg, None)
+        } else {
+            0
+        };
+        let cur_thread = GetCurrentThreadId();
+        let attached = fg_thread != 0
+            && fg_thread != cur_thread
+            && AttachThreadInput(cur_thread, fg_thread, true).as_bool();
+
+        let ok = SetForegroundWindow(h).as_bool();
+        let _ = BringWindowToTop(h);
+        let _ = SetFocus(h);
+
+        if attached {
+            let _ = AttachThreadInput(cur_thread, fg_thread, false);
+        }
+        ok || GetForegroundWindow().0 == hwnd
+    }
+}
+
+/// 获取客户区在屏幕上的位置与尺寸：(x, y, width, height)
+pub fn window_client_rect(hwnd: isize) -> Option<(i32, i32, i32, i32)> {
+    use windows::Win32::Foundation::{HWND, POINT, RECT};
+    use windows::Win32::Graphics::Gdi::ClientToScreen;
+    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+
+    if hwnd == 0 {
+        return None;
+    }
+    let h = HWND(hwnd);
+    let mut rc = RECT::default();
+    unsafe {
+        GetClientRect(h, &mut rc).ok()?;
+    }
+    let mut origin = POINT { x: 0, y: 0 };
+    unsafe {
+        let _ = ClientToScreen(h, &mut origin);
+    }
+    Some((
+        origin.x,
+        origin.y,
+        (rc.right - rc.left).max(0),
+        (rc.bottom - rc.top).max(0),
+    ))
+}
+
+/// 阻塞等待一次鼠标左键点击，返回点击位置与当时前台窗口的相对比例坐标
+/// 会自动忽略本进程窗口上的点击；超时返回 None
+pub fn capture_clickpoint(timeout_ms: u64) -> Option<CapturedClick> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+    use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow};
+
+    const VK_LBUTTON: i32 = 0x01;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+
+    unsafe {
+        // 先等待左键释放，避免把触发校准按钮的那次点击算进去
+        let release_deadline =
+            std::time::Instant::now() + std::time::Duration::from_millis(1000);
+        while (GetAsyncKeyState(VK_LBUTTON) as u16) & 0x8000 != 0 {
+            if std::time::Instant::now() > release_deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+
+        loop {
+            if std::time::Instant::now() > deadline {
+                return None;
+            }
+            if (GetAsyncKeyState(VK_LBUTTON) as u16) & 0x8000 != 0 {
+                let mut pt = POINT { x: 0, y: 0 };
+                let _ = GetCursorPos(&mut pt);
+                let fg = GetForegroundWindow();
+                let window = window_target_from_hwnd(fg);
+
+                // 等待释放，避免连续触发
+                let release_deadline =
+                    std::time::Instant::now() + std::time::Duration::from_millis(1000);
+                while (GetAsyncKeyState(VK_LBUTTON) as u16) & 0x8000 != 0 {
+                    if std::time::Instant::now() > release_deadline {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(15));
+                }
+
+                let target = match window {
+                    Some(w) if !w.title.is_empty() && w.client_width > 0 && w.client_height > 0 => w,
+                    _ => {
+                        // 点到的是本程序/无标题窗口，继续等待
+                        std::thread::sleep(std::time::Duration::from_millis(30));
+                        continue;
+                    }
+                };
+
+                if let Some((ox, oy, w, h)) = window_client_rect(target.hwnd) {
+                    if w > 0 && h > 0 {
+                        let rx = (pt.x - ox) as f64 / w as f64;
+                        let ry = (pt.y - oy) as f64 / h as f64;
+                        if (0.0..=1.0).contains(&rx) && (0.0..=1.0).contains(&ry) {
+                            return Some(CapturedClick {
+                                x: pt.x,
+                                y: pt.y,
+                                rx,
+                                ry,
+                                inside_client: true,
+                                window: Some(target),
+                            });
+                        }
+                    }
+                }
+                // 点在客户区之外（标题栏/边框），仍返回窗口供「捕获窗口」使用
+                return Some(CapturedClick {
+                    x: pt.x,
+                    y: pt.y,
+                    rx: 0.0,
+                    ry: 0.0,
+                    inside_client: false,
+                    window: Some(target),
+                });
+            }
+            std::thread::sleep(std::time::Duration::from_millis(12));
+        }
+    }
+}
+
+/// 捕获用户点击的窗口信息
+pub fn capture_window_info(timeout_ms: u64) -> Option<WindowTarget> {
+    capture_clickpoint(timeout_ms).and_then(|c| c.window)
+}
+
+/// 在屏幕坐标处执行一次鼠标左键点击
+pub fn click_at(x: i32, y: i32) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+        MOUSEINPUT,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
+
+    unsafe {
+        let _ = SetCursorPos(x, y);
+        std::thread::sleep(std::time::Duration::from_millis(40));
+
+        let down = INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dwFlags: MOUSEEVENTF_LEFTDOWN,
+                    ..std::mem::zeroed()
+                },
+            },
+        };
+        let up = INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dwFlags: MOUSEEVENTF_LEFTUP,
+                    ..std::mem::zeroed()
+                },
+            },
+        };
+        let size = std::mem::size_of::<INPUT>() as i32;
+        SendInput(&[down], size);
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        SendInput(&[up], size);
+    }
+}
+
+/// 以 Unicode 方式逐字符输入文本（不受输入法/键盘布局影响）
+pub fn send_text(text: &str) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+        KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, VIRTUAL_KEY,
+    };
+
+    let size = std::mem::size_of::<INPUT>() as i32;
+    for unit in text.encode_utf16() {
+        let down = INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(0),
+                    wScan: unit,
+                    dwFlags: KEYEVENTF_UNICODE,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        let up = INPUT {
+            r#type: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(0),
+                    wScan: unit,
+                    dwFlags: KEYBD_EVENT_FLAGS(KEYEVENTF_UNICODE.0 | KEYEVENTF_KEYUP.0),
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        unsafe {
+            SendInput(&[down], size);
+            SendInput(&[up], size);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(3));
+    }
+}
+
+/// 发送组合键/功能键：支持 "Ctrl+A" / "Enter" / "Tab"
+pub fn send_key(key: &str) -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+        KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_CONTROL, VK_RETURN, VK_TAB,
+    };
+
+    let size = std::mem::size_of::<INPUT>() as i32;
+    let key_input = |vk: u16, up: bool| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(vk),
+                wScan: 0,
+                dwFlags: if up {
+                    KEYBD_EVENT_FLAGS(KEYEVENTF_KEYUP.0)
+                } else {
+                    KEYBD_EVENT_FLAGS(0)
+                },
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+
+    unsafe {
+        match key.to_lowercase().as_str() {
+            "ctrl+a" => {
+                SendInput(&[key_input(VK_CONTROL.0, false)], size);
+                SendInput(&[key_input(0x41, false)], size);
+                SendInput(&[key_input(0x41, true)], size);
+                SendInput(&[key_input(VK_CONTROL.0, true)], size);
+                true
+            }
+            "enter" => {
+                SendInput(&[key_input(VK_RETURN.0, false)], size);
+                SendInput(&[key_input(VK_RETURN.0, true)], size);
+                true
+            }
+            "tab" => {
+                SendInput(&[key_input(VK_TAB.0, false)], size);
+                SendInput(&[key_input(VK_TAB.0, true)], size);
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+/// 用 Windows DPAPI 加密密码，输出十六进制字符串（仅当前用户可解密）
+pub fn protect_secret(plain: &str) -> Option<String> {
+    use windows::Win32::Security::Cryptography::{
+        CryptProtectData, CRYPT_INTEGER_BLOB,
+    };
+    use windows::core::PCWSTR;
+
+    if plain.is_empty() {
+        return Some(String::new());
+    }
+    let data = plain.as_bytes();
+    let input = CRYPT_INTEGER_BLOB {
+        cbData: data.len() as u32,
+        pbData: data.as_ptr() as *mut u8,
+    };
+    let mut output = CRYPT_INTEGER_BLOB::default();
+    unsafe {
+        CryptProtectData(
+            &input,
+            PCWSTR::null(),
+            None,
+            None,
+            None,
+            0,
+            &mut output,
+        )
+        .ok()?;
+        let bytes = std::slice::from_raw_parts(output.pbData, output.cbData as usize);
+        let hex = login_hex_encode(bytes);
+        let _ = windows::Win32::Foundation::LocalFree(windows::Win32::Foundation::HLOCAL(
+            output.pbData as *mut core::ffi::c_void,
+        ));
+        Some(hex)
+    }
+}
+
+/// 解密 DPAPI 密码（输入为 protect_secret 输出的十六进制）
+pub fn unprotect_secret(enc: &str) -> Option<String> {
+    use windows::Win32::Security::Cryptography::{
+        CryptUnprotectData, CRYPT_INTEGER_BLOB,
+    };
+
+    if enc.is_empty() {
+        return Some(String::new());
+    }
+    let bytes = login_hex_decode(enc)?;
+    let input = CRYPT_INTEGER_BLOB {
+        cbData: bytes.len() as u32,
+        pbData: bytes.as_ptr() as *mut u8,
+    };
+    let mut output = CRYPT_INTEGER_BLOB::default();
+    unsafe {
+        CryptUnprotectData(&input, None, None, None, None, 0, &mut output).ok()?;
+        let plain = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+        let _ = windows::Win32::Foundation::LocalFree(windows::Win32::Foundation::HLOCAL(
+            output.pbData as *mut core::ffi::c_void,
+        ));
+        String::from_utf8(plain).ok()
+    }
+}
+
+fn login_hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+fn login_hex_decode(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    let val = |c: u8| -> Option<u8> {
+        match c {
+            b'0'..=b'9' => Some(c - b'0'),
+            b'a'..=b'f' => Some(c - b'a' + 10),
+            b'A'..=b'F' => Some(c - b'A' + 10),
+            _ => None,
+        }
+    };
+    for chunk in bytes.chunks_exact(2) {
+        out.push(val(chunk[0])? << 4 | val(chunk[1])?);
+    }
+    Some(out)
+}

@@ -83,6 +83,47 @@ pub struct MultiItem {
     pub name: Option<String>,
 }
 
+/// 登录助手：登录窗口中的字段位置（相对客户区比例，0.0 ~ 1.0）
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LoginPoint {
+    pub rx: f64,
+    pub ry: f64,
+}
+
+/// 登录助手：各字段的标定坐标
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LoginFields {
+    pub account: Option<LoginPoint>,
+    pub password: Option<LoginPoint>,
+    pub captcha: Option<LoginPoint>,
+    pub login: Option<LoginPoint>,
+    pub remember: Option<LoginPoint>,
+}
+
+/// 登录助手配置
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LoginProfile {
+    pub id: i64,
+    pub name: String,
+    /// 目标进程名，例如 ykznjy.exe
+    pub exe_name: String,
+    /// 目标程序完整路径（找不到窗口时用于自动启动）
+    pub exe_path: String,
+    /// 窗口类名（可选，精确匹配）
+    pub window_class: String,
+    /// 窗口标题关键字（可选，包含匹配）
+    pub title_keyword: String,
+    pub account: String,
+    /// DPAPI 加密后的密码（十六进制）
+    pub password_enc: String,
+    pub fields: LoginFields,
+    /// 是否在填充后自动点击登录
+    pub auto_login: bool,
+    /// Dawn Launcher 启动时是否自动执行
+    pub auto_start: bool,
+    pub enabled: bool,
+}
+
 impl Classification {
     /// 是否为父分类 (无 parent_id)
     pub fn is_parent(&self) -> bool {

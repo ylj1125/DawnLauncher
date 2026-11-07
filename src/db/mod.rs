@@ -4,7 +4,7 @@
 use rusqlite::{params, Connection};
 use std::sync::Mutex;
 
-use crate::models::{Classification, ClassificationData, Item, ItemData};
+use crate::models::{Classification, ClassificationData, Item, ItemData, LoginFields, LoginProfile};
 
 /// 全局数据库连接 (Slint 的事件循环是单线程的，使用 Mutex 即可)
 pub struct Database {
@@ -54,6 +54,23 @@ impl Database {
             r#"CREATE TABLE IF NOT EXISTS setting (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            )"#,
+        )?;
+        // login_profile 表 (登录助手配置)
+        conn.execute_batch(
+            r#"CREATE TABLE IF NOT EXISTS login_profile (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                exe_name TEXT NOT NULL DEFAULT '',
+                exe_path TEXT NOT NULL DEFAULT '',
+                window_class TEXT NOT NULL DEFAULT '',
+                title_keyword TEXT NOT NULL DEFAULT '',
+                account TEXT NOT NULL DEFAULT '',
+                password_enc TEXT NOT NULL DEFAULT '',
+                fields TEXT NOT NULL DEFAULT '{}',
+                auto_login INTEGER NOT NULL DEFAULT 0,
+                auto_start INTEGER NOT NULL DEFAULT 0,
+                enabled INTEGER NOT NULL DEFAULT 1
             )"#,
         )?;
         Ok(())
@@ -990,6 +1007,96 @@ impl Database {
         Ok(())
     }
 
+    // ==================== 登录助手 (login_profile) ====================
+
+    /// 查询所有登录配置
+    pub fn list_login_profiles(&self) -> Vec<LoginProfile> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = match conn.prepare(
+            "SELECT id, name, exe_name, exe_path, window_class, title_keyword, account, \
+                    password_enc, fields, auto_login, auto_start, enabled \
+             FROM login_profile ORDER BY id ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map([], row_to_login_profile)
+            .ok()
+            .map(|r| r.filter_map(|x| x.ok()).collect())
+            .unwrap_or_default()
+    }
+
+    /// 查询单个登录配置
+    pub fn get_login_profile(&self, id: i64) -> Option<LoginProfile> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, name, exe_name, exe_path, window_class, title_keyword, account, \
+                    password_enc, fields, auto_login, auto_start, enabled \
+             FROM login_profile WHERE id = ?",
+            params![id],
+            row_to_login_profile,
+        )
+        .ok()
+    }
+
+    /// 新增登录配置，返回新 id
+    pub fn insert_login_profile(&self, p: &LoginProfile) -> Result<i64, rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let fields = serde_json::to_string(&p.fields).unwrap_or_else(|_| "{}".into());
+        conn.execute(
+            "INSERT INTO login_profile \
+             (name, exe_name, exe_path, window_class, title_keyword, account, password_enc, fields, auto_login, auto_start, enabled) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                p.name,
+                p.exe_name,
+                p.exe_path,
+                p.window_class,
+                p.title_keyword,
+                p.account,
+                p.password_enc,
+                fields,
+                p.auto_login as i64,
+                p.auto_start as i64,
+                p.enabled as i64,
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// 更新登录配置
+    pub fn update_login_profile(&self, p: &LoginProfile) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let fields = serde_json::to_string(&p.fields).unwrap_or_else(|_| "{}".into());
+        conn.execute(
+            "UPDATE login_profile SET name = ?, exe_name = ?, exe_path = ?, window_class = ?, \
+                    title_keyword = ?, account = ?, password_enc = ?, fields = ?, \
+                    auto_login = ?, auto_start = ?, enabled = ? WHERE id = ?",
+            params![
+                p.name,
+                p.exe_name,
+                p.exe_path,
+                p.window_class,
+                p.title_keyword,
+                p.account,
+                p.password_enc,
+                fields,
+                p.auto_login as i64,
+                p.auto_start as i64,
+                p.enabled as i64,
+                p.id,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 删除登录配置
+    pub fn delete_login_profile(&self, id: i64) -> Result<(), rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM login_profile WHERE id = ?", params![id])?;
+        Ok(())
+    }
+
     // ==================== 设置 (setting) ====================
 
     /// 读取设置项，不存在返回默认值
@@ -1066,6 +1173,25 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<Item> {
         shortcut_key: row.get(5)?,
         global_shortcut_key: row.get(6)?,
         order: row.get(7)?,
+    })
+}
+
+fn row_to_login_profile(row: &rusqlite::Row) -> rusqlite::Result<LoginProfile> {
+    let fields_str: String = row.get(8)?;
+    let fields: LoginFields = serde_json::from_str(&fields_str).unwrap_or_default();
+    Ok(LoginProfile {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        exe_name: row.get(2)?,
+        exe_path: row.get(3)?,
+        window_class: row.get(4)?,
+        title_keyword: row.get(5)?,
+        account: row.get(6)?,
+        password_enc: row.get(7)?,
+        fields,
+        auto_login: row.get::<_, i64>(9)? != 0,
+        auto_start: row.get::<_, i64>(10)? != 0,
+        enabled: row.get::<_, i64>(11)? != 0,
     })
 }
 

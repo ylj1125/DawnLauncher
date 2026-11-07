@@ -1,6 +1,6 @@
 [package]
 name = "dawn-launcher"
-version = "0.23.5"
+version = "0.24.0"
 edition = "2021"
 description = "Dawn Launcher - Windows 快捷启动工具 (Rust + Slint 重构版)"
 authors = ["FanChenIO"]
@@ -33,6 +33,7 @@ features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Security",
+    "Win32_Security_Cryptography",
     "Win32_System_Com",
     "Win32_System_Threading",
     "Win32_System_Diagnostics_Debug",

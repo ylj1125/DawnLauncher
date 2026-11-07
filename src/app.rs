@@ -7,14 +7,14 @@ use std::sync::{Arc, Mutex};
 use slint::{ComponentHandle, Model, ModelRc, SharedString};
 
 use crate::db::Database;
-use crate::models::{Classification, Item};
+use crate::models::{Classification, Item, LoginFields, LoginPoint, LoginProfile};
 use crate::native;
 // MainWindow, ClassificationInfo, ItemInfo, MenuItem 由 slint::include_modules!() 生成在 crate 根
 use crate::{
     ActionDialog, CatalogEntry, ClassificationInfo, DragHelper, InputDialog, ItemEditWindow,
-    ItemInfo, ItemSettingsPayload, ItemSettingsWindow, MainWindow, MenuItem, MultiPick,
-    MultilineInputDialog, NewItemPayload, NewItemWindow, PickListDialog, QuickSearchWindow,
-    SettingsWindow, WindowProbeWindow,
+    ItemInfo, ItemSettingsPayload, ItemSettingsWindow, LoginAssistantWindow, LoginFieldInfo,
+    MainWindow, MenuItem, MultiPick, MultilineInputDialog, NewItemPayload, NewItemWindow,
+    PickListDialog, QuickSearchWindow, SettingsWindow, WindowProbeWindow,
 };
 
 pub struct App {
@@ -25,6 +25,7 @@ pub struct App {
     new_item_window: NewItemWindow,
     item_settings_window: ItemSettingsWindow,
     probe_window: WindowProbeWindow,
+    login_window: LoginAssistantWindow,
     db: Arc<Database>,
     current_classification_id: Arc<Mutex<i64>>,
     expanded_classifications: Arc<Mutex<std::collections::HashSet<i64>>>,
@@ -76,6 +77,10 @@ impl App {
         // 3.1.4b 创建「窗口探测」窗口（初始隐藏）
         let probe_window = WindowProbeWindow::new()?;
         probe_window.window().hide().ok();
+
+        // 3.1.4c 创建「登录助手」窗口（初始隐藏）
+        let login_window = LoginAssistantWindow::new()?;
+        login_window.window().hide().ok();
 
         // 3.1.5 创建 Slint 原生对话框控制器（输入框/多行输入/动作选择）
         let dialogs = Rc::new(DialogController::new()?);
@@ -1553,6 +1558,425 @@ impl App {
                     }
                 }
             });
+        }
+
+        // 15.37.4 登录助手: 打开窗口并刷新配置列表
+        let login_profiles_cache: Arc<Mutex<Vec<LoginProfile>>> =
+            Arc::new(Mutex::new(Vec::new()));
+        let login_current_id: Arc<Mutex<i64>> = Arc::new(Mutex::new(0));
+        let login_current_fields: Arc<Mutex<LoginFields>> =
+            Arc::new(Mutex::new(LoginFields::default()));
+        let login_capturing = Arc::new(Mutex::new(false));
+        {
+            let lw_weak = login_window.as_weak();
+            let mw_weak = main_window.as_weak();
+            let db_login = db.clone();
+            let cache = login_profiles_cache.clone();
+            main_window.on_open_login_assistant(move || {
+                if let Some(w) = lw_weak.upgrade() {
+                    if let Some(mw) = mw_weak.upgrade() {
+                        w.set_theme_mode(mw.get_theme_mode());
+                    }
+                    let profiles = db_login.list_login_profiles();
+                    let names: Vec<SharedString> = profiles
+                        .iter()
+                        .map(|p| SharedString::from(p.name.clone()))
+                        .collect();
+                    w.set_profile_names(ModelRc::from(Rc::new(slint::VecModel::from(names))));
+                    *cache.lock().unwrap() = profiles;
+                    w.set_status(SharedString::from(""));
+                    w.window().show().ok();
+                }
+            });
+        }
+
+        // 15.37.5 登录助手: 新建配置
+        {
+            let lw_weak = login_window.as_weak();
+            let cur_id = login_current_id.clone();
+            let cur_fields = login_current_fields.clone();
+            login_window.on_new_profile(move || {
+                if let Some(w) = lw_weak.upgrade() {
+                    *cur_id.lock().unwrap() = 0;
+                    let empty = LoginFields::default();
+                    *cur_fields.lock().unwrap() = empty.clone();
+                    w.set_selected_index(-1);
+                    w.set_profile_name(SharedString::from(""));
+                    w.set_exe_path(SharedString::from(""));
+                    w.set_title_keyword(SharedString::from(""));
+                    w.set_window_class(SharedString::from(""));
+                    w.set_account(SharedString::from(""));
+                    w.set_password(SharedString::from(""));
+                    w.set_auto_login(false);
+                    w.set_auto_start(false);
+                    w.set_profile_enabled(true);
+                    w.set_fields(login_fields_model(&empty));
+                    w.set_status(SharedString::from(
+                        "新建配置：填写信息、校准字段后点击「保存配置」",
+                    ));
+                }
+            });
+        }
+
+        // 15.37.6 登录助手: 选择配置
+        {
+            let lw_weak = login_window.as_weak();
+            let cache = login_profiles_cache.clone();
+            let cur_id = login_current_id.clone();
+            let cur_fields = login_current_fields.clone();
+            login_window.on_select_profile(move |idx| {
+                if idx < 0 {
+                    return;
+                }
+                let profile = cache
+                    .lock()
+                    .unwrap()
+                    .get(idx as usize)
+                    .cloned();
+                let Some(p) = profile else { return };
+                if let Some(w) = lw_weak.upgrade() {
+                    *cur_id.lock().unwrap() = p.id;
+                    *cur_fields.lock().unwrap() = p.fields.clone();
+                    let pwd = native::unprotect_secret(&p.password_enc).unwrap_or_default();
+                    w.set_selected_index(idx);
+                    w.set_profile_name(SharedString::from(p.name.clone()));
+                    w.set_exe_path(SharedString::from(p.exe_path.clone()));
+                    w.set_title_keyword(SharedString::from(p.title_keyword.clone()));
+                    w.set_window_class(SharedString::from(p.window_class.clone()));
+                    w.set_account(SharedString::from(p.account.clone()));
+                    w.set_password(SharedString::from(pwd));
+                    w.set_auto_login(p.auto_login);
+                    w.set_auto_start(p.auto_start);
+                    w.set_profile_enabled(p.enabled);
+                    w.set_fields(login_fields_model(&p.fields));
+                    w.set_status(SharedString::from(format!("已载入配置：{}", p.name)));
+                }
+            });
+        }
+
+        // 15.37.7 登录助手: 保存配置
+        {
+            let lw_weak = login_window.as_weak();
+            let db_login = db.clone();
+            let cache = login_profiles_cache.clone();
+            let cur_id = login_current_id.clone();
+            let cur_fields = login_current_fields.clone();
+            login_window.on_save_profile(move || {
+                let Some(w) = lw_weak.upgrade() else { return };
+                let name = w.get_profile_name().to_string().trim().to_string();
+                if name.is_empty() {
+                    w.set_status(SharedString::from("配置名称不能为空"));
+                    return;
+                }
+                let exe_path = w.get_exe_path().to_string().trim().to_string();
+                let exe_name = exe_path
+                    .rsplit(['\\', '/'])
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                let pwd = w.get_password().to_string();
+                let password_enc = if pwd.is_empty() {
+                    String::new()
+                } else {
+                    match native::protect_secret(&pwd) {
+                        Some(v) => v,
+                        None => {
+                            w.set_status(SharedString::from("密码加密失败（DPAPI 不可用）"));
+                            return;
+                        }
+                    }
+                };
+                let id = *cur_id.lock().unwrap();
+                let mut p = LoginProfile {
+                    id,
+                    name,
+                    exe_name,
+                    exe_path,
+                    window_class: w.get_window_class().to_string(),
+                    title_keyword: w.get_title_keyword().to_string(),
+                    account: w.get_account().to_string(),
+                    password_enc,
+                    fields: cur_fields.lock().unwrap().clone(),
+                    auto_login: w.get_auto_login(),
+                    auto_start: w.get_auto_start(),
+                    enabled: w.get_profile_enabled(),
+                };
+                let saved = if id == 0 {
+                    db_login.insert_login_profile(&p).map(|new_id| {
+                        p.id = new_id;
+                        new_id
+                    })
+                } else {
+                    db_login.update_login_profile(&p).map(|_| id)
+                };
+                match saved {
+                    Ok(saved_id) => {
+                        *cur_id.lock().unwrap() = saved_id;
+                        let profiles = db_login.list_login_profiles();
+                        let names: Vec<SharedString> = profiles
+                            .iter()
+                            .map(|x| SharedString::from(x.name.clone()))
+                            .collect();
+                        let sel = profiles
+                            .iter()
+                            .position(|x| x.id == saved_id)
+                            .map(|i| i as i32)
+                            .unwrap_or(-1);
+                        w.set_profile_names(ModelRc::from(Rc::new(
+                            slint::VecModel::from(names),
+                        )));
+                        w.set_selected_index(sel);
+                        *cache.lock().unwrap() = profiles;
+                        w.set_status(SharedString::from("配置已保存"));
+                    }
+                    Err(e) => {
+                        w.set_status(SharedString::from(format!("保存失败：{}", e)))
+                    }
+                }
+            });
+        }
+
+        // 15.37.8 登录助手: 删除配置
+        {
+            let lw_weak = login_window.as_weak();
+            let db_login = db.clone();
+            let cache = login_profiles_cache.clone();
+            let cur_id = login_current_id.clone();
+            let cur_fields = login_current_fields.clone();
+            login_window.on_delete_profile(move || {
+                let id = *cur_id.lock().unwrap();
+                let Some(w) = lw_weak.upgrade() else { return };
+                if id == 0 {
+                    w.set_status(SharedString::from("当前是新建配置，无需删除"));
+                    return;
+                }
+                if let Err(e) = db_login.delete_login_profile(id) {
+                    w.set_status(SharedString::from(format!("删除失败：{}", e)));
+                    return;
+                }
+                *cur_id.lock().unwrap() = 0;
+                let empty = LoginFields::default();
+                *cur_fields.lock().unwrap() = empty.clone();
+                let profiles = db_login.list_login_profiles();
+                let names: Vec<SharedString> = profiles
+                    .iter()
+                    .map(|x| SharedString::from(x.name.clone()))
+                    .collect();
+                w.set_profile_names(ModelRc::from(Rc::new(slint::VecModel::from(names))));
+                w.set_selected_index(-1);
+                w.set_profile_name(SharedString::from(""));
+                w.set_exe_path(SharedString::from(""));
+                w.set_title_keyword(SharedString::from(""));
+                w.set_window_class(SharedString::from(""));
+                w.set_account(SharedString::from(""));
+                w.set_password(SharedString::from(""));
+                w.set_auto_login(false);
+                w.set_auto_start(false);
+                w.set_profile_enabled(true);
+                w.set_fields(login_fields_model(&empty));
+                *cache.lock().unwrap() = profiles;
+                w.set_status(SharedString::from("配置已删除"));
+            });
+        }
+
+        // 15.37.9 登录助手: 捕获目标窗口
+        {
+            let lw_weak = login_window.as_weak();
+            let capturing = login_capturing.clone();
+            login_window.on_capture_window(move || {
+                {
+                    let mut c = capturing.lock().unwrap();
+                    if *c {
+                        return;
+                    }
+                    *c = true;
+                }
+                let Some(w) = lw_weak.upgrade() else {
+                    *capturing.lock().unwrap() = false;
+                    return;
+                };
+                w.set_busy(true);
+                w.set_status(SharedString::from(
+                    "助手窗口已隐藏：请点击目标登录窗口（8 秒内）…",
+                ));
+                w.window().hide().ok();
+
+                let weak = lw_weak.clone();
+                let cap = capturing.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    let info = native::capture_window_info(8000);
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak.upgrade() {
+                            match info {
+                                Some(t) => {
+                                    w.set_exe_path(SharedString::from(t.exe_path.clone()));
+                                    w.set_window_class(SharedString::from(t.class_name.clone()));
+                                    w.set_title_keyword(SharedString::from(t.title.clone()));
+                                    w.set_status(SharedString::from(format!(
+                                        "已捕获窗口：{}（{}）",
+                                        t.title, t.exe_name
+                                    )));
+                                }
+                                None => w.set_status(SharedString::from(
+                                    "未捕获到窗口，请重试（需点击目标窗口任意位置）",
+                                )),
+                            }
+                            w.set_busy(false);
+                            w.window().show().ok();
+                        }
+                        *cap.lock().unwrap() = false;
+                    });
+                });
+            });
+        }
+
+        // 15.37.10 登录助手: 校准单个字段
+        {
+            let lw_weak = login_window.as_weak();
+            let capturing = login_capturing.clone();
+            let cur_fields = login_current_fields.clone();
+            login_window.on_capture_field(move |key| {
+                let key = key.to_string();
+                {
+                    let mut c = capturing.lock().unwrap();
+                    if *c {
+                        return;
+                    }
+                    *c = true;
+                }
+                let Some(w) = lw_weak.upgrade() else {
+                    *capturing.lock().unwrap() = false;
+                    return;
+                };
+                w.set_busy(true);
+                w.set_status(SharedString::from(
+                    "助手窗口已隐藏：请点击登录窗口中的目标位置（10 秒内）…",
+                ));
+                w.window().hide().ok();
+
+                let weak = lw_weak.clone();
+                let cap = capturing.clone();
+                let fields = cur_fields.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    let captured = native::capture_clickpoint(10000)
+                        .filter(|c| c.inside_client);
+                    let captured_fields = captured.as_ref().map(|c| {
+                        let point = LoginPoint {
+                            rx: c.rx,
+                            ry: c.ry,
+                        };
+                        let mut f = fields.lock().unwrap();
+                        match key.as_str() {
+                            "account" => f.account = Some(point),
+                            "password" => f.password = Some(point),
+                            "captcha" => f.captcha = Some(point),
+                            "login" => f.login = Some(point),
+                            "remember" => f.remember = Some(point),
+                            _ => {}
+                        }
+                        f.clone()
+                    });
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak.upgrade() {
+                            match captured {
+                                Some(c) => {
+                                    let label = match key.as_str() {
+                                        "account" => "账号",
+                                        "password" => "密码",
+                                        "captcha" => "验证码",
+                                        "login" => "登录按钮",
+                                        "remember" => "记住账户",
+                                        _ => key.as_str(),
+                                    };
+                                    if let Some(f) = captured_fields {
+                                        w.set_fields(login_fields_model(&f));
+                                    }
+                                    // 同时更新窗口信息，便于之后直接执行
+                                    if let Some(t) = &c.window {
+                                        w.set_exe_path(SharedString::from(t.exe_path.clone()));
+                                        w.set_window_class(SharedString::from(
+                                            t.class_name.clone(),
+                                        ));
+                                    }
+                                    w.set_status(SharedString::from(format!(
+                                        "已校准「{}」：{:.1}% / {:.1}%",
+                                        label,
+                                        c.rx * 100.0,
+                                        c.ry * 100.0
+                                    )));
+                                }
+                                None => w.set_status(SharedString::from(
+                                    "校准超时或点击位置无效，请重试",
+                                )),
+                            }
+                            w.set_busy(false);
+                            w.window().show().ok();
+                        }
+                        *cap.lock().unwrap() = false;
+                    });
+                });
+            });
+        }
+
+        // 15.37.11 登录助手: 执行填充
+        {
+            let lw_weak = login_window.as_weak();
+            let db_login = db.clone();
+            let cur_id = login_current_id.clone();
+            login_window.on_run_profile(move || {
+                let id = *cur_id.lock().unwrap();
+                let Some(w) = lw_weak.upgrade() else { return };
+                if id == 0 {
+                    w.set_status(SharedString::from("请先保存配置再执行"));
+                    return;
+                }
+                let Some(p) = db_login.get_login_profile(id) else {
+                    w.set_status(SharedString::from("配置不存在，请重新保存"));
+                    return;
+                };
+                let pwd = native::unprotect_secret(&p.password_enc).unwrap_or_default();
+                w.set_busy(true);
+                w.set_status(SharedString::from("正在查找登录窗口并填充…"));
+                let weak = lw_weak.clone();
+                std::thread::spawn(move || {
+                    let result = execute_login_profile(&p, &pwd);
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak.upgrade() {
+                            w.set_busy(false);
+                            match result {
+                                Ok(msg) => w.set_status(SharedString::from(msg)),
+                                Err(e) => w.set_status(SharedString::from(format!(
+                                    "执行失败：{}",
+                                    e
+                                ))),
+                            }
+                        }
+                    });
+                });
+            });
+        }
+
+        // 15.37.12 启动时自动执行标记为「自动执行」的登录配置
+        {
+            let auto_profiles: Vec<LoginProfile> = db
+                .list_login_profiles()
+                .into_iter()
+                .filter(|p| p.auto_start && p.enabled)
+                .collect();
+            if !auto_profiles.is_empty() {
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    for p in auto_profiles {
+                        let pwd = native::unprotect_secret(&p.password_enc).unwrap_or_default();
+                        match execute_login_profile(&p, &pwd) {
+                            Ok(msg) => log::info!("登录助手自动执行成功 [{}]: {}", p.name, msg),
+                            Err(e) => log::warn!("登录助手自动执行失败 [{}]: {}", p.name, e),
+                        }
+                    }
+                });
+            }
         }
 
         // 15.38 工具: 扫描开始菜单 (导入 .lnk 应用)
@@ -4247,10 +4671,12 @@ impl App {
             apply_font_family(&new_item_window, &font_family);
             apply_font_family(&item_settings_window, &font_family);
             apply_font_family(&probe_window, &font_family);
+            apply_font_family(&login_window, &font_family);
             dialogs.apply_font_family(&font_family);
             new_item_window.set_theme_mode(SharedString::from(theme.clone()));
             item_settings_window.set_theme_mode(SharedString::from(theme.clone()));
             probe_window.set_theme_mode(SharedString::from(theme.clone()));
+            login_window.set_theme_mode(SharedString::from(theme.clone()));
             dialogs.apply_theme(&theme);
             // 应用自定义主题颜色到所有窗口的 ThemeSettings 全局
             for (k, v) in [
@@ -4266,6 +4692,7 @@ impl App {
                 set_custom_theme_color(&new_item_window, k, v);
                 set_custom_theme_color(&item_settings_window, k, v);
                 set_custom_theme_color(&probe_window, k, v);
+                set_custom_theme_color(&login_window, k, v);
                 dialogs.apply_custom_color(k, v);
             }
             // 同步快速搜索窗口主题
@@ -4292,6 +4719,7 @@ impl App {
             new_item_window,
             item_settings_window,
             probe_window,
+            login_window,
             db,
             current_classification_id: current_id,
             expanded_classifications,
@@ -6185,6 +6613,110 @@ fn show_error_dialog(title: &str, message: &str) {
 
 #[cfg(not(target_os = "windows"))]
 fn show_error_dialog(_title: &str, _message: &str) {}
+
+/// 构造登录助手的字段列表模型
+fn login_fields_model(fields: &LoginFields) -> ModelRc<LoginFieldInfo> {
+    let items = vec![
+        login_field_info("account", "账号", &fields.account),
+        login_field_info("password", "密码", &fields.password),
+        login_field_info("captcha", "验证码", &fields.captcha),
+        login_field_info("login", "登录按钮", &fields.login),
+        login_field_info("remember", "记住账户（点击切换）", &fields.remember),
+    ];
+    ModelRc::from(Rc::new(slint::VecModel::from(items)))
+}
+
+fn login_field_info(key: &str, label: &str, point: &Option<LoginPoint>) -> LoginFieldInfo {
+    LoginFieldInfo {
+        key: SharedString::from(key),
+        label: SharedString::from(label),
+        coord: SharedString::from(
+            point
+                .as_ref()
+                .map(|p| format!("{:.1}% / {:.1}%", p.rx * 100.0, p.ry * 100.0))
+                .unwrap_or_default(),
+        ),
+        calibrated: point.is_some(),
+    }
+}
+
+/// 执行一次登录填充：查找/启动窗口 → 激活 → 按坐标点击并注入账号密码
+fn execute_login_profile(p: &LoginProfile, password: &str) -> Result<String, String> {
+    let mut target =
+        native::find_login_window(&p.exe_name, &p.window_class, &p.title_keyword);
+
+    // 未找到窗口时尝试启动程序，最多等待约 6 秒
+    if target.is_none() && !p.exe_path.is_empty() {
+        native::open_path(&p.exe_path).map_err(|e| format!("启动程序失败：{}", e))?;
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            target = native::find_login_window(&p.exe_name, &p.window_class, &p.title_keyword);
+            if target.is_some() {
+                break;
+            }
+        }
+    }
+
+    let target = target.ok_or_else(|| {
+        "未找到登录窗口：请先打开目标程序，或使用「捕获窗口」重新配置".to_string()
+    })?;
+
+    native::activate_window(target.hwnd);
+    std::thread::sleep(std::time::Duration::from_millis(400));
+
+    let (ox, oy, w, h) = native::window_client_rect(target.hwnd)
+        .ok_or_else(|| "无法获取登录窗口客户区尺寸".to_string())?;
+    if w <= 0 || h <= 0 {
+        return Err("登录窗口客户区尺寸无效".to_string());
+    }
+
+    let click = |pt: &LoginPoint| {
+        let x = ox + (pt.rx * w as f64).round() as i32;
+        let y = oy + (pt.ry * h as f64).round() as i32;
+        native::click_at(x, y);
+        std::thread::sleep(std::time::Duration::from_millis(180));
+    };
+
+    let mut done: Vec<&str> = Vec::new();
+
+    if let Some(pt) = &p.fields.remember {
+        click(pt);
+        done.push("记住账户");
+    }
+    if let Some(pt) = &p.fields.account {
+        click(pt);
+        native::send_key("Ctrl+A");
+        native::send_text(&p.account);
+        done.push("账号");
+        std::thread::sleep(std::time::Duration::from_millis(120));
+    }
+    if let Some(pt) = &p.fields.password {
+        if !password.is_empty() {
+            click(pt);
+            native::send_key("Ctrl+A");
+            native::send_text(password);
+            done.push("密码");
+            std::thread::sleep(std::time::Duration::from_millis(120));
+        }
+    }
+    if let Some(pt) = &p.fields.captcha {
+        click(pt);
+        done.push("验证码（请手动输入）");
+    }
+    if p.auto_login {
+        if p.fields.captcha.is_some() {
+            // 有验证码时需要人工输入，不再自动点击登录
+        } else if let Some(pt) = &p.fields.login {
+            click(pt);
+            done.push("登录");
+        }
+    }
+
+    if done.is_empty() {
+        return Err("没有可执行的字段，请先校准账号/密码等坐标".to_string());
+    }
+    Ok(format!("已完成：{}", done.join("、")))
+}
 
 /// 显示信息对话框
 #[cfg(target_os = "windows")]

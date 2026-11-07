@@ -13,6 +13,7 @@ export { NewItemWindow, CatalogEntry, MultiPick, NewItemPayload } from "componen
 export { ItemSettingsWindow, ItemSettingsPayload } from "components/item_settings_window.slint";
 export { InputDialog, MultilineInputDialog, ActionDialog, PickListDialog } from "components/dialogs.slint";
 export { WindowProbeWindow } from "components/probe_window.slint";
+export { LoginAssistantWindow, LoginFieldInfo } from "components/login_assistant_window.slint";
 
 // 分类数据模型
 export struct ClassificationInfo {
@@ -145,6 +146,8 @@ export component MainWindow inherits Window {
     callback scan-appx();
     // 窗口探测诊断
     callback open-window-probe();
+    // 登录助手
+    callback open-login-assistant();
 
     // ===== 右键菜单回调 =====
     // 右键菜单项被选中，参数: source, item-id
@@ -208,7 +211,7 @@ export component MainWindow inherits Window {
                         alignment: start;
 
                         Text {
-                            text: "Dawn Launcher v0.23.5";
+                            text: "Dawn Launcher v0.24.0";
                             color: ThemeSettings.text-c(root.theme-mode);
                             font-size: ThemeSettings.font-size-normal;
                             font-weight: 700;
@@ -943,6 +946,34 @@ export component MainWindow inherits Window {
                         clicked => {
                             root.tools-popup-visible = false;
                             root.open-window-probe();
+                        }
+                    }
+                }
+
+                // 登录助手
+                Rectangle {
+                    height: 40px;
+                    border-radius: 4px;
+                    background: tp-login.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 10px;
+                        spacing: 10px;
+                        alignment: start;
+                        Text { text: "🔑"; font-size: 14px; vertical-alignment: center; horizontal-alignment: center; width: 16px; color: ThemeSettings.text-c(root.theme-mode); }
+                        Text {
+                            text: "登录助手";
+                            color: ThemeSettings.text-c(root.theme-mode);
+                            font-size: ThemeSettings.font-size-normal;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            horizontal-alignment: left;
+                        }
+                    }
+                    tp-login := TouchArea {
+                        clicked => {
+                            root.tools-popup-visible = false;
+                            root.open-login-assistant();
                         }
                     }
                 }
