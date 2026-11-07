@@ -120,6 +120,10 @@ pub fn show_main_window(_window_title: &str, _visible: bool) {}
 
 pub fn set_mouse_hook_enabled(_enabled: bool) {}
 
+pub fn probe_foreground_window() -> String {
+    "窗口探测仅支持 Windows 平台".to_string()
+}
+
 pub(crate) fn run_hidden(_cmd: &str, _args: &[&str]) -> Option<Vec<u8>> {
     None
 }

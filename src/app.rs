@@ -14,7 +14,7 @@ use crate::{
     ActionDialog, CatalogEntry, ClassificationInfo, DragHelper, InputDialog, ItemEditWindow,
     ItemInfo, ItemSettingsPayload, ItemSettingsWindow, MainWindow, MenuItem, MultiPick,
     MultilineInputDialog, NewItemPayload, NewItemWindow, PickListDialog, QuickSearchWindow,
-    SettingsWindow,
+    SettingsWindow, WindowProbeWindow,
 };
 
 pub struct App {
@@ -24,6 +24,7 @@ pub struct App {
     item_edit_window: ItemEditWindow,
     new_item_window: NewItemWindow,
     item_settings_window: ItemSettingsWindow,
+    probe_window: WindowProbeWindow,
     db: Arc<Database>,
     current_classification_id: Arc<Mutex<i64>>,
     expanded_classifications: Arc<Mutex<std::collections::HashSet<i64>>>,
@@ -71,6 +72,10 @@ impl App {
         // 3.1.4 创建「项目设置」窗口（初始隐藏）
         let item_settings_window = ItemSettingsWindow::new()?;
         item_settings_window.window().hide().ok();
+
+        // 3.1.4b 创建「窗口探测」窗口（初始隐藏）
+        let probe_window = WindowProbeWindow::new()?;
+        probe_window.window().hide().ok();
 
         // 3.1.5 创建 Slint 原生对话框控制器（输入框/多行输入/动作选择）
         let dialogs = Rc::new(DialogController::new()?);
@@ -755,6 +760,7 @@ impl App {
             let window_for_theme = main_window.as_weak();
             let qs_for_theme = quick_search_window.as_weak();
             let sw_for_theme = settings_window.as_weak();
+            let pw_for_theme = probe_window.as_weak();
             let dlg_for_theme = dialogs.clone();
             settings_window.on_theme_mode_changed(move |mode| {
                 let mode_str = mode.to_string();
@@ -770,6 +776,9 @@ impl App {
                 if let Some(sw) = sw_for_theme.upgrade() {
                     sw.set_theme_mode(mode.clone());
                 }
+                if let Some(pw) = pw_for_theme.upgrade() {
+                    pw.set_theme_mode(mode.clone());
+                }
                 dlg_for_theme.apply_theme(&mode_str);
             });
         }
@@ -780,6 +789,7 @@ impl App {
             let main_cc = main_window.as_weak();
             let qs_cc = quick_search_window.as_weak();
             let sw_cc = settings_window.as_weak();
+            let pw_cc = probe_window.as_weak();
             let dlg_cc = dialogs.clone();
             settings_window.on_custom_color_changed(move |key, val| {
                 let key_str = key.to_string();
@@ -795,6 +805,9 @@ impl App {
                 }
                 if let Some(qs) = qs_cc.upgrade() {
                     set_custom_theme_color(&qs, &key_clone, &val_clone);
+                }
+                if let Some(pw) = pw_cc.upgrade() {
+                    set_custom_theme_color(&pw, &key_clone, &val_clone);
                 }
                 if let Some(sw) = sw_cc.upgrade() {
                     set_custom_theme_color(&sw, &key_clone, &val_clone);
@@ -1459,6 +1472,85 @@ impl App {
                     }
                 } else {
                     show_info_dialog("检查完成", "所有项目均有效");
+                }
+            });
+        }
+
+        // 15.37.1 工具: 窗口探测（打开探测窗口）
+        {
+            let pw_weak = probe_window.as_weak();
+            let mw_weak = main_window.as_weak();
+            main_window.on_open_window_probe(move || {
+                if let Some(pw) = pw_weak.upgrade() {
+                    if let Some(mw) = mw_weak.upgrade() {
+                        pw.set_theme_mode(mw.get_theme_mode());
+                    }
+                    pw.window().show().ok();
+                }
+            });
+        }
+
+        // 15.37.2 窗口探测: 开始探测（倒计时 5 秒后读取前台窗口）
+        {
+            let pw_weak = probe_window.as_weak();
+            let probing = Arc::new(Mutex::new(false));
+            probe_window.on_start_probe(move || {
+                {
+                    let mut p = probing.lock().unwrap();
+                    if *p {
+                        return;
+                    }
+                    *p = true;
+                }
+                if let Some(pw) = pw_weak.upgrade() {
+                    pw.set_probing(true);
+                    pw.set_status(SharedString::from(
+                        "5 秒后读取前台窗口，请点击目标窗口…",
+                    ));
+                }
+                let pw_weak_t = pw_weak.clone();
+                let probing_t = probing.clone();
+                std::thread::spawn(move || {
+                    for remain in (1..5).rev() {
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        let pw_weak_c = pw_weak_t.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(pw) = pw_weak_c.upgrade() {
+                                pw.set_status(SharedString::from(format!(
+                                    "{} 秒后读取前台窗口，请保持目标窗口在最前…",
+                                    remain
+                                )));
+                            }
+                        });
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    let report = native::probe_foreground_window();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(pw) = pw_weak_t.upgrade() {
+                            pw.set_result(SharedString::from(report));
+                            pw.set_status(SharedString::from("探测完成，可复制结果"));
+                            pw.set_probing(false);
+                        }
+                        *probing_t.lock().unwrap() = false;
+                    });
+                });
+            });
+        }
+
+        // 15.37.3 窗口探测: 复制结果
+        {
+            let pw_weak = probe_window.as_weak();
+            probe_window.on_copy_result(move || {
+                if let Some(pw) = pw_weak.upgrade() {
+                    let text = pw.get_result();
+                    if !text.is_empty() {
+                        match copy_to_clipboard(&text.to_string()) {
+                            Ok(_) => pw.set_status(SharedString::from("已复制到剪贴板")),
+                            Err(e) => {
+                                pw.set_status(SharedString::from(format!("复制失败: {}", e)))
+                            }
+                        }
+                    }
                 }
             });
         }
@@ -4154,9 +4246,11 @@ impl App {
             apply_font_family(&settings_window, &font_family);
             apply_font_family(&new_item_window, &font_family);
             apply_font_family(&item_settings_window, &font_family);
+            apply_font_family(&probe_window, &font_family);
             dialogs.apply_font_family(&font_family);
             new_item_window.set_theme_mode(SharedString::from(theme.clone()));
             item_settings_window.set_theme_mode(SharedString::from(theme.clone()));
+            probe_window.set_theme_mode(SharedString::from(theme.clone()));
             dialogs.apply_theme(&theme);
             // 应用自定义主题颜色到所有窗口的 ThemeSettings 全局
             for (k, v) in [
@@ -4171,6 +4265,7 @@ impl App {
                 set_custom_theme_color(&settings_window, k, v);
                 set_custom_theme_color(&new_item_window, k, v);
                 set_custom_theme_color(&item_settings_window, k, v);
+                set_custom_theme_color(&probe_window, k, v);
                 dialogs.apply_custom_color(k, v);
             }
             // 同步快速搜索窗口主题
@@ -4196,6 +4291,7 @@ impl App {
             item_edit_window,
             new_item_window,
             item_settings_window,
+            probe_window,
             db,
             current_classification_id: current_id,
             expanded_classifications,

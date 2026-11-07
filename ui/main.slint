@@ -12,6 +12,7 @@ import { MultiPick as EditPick } from "components/new_item_window.slint";
 export { NewItemWindow, CatalogEntry, MultiPick, NewItemPayload } from "components/new_item_window.slint";
 export { ItemSettingsWindow, ItemSettingsPayload } from "components/item_settings_window.slint";
 export { InputDialog, MultilineInputDialog, ActionDialog, PickListDialog } from "components/dialogs.slint";
+export { WindowProbeWindow } from "components/probe_window.slint";
 
 // 分类数据模型
 export struct ClassificationInfo {
@@ -142,6 +143,8 @@ export component MainWindow inherits Window {
     // 扫描应用 (开始菜单 / 商店应用)
     callback scan-start-menu();
     callback scan-appx();
+    // 窗口探测诊断
+    callback open-window-probe();
 
     // ===== 右键菜单回调 =====
     // 右键菜单项被选中，参数: source, item-id
@@ -205,7 +208,7 @@ export component MainWindow inherits Window {
                         alignment: start;
 
                         Text {
-                            text: "Dawn Launcher v0.23.4";
+                            text: "Dawn Launcher v0.23.5";
                             color: ThemeSettings.text-c(root.theme-mode);
                             font-size: ThemeSettings.font-size-normal;
                             font-weight: 700;
@@ -779,7 +782,7 @@ export component MainWindow inherits Window {
             x: root.width - 160px;
             y: 32px;
             width: 150px;
-            height: 260px;
+            height: 300px;
             background: ThemeSettings.card-bg(root.theme-mode);
             border-radius: 8px;
             border-width: 1px;
@@ -912,6 +915,34 @@ export component MainWindow inherits Window {
                         clicked => {
                             root.tools-popup-visible = false;
                             root.check-invalid-items();
+                        }
+                    }
+                }
+
+                // 窗口探测
+                Rectangle {
+                    height: 40px;
+                    border-radius: 4px;
+                    background: tp-probe.has-hover ? ThemeSettings.hover-c(root.theme-mode) : transparent;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 10px;
+                        spacing: 10px;
+                        alignment: start;
+                        Text { text: "🔬"; font-size: 14px; vertical-alignment: center; horizontal-alignment: center; width: 16px; color: ThemeSettings.text-c(root.theme-mode); }
+                        Text {
+                            text: "窗口探测";
+                            color: ThemeSettings.text-c(root.theme-mode);
+                            font-size: ThemeSettings.font-size-normal;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            horizontal-alignment: left;
+                        }
+                    }
+                    tp-probe := TouchArea {
+                        clicked => {
+                            root.tools-popup-visible = false;
+                            root.open-window-probe();
                         }
                     }
                 }

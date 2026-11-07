@@ -1705,6 +1705,7 @@ pub fn set_mouse_hook_enabled(enabled: bool) {
     if !enabled {
         return;
     }
+
     // 钩子已安装则无需重复创建
     if MOUSE_HOOK_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;
@@ -1728,4 +1729,460 @@ pub fn set_mouse_hook_enabled(enabled: bool) {
             DispatchMessageW(&msg);
         }
     });
+}
+
+// ============================================================
+// 窗口探测诊断
+// 读取前台窗口的标题/类名/进程/子窗口/UIA 控件树，
+// 用于判断「登录自动填充」适合的技术方案
+// ============================================================
+
+/// 子窗口信息
+struct ChildWindowInfo {
+    class_name: String,
+    text: String,
+    ctrl_id: i32,
+    rect: (i32, i32, i32, i32),
+    visible: bool,
+}
+
+/// 枚举子窗口回调（lparam 携带 &mut Vec<ChildWindowInfo>）
+unsafe extern "system" fn probe_enum_child_proc(
+    hwnd: windows::Win32::Foundation::HWND,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::BOOL {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, GetWindowRect, GetWindowTextW, IsWindowVisible,
+    };
+    let list = &mut *(lparam.0 as *mut Vec<ChildWindowInfo>);
+    let mut class_buf = [0u16; 128];
+    let class_len = GetClassNameW(hwnd, &mut class_buf);
+    let class_name = String::from_utf16_lossy(&class_buf[..class_len as usize]);
+    let mut text_buf = [0u16; 128];
+    let text_len = GetWindowTextW(hwnd, &mut text_buf);
+    let text = String::from_utf16_lossy(&text_buf[..text_len as usize]);
+    let ctrl_id = windows::Win32::UI::WindowsAndMessaging::GetDlgCtrlID(hwnd);
+    let mut rc = windows::Win32::Foundation::RECT::default();
+    let _ = GetWindowRect(hwnd, &mut rc);
+    list.push(ChildWindowInfo {
+        class_name,
+        text,
+        ctrl_id,
+        rect: (rc.left, rc.top, rc.right, rc.bottom),
+        visible: IsWindowVisible(hwnd).as_bool(),
+    });
+    windows::Win32::Foundation::BOOL(1)
+}
+
+/// UTF-16 缓冲转字符串（遇到 0 终止）
+fn probe_wstr(buf: &[u16]) -> String {
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    String::from_utf16_lossy(&buf[..end])
+}
+
+/// 截取过长文本
+fn probe_truncate(s: &str, max: usize) -> String {
+    let s = s.replace('\n', " ").replace('\r', "");
+    if s.chars().count() > max {
+        let t: String = s.chars().take(max).collect();
+        format!("{}…", t)
+    } else {
+        s
+    }
+}
+
+/// UIA 控件类型 ID 转名称
+fn uia_type_name(id: u32) -> &'static str {
+    match id {
+        50000 => "Button",
+        50001 => "Calendar",
+        50002 => "CheckBox",
+        50003 => "ComboBox",
+        50004 => "Edit",
+        50005 => "Hyperlink",
+        50006 => "Image",
+        50007 => "ListItem",
+        50008 => "List",
+        50009 => "Menu",
+        50010 => "MenuBar",
+        50011 => "MenuItem",
+        50012 => "ProgressBar",
+        50013 => "RadioButton",
+        50014 => "ScrollBar",
+        50015 => "Slider",
+        50016 => "Spinner",
+        50017 => "StatusBar",
+        50018 => "Tab",
+        50019 => "TabItem",
+        50020 => "Text",
+        50021 => "ToolBar",
+        50022 => "ToolTip",
+        50023 => "Tree",
+        50024 => "TreeItem",
+        50025 => "Custom",
+        50026 => "Group",
+        50027 => "Thumb",
+        50028 => "DataGrid",
+        50029 => "DataItem",
+        50030 => "Document",
+        50031 => "SplitButton",
+        50032 => "Window",
+        50033 => "Pane",
+        50034 => "Header",
+        50035 => "HeaderItem",
+        50036 => "Table",
+        50037 => "TitleBar",
+        50038 => "Separator",
+        50039 => "SemanticZoom",
+        50040 => "AppBar",
+        _ => "Unknown",
+    }
+}
+
+/// 根据类名/模块/目录特征猜测 UI 框架，并给出自动填充建议
+fn guess_framework(
+    class_name: &str,
+    modules: &[String],
+    exe_path: &str,
+    uia_total: i64,
+    uia_edit_count: i64,
+    child_edit_count: usize,
+) -> (String, String) {
+    let cls = class_name.to_lowercase();
+    let has_mod = |pat: &str| modules.iter().any(|m| m.to_lowercase().contains(pat));
+
+    // Electron 目录特征
+    let exe_dir = std::path::Path::new(exe_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_default();
+    let electron_dir = exe_dir.join("resources").join("app.asar").exists()
+        || exe_dir.join("app.asar").exists();
+
+    let framework = if has_mod("libcef") {
+        "CEF (Chromium Embedded Framework)".to_string()
+    } else if electron_dir {
+        "Electron".to_string()
+    } else if has_mod("embeddedbrowserwebview") {
+        "WebView2 (Edge Chromium)".to_string()
+    } else if has_mod("qt6core") || has_mod("qt6widgets") || has_mod("qt5core") || has_mod("qt5widgets") || cls.starts_with("qt") {
+        "Qt 自绘".to_string()
+    } else if has_mod("wpfgfx") || has_mod("presentationcore") || has_mod("presentationframework") {
+        "WPF".to_string()
+    } else if cls.starts_with("windowsforms10") {
+        "WinForms (.NET)".to_string()
+    } else if has_mod("flutter_windows") {
+        "Flutter".to_string()
+    } else if cls.starts_with("chrome_widgetwin") {
+        "Chromium 系 (类名特征)".to_string()
+    } else if cls.starts_with("sunawt") || has_mod("jvm") || has_mod("awt") {
+        "Java (Swing/AWT)".to_string()
+    } else if class_name.starts_with('T') && class_name.len() > 1 && class_name.chars().nth(1).map(|c| c.is_uppercase()).unwrap_or(false) {
+        "Delphi/VCL (推测)".to_string()
+    } else if child_edit_count > 0 {
+        "标准 Win32 控件".to_string()
+    } else {
+        "未知（可能为自绘界面）".to_string()
+    };
+
+    // 自动填充方案建议
+    let strategy = if child_edit_count > 0 {
+        "检测到标准 Win32 输入框，可通过窗口句柄直接填值（最稳定）。".to_string()
+    } else if uia_edit_count > 0 {
+        format!(
+            "UIA 可读（{} 个元素，含 {} 个输入框），可通过 UIA 定位并填入用户名/密码。",
+            uia_total, uia_edit_count
+        )
+    } else if uia_total > 3 {
+        format!(
+            "UIA 可读（{} 个元素）但没有标准输入框，需「UIA 定位 + 键鼠注入」混合方案。",
+            uia_total
+        )
+    } else {
+        "UIA 几乎读不到内容（典型自绘/Chromium 界面），建议「坐标校准 + 键鼠注入」：\
+         人工标注一次各字段位置，之后按相对坐标点击并输入。"
+            .to_string()
+    };
+
+    (framework, strategy)
+}
+
+/// 探测当前前台窗口，返回文本报告
+/// 由探测线程在倒计时结束后调用
+pub fn probe_foreground_window() -> String {
+    use windows::Win32::Foundation::{CloseHandle, RECT};
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumChildWindows, GetClassNameW, GetClientRect, GetForegroundWindow,
+        GetWindowLongPtrW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId,
+        GWL_EXSTYLE, GWL_STYLE,
+    };
+
+    let mut out = String::new();
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0 == 0 {
+            return "探测失败：未获取到前台窗口".to_string();
+        }
+
+        // ===== 基本窗口信息 =====
+        let mut title_buf = [0u16; 512];
+        let title_len = GetWindowTextW(hwnd, &mut title_buf);
+        let title = String::from_utf16_lossy(&title_buf[..title_len as usize]);
+
+        let mut class_buf = [0u16; 256];
+        let class_len = GetClassNameW(hwnd, &mut class_buf);
+        let class_name = String::from_utf16_lossy(&class_buf[..class_len as usize]);
+
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+
+        let mut exe_path = String::new();
+        let mut exe_name = String::new();
+        if let Ok(hproc) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+            let mut buf = [0u16; 1024];
+            let mut size = buf.len() as u32;
+            if QueryFullProcessImageNameW(
+                hproc,
+                PROCESS_NAME_WIN32,
+                windows::core::PWSTR(buf.as_mut_ptr()),
+                &mut size,
+            )
+            .is_ok()
+            {
+                exe_path = probe_wstr(&buf[..size as usize]);
+                exe_name = exe_path
+                    .rsplit(['\\', '/'])
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+            }
+            let _ = CloseHandle(hproc);
+        }
+
+        let mut rc = RECT::default();
+        let _ = GetWindowRect(hwnd, &mut rc);
+        let mut crc = RECT::default();
+        let _ = GetClientRect(hwnd, &mut crc);
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u64;
+        let exstyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u64;
+
+        // DPI
+        let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd);
+        let awareness_ctx = windows::Win32::UI::HiDpi::GetWindowDpiAwarenessContext(hwnd);
+        let awareness = windows::Win32::UI::HiDpi::GetAwarenessFromDpiAwarenessContext(awareness_ctx).0;
+        let awareness_text = match awareness {
+            -1 => "不感知 (DPI Unaware，坐标会被系统缩放)",
+            0 => "系统感知 (System Aware)",
+            1 => "每显示器感知 (Per-Monitor)",
+            2 => "每显示器感知 V2 (Per-Monitor V2)",
+            3 => "不感知+GDI 缩放 (Unaware GDIScaled)",
+            _ => "未知",
+        };
+
+        let is_self = pid == std::process::id();
+
+        out.push_str("===== 窗口探测报告 =====\n\n");
+        out.push_str("【基本信息】\n");
+        out.push_str(&format!("窗口标题: {}\n", probe_truncate(&title, 120)));
+        out.push_str(&format!("窗口类名: {}\n", class_name));
+        out.push_str(&format!("窗口句柄: 0x{:X}\n", hwnd.0));
+        out.push_str(&format!(
+            "进程: {} (PID: {}){}\n",
+            exe_name,
+            pid,
+            if is_self { "  ← 这是 Dawn Launcher 自己" } else { "" }
+        ));
+        out.push_str(&format!("程序路径: {}\n", exe_path));
+        out.push_str(&format!(
+            "窗口位置: ({}, {}) - ({}, {})  尺寸: {}x{}\n",
+            rc.left,
+            rc.top,
+            rc.right,
+            rc.bottom,
+            rc.right - rc.left,
+            rc.bottom - rc.top
+        ));
+        out.push_str(&format!(
+            "客户区: {}x{}\n",
+            crc.right - crc.left,
+            crc.bottom - crc.top
+        ));
+        out.push_str(&format!("窗口样式: 0x{:08X}  扩展样式: 0x{:08X}\n", style as u32, exstyle as u32));
+        out.push_str(&format!(
+            "DPI: {} (缩放 {}%)  DPI 感知: {}\n\n",
+            dpi,
+            dpi * 100 / 96,
+            awareness_text
+        ));
+
+        // ===== 子窗口 =====
+        let mut children: Vec<ChildWindowInfo> = Vec::new();
+        let _ = EnumChildWindows(
+            hwnd,
+            Some(probe_enum_child_proc),
+            windows::Win32::Foundation::LPARAM(&mut children as *mut _ as isize),
+        );
+        let child_edit_count = children
+            .iter()
+            .filter(|c| c.class_name.eq_ignore_ascii_case("edit"))
+            .count();
+        out.push_str(&format!("【子窗口】共 {} 个\n", children.len()));
+        for (i, c) in children.iter().take(60).enumerate() {
+            out.push_str(&format!(
+                "  [{}] class={} id={} {} rect=({},{})-({},{}){}\n",
+                i + 1,
+                c.class_name,
+                c.ctrl_id,
+                if c.text.is_empty() {
+                    String::new()
+                } else {
+                    format!("text=\"{}\" ", probe_truncate(&c.text, 40))
+                },
+                c.rect.0,
+                c.rect.1,
+                c.rect.2,
+                c.rect.3,
+                if c.visible { "" } else { " (隐藏)" }
+            ));
+        }
+        if children.len() > 60 {
+            out.push_str(&format!("  …… 其余 {} 个省略\n", children.len() - 60));
+        }
+        out.push('\n');
+
+        // ===== 进程模块特征 =====
+        let mut modules: Vec<String> = Vec::new();
+        {
+            use windows::Win32::System::Diagnostics::ToolHelp::{
+                CreateToolhelp32Snapshot, Module32FirstW, Module32NextW, MODULEENTRY32W,
+                TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32,
+            };
+            if let Ok(snap) =
+                CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid)
+            {
+                let mut me: MODULEENTRY32W = std::mem::zeroed();
+                me.dwSize = std::mem::size_of::<MODULEENTRY32W>() as u32;
+                if Module32FirstW(snap, &mut me).is_ok() {
+                    loop {
+                        modules.push(probe_wstr(&me.szModule));
+                        if Module32NextW(snap, &mut me).is_err() {
+                            break;
+                        }
+                    }
+                }
+                let _ = CloseHandle(snap);
+            }
+        }
+        let interesting: Vec<&String> = modules
+            .iter()
+            .filter(|m| {
+                let l = m.to_lowercase();
+                [
+                    "cef", "qt5", "qt6", "webview", "wpf", "presentation", "flutter",
+                    "electron", "node.dll", "chrome", "awt", "jvm", "wx", "gtk", "duilib",
+                    "nw.dll", "javafx", "vb6", "msvb", "dui",
+                ]
+                .iter()
+                .any(|p| l.contains(p))
+            })
+            .collect();
+        out.push_str(&format!("【进程模块】共 {} 个，特征模块 {} 个\n", modules.len(), interesting.len()));
+        for m in interesting.iter().take(40) {
+            out.push_str(&format!("  {}\n", m));
+        }
+        out.push('\n');
+
+        // ===== UIA 控件树 =====
+        let mut uia_total: i64 = -1;
+        let mut uia_edit_count: i64 = 0;
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        out.push_str("【UIA 控件树】\n");
+        {
+            use windows::Win32::UI::Accessibility::{
+                CUIAutomation, IUIAutomation, TreeScope_Subtree,
+            };
+            let uia_result: Result<(), String> = (|| {
+                let uia: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+                    .map_err(|e| format!("创建 UIA 失败: {}", e))?;
+                let root_el = uia
+                    .ElementFromHandle(hwnd)
+                    .map_err(|e| format!("获取根元素失败: {}", e))?;
+                let cond = uia
+                    .CreateTrueCondition()
+                    .map_err(|e| format!("创建条件失败: {}", e))?;
+                let arr = root_el
+                    .FindAll(TreeScope_Subtree, &cond)
+                    .map_err(|e| format!("枚举元素失败: {}", e))?;
+                let len = arr.Length().map_err(|e| format!("读取元素数失败: {}", e))?;
+                uia_total = len as i64;
+                let mut lines = String::new();
+                for i in 0..len {
+                    let el = match arr.GetElement(i) {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
+                    let ct = el.CurrentControlType().map(|v| v.0).unwrap_or(0);
+                    if ct == 50004 {
+                        uia_edit_count += 1;
+                    }
+                    if i >= 300 {
+                        continue;
+                    }
+                    let name = el.CurrentName().map(|s| s.to_string()).unwrap_or_default();
+                    let cls2 = el.CurrentClassName().map(|s| s.to_string()).unwrap_or_default();
+                    let aid = el.CurrentAutomationId().map(|s| s.to_string()).unwrap_or_default();
+                    let rect = el.CurrentBoundingRectangle().unwrap_or_default();
+                    let is_pwd = el.CurrentIsPassword().map(|v| v.as_bool()).unwrap_or(false);
+                    let offscreen = el.CurrentIsOffscreen().map(|v| v.as_bool()).unwrap_or(false);
+                    lines.push_str(&format!(
+                        "  [{}] {}{}{}{}{} rect=({},{})-({},{})\n",
+                        i + 1,
+                        uia_type_name(ct),
+                        if name.is_empty() { String::new() } else { format!(" name=\"{}\"", probe_truncate(&name, 40)) },
+                        if cls2.is_empty() { String::new() } else { format!(" class={}", probe_truncate(&cls2, 40)) },
+                        if aid.is_empty() { String::new() } else { format!(" id={}", probe_truncate(&aid, 30)) },
+                        if is_pwd { " [密码框]" } else { "" },
+                        rect.left, rect.top, rect.right, rect.bottom
+                    ));
+                    if offscreen {
+                        lines.push_str("       (离屏)\n");
+                    }
+                }
+                if uia_total > 300 {
+                    lines.push_str(&format!("  …… 其余 {} 个元素省略\n", uia_total - 300));
+                }
+                let shown = (len as i64).min(300);
+                out.push_str(&format!(
+                    "共 {} 个元素（其中输入框 {} 个，显示前 {} 个）\n",
+                    uia_total, uia_edit_count, shown
+                ));
+                out.push_str(&lines);
+                Ok(())
+            })();
+            if let Err(e) = uia_result {
+                out.push_str(&format!("  读取失败: {}\n", e));
+            }
+        }
+        CoUninitialize();
+        out.push('\n');
+
+        // ===== 框架判断与建议 =====
+        let (framework, strategy) = guess_framework(
+            &class_name,
+            &modules,
+            &exe_path,
+            uia_total.max(0),
+            uia_edit_count,
+            child_edit_count,
+        );
+        out.push_str("【初步判断】\n");
+        out.push_str(&format!("UI 框架: {}\n", framework));
+        out.push_str(&format!("自动填充建议: {}\n", strategy));
+        out.push_str("\n===== 报告结束 =====\n");
+    }
+    out
 }

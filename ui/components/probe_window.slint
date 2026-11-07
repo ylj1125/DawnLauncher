@@ -1,0 +1,123 @@
+// 窗口探测诊断窗口
+// 点击「开始探测」后倒计时 5 秒，读取前台窗口的标题/类名/进程/子窗口/UIA 控件树，
+// 用于判断「登录自动填充」适合的技术方案
+
+import { ScrollView } from "std-widgets.slint";
+import { ThemeSettings } from "../theme.slint";
+
+// 按钮
+component probe-btn inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> primary: false;
+    in property <bool> enabled: true;
+    in property <string> theme-mode: "light";
+    callback clicked();
+
+    min-width: 96px;
+    height: 32px;
+    border-radius: ThemeSettings.border-radius;
+    background: !root.enabled
+        ? ThemeSettings.border-c(root.theme-mode)
+        : (root.primary ? ThemeSettings.accent-color : ThemeSettings.card-bg(root.theme-mode));
+    border-width: root.primary ? 0px : 1px;
+    border-color: ThemeSettings.border-c(root.theme-mode);
+
+    Text {
+        text: root.label;
+        color: root.primary && root.enabled ? #ffffff : ThemeSettings.text-c(root.theme-mode);
+        font-size: ThemeSettings.font-size-normal;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component WindowProbeWindow inherits Window {
+    title: "窗口探测";
+    background: ThemeSettings.bg-color(root.theme-mode);
+    default-font-family: ThemeSettings.font-family;
+    preferred-width: 600px;
+    preferred-height: 560px;
+    min-width: 480px;
+    min-height: 420px;
+
+    in property <string> theme-mode: "light";
+    // 状态行文本（倒计时/完成提示）
+    in property <string> status: "";
+    // 探测报告文本
+    in property <string> result: "";
+    // 是否正在探测（禁用开始按钮）
+    in property <bool> probing: false;
+
+    callback start-probe();
+    callback copy-result();
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+
+        Text {
+            text: "用途：分析其他软件的窗口结构，为「登录自动填充」选择可行方案。\n用法：点击「开始探测」，5 秒内点击目标窗口（如登录窗口）使其处于前台，等待自动读取。";
+            color: ThemeSettings.text-c(root.theme-mode);
+            font-size: ThemeSettings.font-size-small;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+
+            probe-btn {
+                label: root.probing ? "探测中…" : "开始探测";
+                primary: true;
+                enabled: !root.probing;
+                theme-mode: root.theme-mode;
+                clicked => { root.start-probe(); }
+            }
+
+            probe-btn {
+                label: "复制结果";
+                enabled: root.result != "";
+                theme-mode: root.theme-mode;
+                clicked => { root.copy-result(); }
+            }
+        }
+
+        Text {
+            text: root.status;
+            color: ThemeSettings.accent-color;
+            font-size: ThemeSettings.font-size-small;
+            horizontal-stretch: 1;
+            visible: root.status != "";
+        }
+
+        // 结果区
+        Rectangle {
+            vertical-stretch: 1;
+            horizontal-stretch: 1;
+            background: ThemeSettings.card-bg(root.theme-mode);
+            border-radius: ThemeSettings.border-radius;
+            border-width: 1px;
+            border-color: ThemeSettings.border-c(root.theme-mode);
+
+            ScrollView {
+                width: 100%;
+                height: 100%;
+
+                Text {
+                    x: 10px;
+                    width: parent.visible-width - 20px;
+                    text: root.result == "" ? "（暂无结果）" : root.result;
+                    color: root.result == "" ? ThemeSettings.text-sec(root.theme-mode) : ThemeSettings.text-c(root.theme-mode);
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
